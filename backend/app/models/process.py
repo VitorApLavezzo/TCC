@@ -1,0 +1,25 @@
+from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Text
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from app.database import Base
+
+
+class ProcessSnapshot(Base):
+    __tablename__ = "processes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    metric_id = Column(Integer, ForeignKey("metrics.id"), nullable=False)
+    pid = Column(Integer)
+    name = Column(String, index=True)
+    cpu_percent = Column(Float)
+    mem_percent = Column(Float)
+    mem_rss = Column(Float)
+    num_threads = Column(Integer)
+    status = Column(String)
+    username = Column(String)
+    ppid = Column(Integer)
+    create_time = Column(Float)
+    cmdline = Column(Text)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+    metric = relationship("Metric", back_populates="processes")

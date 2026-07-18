@@ -1,0 +1,66 @@
+from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey, JSON, Boolean
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from app.database import Base
+
+
+class Metric(Base):
+    __tablename__ = "metrics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    machine_id = Column(Integer, ForeignKey("machines.id"), nullable=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # CPU
+    cpu_percent = Column(Float)
+    cpu_per_core = Column(JSON)
+    cpu_freq_current = Column(Float)
+    cpu_freq_max = Column(Float)
+    cpu_count_logical = Column(Integer)
+    cpu_count_physical = Column(Integer)
+
+    # Memória
+    mem_used = Column(Float)
+    mem_available = Column(Float)
+    mem_percent = Column(Float)
+    mem_total = Column(Float)
+
+    # Swap
+    swap_used = Column(Float)
+    swap_percent = Column(Float)
+    swap_total = Column(Float)
+
+    # Disco
+    disk_used = Column(Float)
+    disk_free = Column(Float)
+    disk_percent = Column(Float)
+    disk_read_bytes = Column(Float)
+    disk_write_bytes = Column(Float)
+    disk_partitions = Column(JSON)
+
+    # Rede
+    net_bytes_sent = Column(Float)
+    net_bytes_recv = Column(Float)
+    net_connections = Column(Integer)
+
+    # Sistema
+    uptime_seconds = Column(Float)
+    load_avg_1 = Column(Float)
+    load_avg_5 = Column(Float)
+    load_avg_15 = Column(Float)
+
+    # GPU
+    gpu_metrics = Column(JSON)
+
+    # Temperatura
+    temperatures = Column(JSON)
+
+    # Bateria
+    battery_percent = Column(Float)
+    battery_plugged = Column(Boolean)
+    battery_secs_left = Column(Float)
+
+    process_count = Column(Integer)
+
+    machine = relationship("Machine", back_populates="metrics")
+    processes = relationship("ProcessSnapshot", back_populates="metric", cascade="all, delete-orphan")

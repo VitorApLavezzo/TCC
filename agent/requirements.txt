@@ -1,0 +1,5 @@
+psutil==6.0.0
+requests==2.32.3
+GPUtil==1.4.0
+nvidia-ml-py==12.560.30
+wmi==1.5.1; sys_platform == "win32"
