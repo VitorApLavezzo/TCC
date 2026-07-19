@@ -57,7 +57,7 @@ def train_model(machine_id: int, db: Session) -> bool:
         db.query(Metric)
         .filter(Metric.machine_id == machine_id)
         .order_by(Metric.timestamp.desc())
-        .limit(2000)
+        .limit(settings.TRAINING_WINDOW)
         .all()
     )
     if len(metrics) < settings.MIN_TRAINING_SAMPLES:
@@ -69,7 +69,7 @@ def train_model(machine_id: int, db: Session) -> bool:
     X_scaled = scaler.fit_transform(X)
 
     model = IsolationForest(
-        n_estimators=200,
+        n_estimators=300,
         contamination=settings.ISOLATION_FOREST_CONTAMINATION,
         random_state=42,
         n_jobs=-1,
@@ -101,9 +101,19 @@ def predict_anomaly(machine_id: int, metric: Metric) -> Tuple[bool, float]:
     if model is None:
         return False, 0.0
 
-    X = np.array([_metric_to_vector(metric)])
-    X_scaled = scaler.transform(X)
-    score = model.score_samples(X_scaled)[0]
+    try:
+        X = np.array([_metric_to_vector(metric)])
+        X_scaled = scaler.transform(X)
+        score = model.score_samples(X_scaled)[0]
+    except Exception:
+        # Modelo antigo incompatível (ex: nº de features mudou) — descarta para retreinar
+        for path in (_model_path(machine_id), _scaler_path(machine_id)):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        return False, 0.0
+
     is_anomaly = score < settings.ANOMALY_SCORE_THRESHOLD
     return is_anomaly, float(score)
 
