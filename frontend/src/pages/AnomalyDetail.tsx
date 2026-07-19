@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { anomaliesApi, explanationsApi } from "../services/api";
+import { anomaliesApi, explanationsApi, machinesApi } from "../services/api";
 import { Anomaly, ANOMALY_TYPE_LABELS } from "../types";
 import { SeverityBadge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
@@ -22,6 +22,7 @@ export function AnomalyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [anomaly, setAnomaly] = useState<Anomaly | null>(null);
+  const [machineName, setMachineName] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -36,7 +37,12 @@ export function AnomalyDetail() {
   useEffect(() => {
     if (!id) return;
     anomaliesApi.get(Number(id))
-      .then((res) => setAnomaly(res.data))
+      .then((res) => {
+        setAnomaly(res.data);
+        machinesApi.get(res.data.machine_id)
+          .then((mr) => setMachineName(mr.data.name))
+          .catch(() => {});
+      })
       .catch(() => navigate("/anomalies"))
       .finally(() => setLoading(false));
     return () => stopPolling();
@@ -111,9 +117,17 @@ export function AnomalyDetail() {
               </span>
             )}
           </div>
-          <p className="text-gray-500 text-xs mt-1 flex items-center gap-1">
-            <Clock size={11} />
-            Detectada em {format(new Date(anomaly.detected_at), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}
+          <p className="text-gray-500 text-xs mt-1 flex items-center gap-3 flex-wrap">
+            {machineName && (
+              <span className="flex items-center gap-1 text-blue-300/80">
+                <Cpu size={11} />
+                {machineName}
+              </span>
+            )}
+            <span className="flex items-center gap-1">
+              <Clock size={11} />
+              Detectada em {format(new Date(anomaly.detected_at), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}
+            </span>
           </p>
         </div>
         <button
@@ -128,24 +142,38 @@ export function AnomalyDetail() {
         </button>
       </div>
 
-      {/* AI Summary */}
+      {/* Urgência em linguagem cotidiana */}
+      <div className={`rounded-xl px-4 py-3 border text-sm flex items-center gap-2 ${
+        anomaly.severity === "critical" ? "bg-red-400/10 border-red-400/30 text-red-300"
+        : anomaly.severity === "high" ? "bg-orange-400/10 border-orange-400/30 text-orange-300"
+        : anomaly.severity === "medium" ? "bg-yellow-400/10 border-yellow-400/30 text-yellow-300"
+        : "bg-blue-400/10 border-blue-400/30 text-blue-300"
+      }`}>
+        <AlertTriangle size={15} className="flex-shrink-0" />
+        {anomaly.severity === "critical" && "Aja agora: este problema pode travar o computador ou indicar uma ameaça séria."}
+        {anomaly.severity === "high" && "Requer atenção hoje: o computador pode ficar lento ou instável se nada for feito."}
+        {anomaly.severity === "medium" && "Vale investigar quando puder: não é urgente, mas não deve ser ignorado."}
+        {anomaly.severity === "low" && "Apenas informativo: nenhuma ação urgente é necessária."}
+      </div>
+
+      {/* O que aconteceu */}
       {exp && (
         <div className="bg-gradient-to-br from-blue-950/50 to-purple-950/50 border border-blue-800/40 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-3">
             <Brain size={16} className="text-blue-400" />
-            <span className="text-blue-300 text-sm font-semibold">Análise da Inteligência Artificial</span>
+            <span className="text-blue-300 text-sm font-semibold">O que aconteceu?</span>
             {exp.model_used && (
-              <span className="text-xs text-gray-600 ml-auto">{exp.model_used}</span>
+              <span className="text-xs text-gray-600 ml-auto" title="Modelo de IA que gerou esta análise">{exp.model_used}</span>
             )}
           </div>
           <p className="text-white text-sm leading-relaxed">{exp.summary}</p>
           {exp.detailed_explanation && (
-            <p className="text-gray-300 text-sm leading-relaxed mt-3 border-t border-blue-800/30 pt-3">
+            <p className="text-gray-300 text-sm leading-relaxed mt-3 border-t border-blue-800/30 pt-3 whitespace-pre-line">
               {exp.detailed_explanation}
             </p>
           )}
           {exp.severity_justification && (
-            <p className="text-gray-500 text-xs mt-3 italic">{exp.severity_justification}</p>
+            <p className="text-gray-400 text-xs mt-3 italic">{exp.severity_justification}</p>
           )}
         </div>
       )}
@@ -213,10 +241,11 @@ export function AnomalyDetail() {
 
         {exp?.possible_causes && exp.possible_causes.length > 0 && (
           <Card>
-            <div className="flex items-center gap-2 mb-4">
+            <div className="flex items-center gap-2 mb-1">
               <Lightbulb size={15} className="text-yellow-400" />
               <h2 className="text-sm font-semibold text-white">Possíveis Causas</h2>
             </div>
+            <p className="text-xs text-gray-500 mb-4">Da mais provável para a menos provável</p>
             <ul className="space-y-2">
               {exp.possible_causes.map((cause, i) => (
                 <li key={i} className="flex items-start gap-2 text-xs text-gray-300">
@@ -232,10 +261,11 @@ export function AnomalyDetail() {
       {/* Recommendations */}
       {exp?.recommendations && exp.recommendations.length > 0 && (
         <Card>
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-1">
             <Wrench size={15} className="text-green-400" />
-            <h2 className="text-sm font-semibold text-white">Ações Recomendadas</h2>
+            <h2 className="text-sm font-semibold text-white">O que fazer agora</h2>
           </div>
+          <p className="text-xs text-gray-500 mb-4">Siga os passos na ordem — do mais simples para o mais avançado</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {exp.recommendations.map((rec, i) => (
               <div key={i} className="flex items-start gap-3 bg-gray-800/50 rounded-lg px-3 py-2.5">

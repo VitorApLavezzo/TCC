@@ -1,16 +1,18 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
+/**
+ * Executa `callback` imediatamente e depois a cada `intervalMs`.
+ * Quando o callback muda (ex: filtro alterado, se memoizado com useCallback
+ * e o filtro nas dependências), a busca dispara NA HORA e o timer reinicia.
+ *
+ * Importante: o callback DEVE vir de useCallback — uma função inline nova a
+ * cada render reiniciaria o polling continuamente.
+ */
 export function usePolling(callback: () => void, intervalMs: number, enabled = true) {
-  const savedCallback = useRef(callback);
-
-  useEffect(() => {
-    savedCallback.current = callback;
-  }, [callback]);
-
   useEffect(() => {
     if (!enabled) return;
-    savedCallback.current();
-    const id = setInterval(() => savedCallback.current(), intervalMs);
+    callback();
+    const id = setInterval(callback, intervalMs);
     return () => clearInterval(id);
-  }, [intervalMs, enabled]);
+  }, [callback, intervalMs, enabled]);
 }
