@@ -5,13 +5,20 @@ import { Machine } from "../types";
 import { Card } from "../components/ui/Card";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Monitor, Plus, Copy, CheckCheck, RefreshCw, Trash2, Circle } from "lucide-react";
+import { Monitor, Plus, Copy, CheckCheck, Trash2, Circle, X, Download, Terminal, Pause, Play } from "lucide-react";
+import { downloadInstaller, downloadUninstaller, serverOneLiner, isLocalOrigin } from "../utils/installers";
+
+interface EnrollCode {
+  code: string;
+  expires_at: string;
+}
 
 export function Machines() {
   const [machines, setMachines] = useState<Machine[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", hostname: "", os_type: "Windows" });
+  const [enrollCode, setEnrollCode] = useState<EnrollCode | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const fetchMachines = useCallback(async () => {
@@ -21,17 +28,28 @@ export function Machines() {
 
   usePolling(fetchMachines, 15000);
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleNewMachine = async () => {
     setLoading(true);
     try {
-      await machinesApi.create(form);
-      setShowForm(false);
-      setForm({ name: "", hostname: "", os_type: "Windows" });
-      await fetchMachines();
+      const res = await machinesApi.createEnrollCode();
+      setEnrollCode(res.data);
     } finally {
       setLoading(false);
     }
+  };
+
+  const copyCode = async () => {
+    if (!enrollCode) return;
+    await navigator.clipboard.writeText(enrollCode.code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
+
+  const copyCmd = async () => {
+    if (!enrollCode) return;
+    await navigator.clipboard.writeText(serverOneLiner({ code: enrollCode.code }));
+    setCopiedCmd(true);
+    setTimeout(() => setCopiedCmd(false), 2000);
   };
 
   const copyToken = async (machine: Machine) => {
@@ -41,15 +59,22 @@ export function Machines() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Remover esta máquina e todos os seus dados?")) return;
-    await machinesApi.delete(id);
-    await fetchMachines();
+    if (!confirm("Remover esta máquina e todos os seus dados (métricas, anomalias)?")) return;
+    try {
+      await machinesApi.delete(id);
+      await fetchMachines();
+    } catch (e) {
+      alert("Erro ao remover a máquina. Tente novamente.");
+    }
   };
 
-  const handleRegenToken = async (id: number) => {
-    if (!confirm("Regenerar token? O agente precisará ser reconfigurado.")) return;
-    await machinesApi.regenerateToken(id);
-    await fetchMachines();
+  const handleTogglePause = async (m: Machine) => {
+    try {
+      await machinesApi.update(m.id, { is_active: !m.is_active });
+      await fetchMachines();
+    } catch (e) {
+      alert("Erro ao alterar o estado da coleta.");
+    }
   };
 
   return (
@@ -60,59 +85,103 @@ export function Machines() {
           <p className="text-gray-400 text-sm mt-0.5">{machines.length} registradas</p>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          onClick={handleNewMachine}
+          disabled={loading}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
         >
           <Plus size={16} />
-          Nova Máquina
+          {loading ? "Gerando código..." : "Nova Máquina"}
         </button>
       </div>
 
-      {showForm && (
+      {enrollCode && (
         <div className="bg-gray-900 border border-blue-600/30 rounded-xl p-5">
-          <h2 className="text-base font-semibold text-white mb-4">Adicionar Máquina</h2>
-          <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="flex items-start justify-between mb-4">
             <div>
-              <label className="block text-xs text-gray-400 mb-1.5">Nome</label>
-              <input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-                placeholder="Meu PC"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-              />
+              <h2 className="text-base font-semibold text-white">Conectar nova máquina</h2>
+              <p className="text-gray-400 text-xs mt-1">
+                O nome, o hostname e o sistema operacional são detectados automaticamente — você não precisa digitar nada disso.
+              </p>
             </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">Hostname</label>
-              <input
-                value={form.hostname}
-                onChange={(e) => setForm({ ...form, hostname: e.target.value })}
-                required
-                placeholder="DESKTOP-ABC123"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-              />
+            <button onClick={() => setEnrollCode(null)} className="text-gray-500 hover:text-white transition-colors">
+              <X size={18} />
+            </button>
+          </div>
+
+          {isLocalOrigin() && (
+            <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-lg px-4 py-3 mb-4">
+              <p className="text-xs text-yellow-300">
+                ⚠ Você está acessando o painel por <code className="font-mono">localhost</code> — esse endereço não
+                funciona em outras máquinas. Ao baixar o instalador, será pedido o endereço de rede do servidor
+                (ex: <code className="font-mono">http://192.168.0.10:3000</code>). Dica: acesse o painel direto pelo IP
+                para evitar isso.
+              </p>
             </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">Sistema</label>
-              <select
-                value={form.os_type}
-                onChange={(e) => setForm({ ...form, os_type: e.target.value })}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+          )}
+
+          <div className="space-y-2 text-sm text-gray-300 mb-4">
+            <p className="flex gap-2">
+              <span className="w-5 h-5 rounded-full bg-blue-600/20 text-blue-400 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
+              Baixe o instalador clicando no botão do sistema da máquina que será monitorada:
+            </p>
+            <div className="flex gap-3 pl-7 py-1 flex-wrap">
+              <button
+                onClick={() => downloadInstaller("windows", { code: enrollCode.code })}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
               >
-                <option>Windows</option>
-                <option>Linux</option>
-                <option>macOS</option>
-              </select>
-            </div>
-            <div className="md:col-span-3 flex gap-3">
-              <button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50">
-                {loading ? "Criando..." : "Criar"}
+                <Download size={15} /> Windows
               </button>
-              <button type="button" onClick={() => setShowForm(false)} className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors">
-                Cancelar
+              <button
+                onClick={() => downloadInstaller("linux", { code: enrollCode.code })}
+                className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                <Download size={15} /> Linux (desktop)
               </button>
             </div>
-          </form>
+            <p className="flex gap-2">
+              <span className="w-5 h-5 rounded-full bg-blue-600/20 text-blue-400 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
+              Leve o arquivo para a máquina (pendrive, e-mail, etc.) e dê dois cliques nele. No Linux: <code className="text-green-400 bg-gray-800 px-1.5 rounded">bash instalar-anomalydetect.sh</code>
+            </p>
+            <p className="flex gap-2">
+              <span className="w-5 h-5 rounded-full bg-blue-600/20 text-blue-400 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
+              Pronto! O instalador configura tudo sozinho e a máquina aparece nesta lista em instantes — monitorando automaticamente a cada inicialização.
+            </p>
+          </div>
+
+          <div className="bg-gray-800/60 rounded-lg px-4 py-3 mb-3">
+            <p className="text-xs text-gray-400 mb-2 flex items-center gap-1.5">
+              <Terminal size={12} />
+              Servidor sem interface gráfica (só terminal)? Cole este comando único via SSH:
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="text-xs text-green-400 font-mono flex-1 truncate bg-gray-900 rounded px-2 py-1.5">
+                {serverOneLiner({ code: enrollCode.code })}
+              </code>
+              <button onClick={copyCmd} className="flex-shrink-0 p-1 text-gray-400 hover:text-white transition-colors" title="Copiar comando">
+                {copiedCmd ? <CheckCheck size={14} className="text-green-400" /> : <Copy size={14} />}
+              </button>
+            </div>
+          </div>
+
+          <details className="bg-gray-800/60 rounded-lg px-4 py-3">
+            <summary className="text-xs text-gray-400 cursor-pointer select-none">
+              Alternativa manual (avançado): usar o código de pareamento
+            </summary>
+            <div className="flex flex-col items-center py-4">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl font-bold font-mono text-blue-400 tracking-widest">{enrollCode.code}</span>
+                <button onClick={copyCode} className="p-1.5 text-gray-400 hover:text-white transition-colors" title="Copiar código">
+                  {copiedCode ? <CheckCheck size={16} className="text-green-400" /> : <Copy size={16} />}
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-2 text-center">
+                Execute <code className="text-green-400">python agent.py</code> na máquina e digite o código quando pedido.
+              </p>
+            </div>
+          </details>
+          <p className="text-xs text-gray-600 mt-3">
+            Código válido até {format(new Date(enrollCode.expires_at), "HH:mm", { locale: ptBR })} · uso único · gere outro se expirar
+          </p>
         </div>
       )}
 
@@ -131,13 +200,28 @@ export function Machines() {
                     />
                   </div>
                   <div>
-                    <p className="text-white font-medium text-sm">{m.name}</p>
+                    <p className="text-white font-medium text-sm flex items-center gap-2">
+                      {m.name}
+                      {!m.is_active && (
+                        <span className="text-xs text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2 py-0.5 rounded-full">
+                          Coleta pausada
+                        </span>
+                      )}
+                    </p>
                     <p className="text-gray-500 text-xs font-mono">{m.hostname} · {m.os_type}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button onClick={() => handleRegenToken(m.id)} title="Regenerar token" className="p-1.5 text-gray-500 hover:text-yellow-400 hover:bg-yellow-400/10 rounded-lg transition-colors">
-                    <RefreshCw size={14} />
+                  <button
+                    onClick={() => handleTogglePause(m)}
+                    title={m.is_active ? "Pausar coleta" : "Retomar coleta"}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      m.is_active
+                        ? "text-gray-500 hover:text-yellow-400 hover:bg-yellow-400/10"
+                        : "text-yellow-400 hover:text-green-400 hover:bg-green-400/10"
+                    }`}
+                  >
+                    {m.is_active ? <Pause size={14} /> : <Play size={14} />}
                   </button>
                   <button onClick={() => handleDelete(m.id)} title="Remover" className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors">
                     <Trash2 size={14} />
@@ -146,29 +230,72 @@ export function Machines() {
               </div>
 
               <div className="bg-gray-800 rounded-lg p-3">
-                <p className="text-xs text-gray-500 mb-1.5">Token do Agente</p>
-                <div className="flex items-center gap-2">
-                  <code className="text-xs text-green-400 font-mono flex-1 truncate">{m.agent_token}</code>
-                  <button onClick={() => copyToken(m)} className="flex-shrink-0 p-1 text-gray-400 hover:text-white transition-colors">
-                    {copiedId === m.id ? <CheckCheck size={14} className="text-green-400" /> : <Copy size={14} />}
+                <p className="text-xs text-gray-500 mb-2">
+                  Reinstalar o agente nesta máquina (token já embutido — sem código, sem validade)
+                </p>
+                <div className="flex gap-2 flex-wrap items-center">
+                  <button
+                    onClick={() => downloadInstaller("windows", { token: m.agent_token })}
+                    className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    <Download size={12} /> Windows
+                  </button>
+                  <button
+                    onClick={() => downloadInstaller("linux", { token: m.agent_token })}
+                    className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    <Download size={12} /> Linux
+                  </button>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(serverOneLiner({ token: m.agent_token }))}
+                    className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                    title="Copiar comando de instalação via terminal (servidores)"
+                  >
+                    <Terminal size={12} /> Copiar comando p/ servidor
+                  </button>
+                  <button onClick={() => copyToken(m)} className="flex items-center gap-1.5 text-gray-400 hover:text-white text-xs px-2 py-1.5 transition-colors" title="Copiar token">
+                    {copiedId === m.id ? <CheckCheck size={12} className="text-green-400" /> : <Copy size={12} />} token
                   </button>
                 </div>
               </div>
 
-              <div className="bg-gray-800 rounded-lg p-3">
-                <p className="text-xs text-gray-500 mb-2">Configurar Agente</p>
-                <pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap">
-{`# Linux/macOS
-AGENT_API_URL=http://seu-servidor:8000
-AGENT_API_TOKEN=${m.agent_token}
-python agent.py
-
-# Windows (PowerShell)
-$env:AGENT_API_URL="http://seu-servidor:8000"
-$env:AGENT_API_TOKEN="${m.agent_token}"
-python agent.py`}
-                </pre>
-              </div>
+              <details className="bg-gray-800/60 rounded-lg px-4 py-3">
+                <summary className="text-xs text-gray-400 cursor-pointer select-none">
+                  Como remover o monitoramento deste computador
+                </summary>
+                <div className="pt-3 space-y-2 text-xs text-gray-300">
+                  <p className="flex gap-2">
+                    <span className="w-4 h-4 rounded-full bg-red-400/20 text-red-400 font-bold flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
+                    Baixe o desinstalador do sistema correspondente:
+                  </p>
+                  <div className="flex gap-2 pl-6 py-1 flex-wrap">
+                    <button
+                      onClick={() => downloadUninstaller("windows", m.agent_token)}
+                      className="flex items-center gap-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-600/30 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      <Download size={12} /> Desinstalador Windows
+                    </button>
+                    <button
+                      onClick={() => downloadUninstaller("linux", m.agent_token)}
+                      className="flex items-center gap-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-600/30 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                      <Download size={12} /> Desinstalador Linux
+                    </button>
+                  </div>
+                  <p className="flex gap-2">
+                    <span className="w-4 h-4 rounded-full bg-red-400/20 text-red-400 font-bold flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
+                    Execute o arquivo <strong>no computador monitorado</strong> (dois cliques no Windows; no Linux: <code className="text-green-400">bash remover-anomalydetect.sh</code>).
+                  </p>
+                  <p className="flex gap-2">
+                    <span className="w-4 h-4 rounded-full bg-red-400/20 text-red-400 font-bold flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
+                    Pronto: ele encerra o agente, apaga todos os arquivos e a máquina <strong>some desta lista automaticamente</strong>, junto com o histórico dela.
+                  </p>
+                  <p className="text-gray-500 pt-1 border-t border-gray-700/50">
+                    O botão de lixeira acima remove a máquina apenas do painel — o agente continua instalado no
+                    computador (e será desativado por não conseguir mais se conectar). Para limpeza completa, prefira o desinstalador.
+                  </p>
+                </div>
+              </details>
 
               {m.last_seen && (
                 <p className="text-xs text-gray-600">

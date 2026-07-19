@@ -1,0 +1,319 @@
+/**
+ * Gera instaladores personalizados do agente com o código de pareamento
+ * (máquina nova) ou o token (máquina existente) e o endereço do servidor
+ * já embutidos — o usuário só dá dois cliques.
+ */
+
+export type InstallerAuth =
+  | { code: string; token?: undefined }
+  | { token: string; code?: undefined };
+
+function authEnvBat(auth: InstallerAuth): string {
+  return auth.code !== undefined
+    ? `set "AGENT_ENROLL_CODE=${auth.code}"`
+    : `set "AGENT_API_TOKEN=${auth.token}"`;
+}
+
+function authEnvSh(auth: InstallerAuth): string {
+  return auth.code !== undefined
+    ? `AGENT_ENROLL_CODE="${auth.code}"`
+    : `AGENT_API_TOKEN="${auth.token}"`;
+}
+
+export function isLocalOrigin(): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/i.test(window.location.origin);
+}
+
+/**
+ * Endereço do servidor visto PELAS OUTRAS MÁQUINAS. Se o painel está sendo
+ * acessado por localhost, esse endereço não funciona fora desta máquina —
+ * pergunta ao usuário o endereço de rede e memoriza a resposta.
+ */
+function resolveServerUrl(interactive: boolean): string | null {
+  const origin = window.location.origin;
+  if (!isLocalOrigin()) return origin;
+
+  const saved = localStorage.getItem("public_server_url");
+  if (!interactive) return saved || origin;
+
+  const input = window.prompt(
+    "Você está acessando o painel por 'localhost', mas a máquina que vai receber o agente " +
+      "precisa do endereço de REDE deste servidor.\n\n" +
+      "Digite o endereço que as outras máquinas usarão (ex: http://192.168.0.10:3000):",
+    saved || `http://${window.location.hostname}:${window.location.port || "3000"}`
+  );
+  if (!input) return null;
+  const url = input.trim().replace(/\/+$/, "");
+  localStorage.setItem("public_server_url", url);
+  return url;
+}
+
+export function serverOneLiner(auth: InstallerAuth): string {
+  const server = resolveServerUrl(false) ?? window.location.origin;
+  const param = auth.code !== undefined ? `code=${auth.code}` : `token=${auth.token}`;
+  return `curl -fsS "${server}/api/agent/install.sh?${param}&server=${server}" | bash`;
+}
+
+export function windowsInstaller(serverUrl: string, auth: InstallerAuth): string {
+  const script = `@echo off
+title AnomalyDetect - Instalador do Agente
+echo ============================================
+echo   AnomalyDetect - Instalando o agente...
+echo ============================================
+echo.
+
+set "SERVER=${serverUrl}"
+set "DIR=%LOCALAPPDATA%\\AnomalyDetect"
+set "STARTUP=%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"
+
+rem --- 1. Verifica se o Python esta instalado ---
+python --version >nul 2>nul
+if errorlevel 1 (
+    echo Python nao encontrado. Tentando instalar automaticamente...
+    winget install -e --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
+    if errorlevel 1 (
+        echo.
+        echo ERRO: nao foi possivel instalar o Python automaticamente.
+        echo Baixe em https://www.python.org/downloads/ , instale marcando
+        echo a opcao "Add python.exe to PATH" e execute este instalador de novo.
+        pause
+        exit /b 1
+    )
+    echo.
+    echo Python instalado! FECHE esta janela e execute o instalador NOVAMENTE.
+    pause
+    exit /b 0
+)
+
+rem --- 2. Baixa os arquivos do agente ---
+mkdir "%DIR%" 2>nul
+cd /d "%DIR%"
+echo Baixando o agente do servidor...
+curl -fsS "%SERVER%/api/agent/download/agent.py" -o agent.py
+if errorlevel 1 goto :fail
+curl -fsS "%SERVER%/api/agent/download/collector.py" -o collector.py
+if errorlevel 1 goto :fail
+curl -fsS "%SERVER%/api/agent/download/requirements.txt" -o requirements.txt
+if errorlevel 1 goto :fail
+
+rem --- 3. Instala dependencias ---
+echo Instalando dependencias (pode levar alguns minutos)...
+python -m pip install --quiet --disable-pip-version-check -r requirements.txt
+if errorlevel 1 goto :fail
+
+rem --- 4. Pareamento com o servidor ---
+echo Registrando esta maquina no painel...
+set "AGENT_API_URL=%SERVER%"
+${authEnvBat(auth)}
+python agent.py --enroll-only
+if errorlevel 1 goto :fail
+
+rem --- 5. Inicia junto com o Windows (sem janela) ---
+(
+echo Set sh = CreateObject("WScript.Shell"^)
+echo sh.CurrentDirectory = "%DIR%"
+echo sh.Run "pythonw agent.py", 0, False
+) > "%STARTUP%\\AnomalyDetectAgent.vbs"
+
+rem --- Atalho no Menu Iniciar (para reiniciar apos clicar em "Sair") ---
+copy /y "%STARTUP%\\AnomalyDetectAgent.vbs" "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\AnomalyDetect Agent.vbs" >nul
+
+rem --- 6. Encerra instancia antiga (se houver) e inicia agora ---
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*AnomalyDetect*agent.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>nul
+wscript "%STARTUP%\\AnomalyDetectAgent.vbs"
+
+echo.
+echo ============================================
+echo   Instalacao concluida com sucesso!
+echo   A maquina ja deve aparecer no painel.
+echo ============================================
+pause
+exit /b 0
+
+:fail
+echo.
+echo Ocorreu um erro durante a instalacao.
+echo Verifique sua conexao com o servidor e tente novamente.
+pause
+exit /b 1
+`;
+  // cmd.exe é mais confiável com CRLF
+  return script.replace(/\n/g, "\r\n");
+}
+
+export function linuxInstaller(serverUrl: string, auth: InstallerAuth): string {
+  return `#!/usr/bin/env bash
+# AnomalyDetect - Instalador do Agente (Linux)
+set -e
+
+SERVER="${serverUrl}"
+DIR="$HOME/.anomalydetect"
+
+echo "============================================"
+echo "  AnomalyDetect - Instalando o agente..."
+echo "============================================"
+
+command -v python3 >/dev/null || { echo "ERRO: instale o python3 primeiro (ex: sudo apt install python3 python3-pip python3-venv)"; exit 1; }
+
+mkdir -p "$DIR"
+cd "$DIR"
+
+echo "Baixando o agente do servidor..."
+curl -fsS "$SERVER/api/agent/download/agent.py" -o agent.py
+curl -fsS "$SERVER/api/agent/download/collector.py" -o collector.py
+curl -fsS "$SERVER/api/agent/download/requirements.txt" -o requirements.txt
+
+echo "Instalando dependências..."
+# --system-site-packages: deixa o venv usar o PyGObject (gi) do sistema,
+# necessário para o ícone de bandeja usar o backend GTK (menu funcional)
+if python3 -m venv --system-site-packages venv 2>/dev/null; then
+    PY="$DIR/venv/bin/python"
+else
+    PY="python3"
+fi
+"$PY" -m pip install --quiet -r requirements.txt
+
+echo "Registrando esta máquina no painel..."
+AGENT_API_URL="$SERVER" ${authEnvSh(auth)} "$PY" agent.py --enroll-only
+
+echo "Configurando início automático..."
+# Remove o serviço systemd de versões antigas do instalador (respawnava o agente sozinho)
+systemctl --user disable --now anomalydetect-agent 2>/dev/null || true
+rm -f "$HOME/.config/systemd/user/anomalydetect-agent.service"
+systemctl --user daemon-reload 2>/dev/null || true
+
+mkdir -p "$HOME/.config/autostart"
+cat > "$HOME/.config/autostart/anomalydetect-agent.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=AnomalyDetect Agent
+Comment=Monitoramento e detecção de anomalias
+Exec=$PY $DIR/agent.py
+Path=$DIR
+X-GNOME-Autostart-enabled=true
+EOF
+
+# Entrada no menu de aplicativos — para reiniciar o agente após clicar em "Sair"
+mkdir -p "$HOME/.local/share/applications"
+cat > "$HOME/.local/share/applications/anomalydetect-agent.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=AnomalyDetect Agent
+Comment=Iniciar o monitoramento desta máquina
+Exec=$PY $DIR/agent.py
+Path=$DIR
+Icon=utilities-system-monitor
+Categories=Utility;Monitor;
+Terminal=false
+EOF
+update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+
+echo "Iniciando o agente..."
+pkill -f "$DIR/agent.py" 2>/dev/null && sleep 1 || true
+nohup "$PY" "$DIR/agent.py" >/dev/null 2>&1 &
+disown
+
+echo ""
+echo "============================================"
+echo "  Instalação concluída com sucesso!"
+echo "  A máquina já deve aparecer no painel."
+echo ""
+echo "  Um ícone azul aparece na bandeja do"
+echo "  sistema — para parar o agente, clique"
+echo "  nele e escolha 'Sair'."
+echo "============================================"
+`;
+}
+
+export function windowsUninstaller(serverUrl: string, token: string): string {
+  const script = `@echo off
+title AnomalyDetect - Remover monitoramento
+echo ============================================
+echo   AnomalyDetect - Removendo o monitoramento
+echo ============================================
+echo.
+
+echo Encerrando o agente...
+powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*AnomalyDetect*agent.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>nul
+
+echo Removendo este computador do painel...
+curl -fsS -X DELETE "${serverUrl}/api/agent/self" -H "X-Agent-Token: ${token}" >nul 2>nul
+
+echo Apagando os arquivos...
+rmdir /s /q "%LOCALAPPDATA%\\AnomalyDetect" 2>nul
+del /f /q "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\AnomalyDetectAgent.vbs" 2>nul
+del /f /q "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\AnomalyDetect Agent.vbs" 2>nul
+
+echo.
+echo ============================================
+echo   Pronto! O monitoramento foi removido e o
+echo   computador ja sumiu do painel.
+echo ============================================
+pause
+`;
+  return script.replace(/\n/g, "\r\n");
+}
+
+export function linuxUninstaller(serverUrl: string, token: string): string {
+  return `#!/usr/bin/env bash
+# AnomalyDetect - Remover monitoramento deste computador
+echo "============================================"
+echo "  AnomalyDetect - Removendo o monitoramento"
+echo "============================================"
+
+echo "Encerrando o agente..."
+pkill -f ".anomalydetect/agent.py" 2>/dev/null || true
+pkill -f ".anomalydetect/venv" 2>/dev/null || true
+
+echo "Removendo este computador do painel..."
+curl -fsS -X DELETE "${serverUrl}/api/agent/self" -H "X-Agent-Token: ${token}" >/dev/null 2>&1 || true
+
+echo "Apagando os arquivos..."
+rm -rf "$HOME/.anomalydetect"
+rm -f "$HOME/.config/autostart/anomalydetect-agent.desktop"
+rm -f "$HOME/.local/share/applications/anomalydetect-agent.desktop"
+systemctl --user disable --now anomalydetect-agent 2>/dev/null || true
+rm -f "$HOME/.config/systemd/user/anomalydetect-agent.service"
+( crontab -l 2>/dev/null | grep -v "anomalydetect/agent.py" ) | crontab - 2>/dev/null || true
+
+echo ""
+echo "============================================"
+echo "  Pronto! O monitoramento foi removido e o"
+echo "  computador já sumiu do painel."
+echo "============================================"
+`;
+}
+
+export function downloadUninstaller(os: "windows" | "linux", token: string) {
+  const serverUrl = resolveServerUrl(true);
+  if (!serverUrl) return;
+  const isWin = os === "windows";
+  const content = isWin ? windowsUninstaller(serverUrl, token) : linuxUninstaller(serverUrl, token);
+  const blob = new Blob([content], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = isWin ? "remover-anomalydetect.bat" : "remover-anomalydetect.sh";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export function downloadInstaller(os: "windows" | "linux", auth: InstallerAuth) {
+  const serverUrl = resolveServerUrl(true);
+  if (!serverUrl) return;
+  const isWin = os === "windows";
+  const content = isWin
+    ? windowsInstaller(serverUrl, auth)
+    : linuxInstaller(serverUrl, auth);
+  const blob = new Blob([content], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = isWin ? "instalar-anomalydetect.bat" : "instalar-anomalydetect.sh";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
