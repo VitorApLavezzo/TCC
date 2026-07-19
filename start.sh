@@ -8,7 +8,7 @@ echo "=== AnomalyDetect - Setup ==="
 if [ ! -f .env ]; then
     cp .env.example .env
     echo "✓ .env criado a partir do .env.example"
-    echo "  → Configure OPENAI_API_KEY no .env"
+    echo "  → Configure OLLAMA_BASE_URL e CLOUD_LLM_API_KEY no .env"
 fi
 
 echo ""
