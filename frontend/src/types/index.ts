@@ -113,14 +113,21 @@ export interface AnomalyStats {
 }
 
 export const ANOMALY_TYPE_LABELS: Record<string, string> = {
-  high_cpu: "CPU Alta",
-  high_memory: "Memória Alta",
-  resource_exhaustion: "Esgotamento de Recursos",
-  disk_full: "Disco Cheio",
-  network_spike: "Pico de Rede",
-  memory_leak: "Vazamento de Memória",
-  behavioral_anomaly: "Comportamento Anormal",
-  unknown: "Desconhecido",
+  high_cpu: "Processador Sobrecarregado",
+  high_memory: "Memória Quase Esgotada",
+  resource_exhaustion: "Computador no Limite (CPU + Memória)",
+  disk_full: "Disco Quase Cheio",
+  network_spike: "Pico Anormal de Internet",
+  memory_leak: "Programa Acumulando Memória",
+  cpu_loop: "Programa Travado Consumindo Processador",
+  ddos_indicator: "Possível Ataque pela Rede",
+  unknown_process: "Programa Desconhecido Detectado",
+  suspicious_process: "Programa Suspeito Detectado",
+  malware_pattern: "Comportamento Típico de Vírus",
+  resource_abuse: "Programa Gastando Mais que o Normal",
+  behavioral_change: "Mudança Brusca de Comportamento",
+  behavioral_anomaly: "Comportamento Fora do Padrão",
+  unknown: "Anomalia Desconhecida",
 };
 
 export const SEVERITY_COLORS: Record<string, string> = {

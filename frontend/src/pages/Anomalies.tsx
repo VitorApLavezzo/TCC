@@ -1,31 +1,39 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { anomaliesApi } from "../services/api";
+import { anomaliesApi, machinesApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
-import { Anomaly, ANOMALY_TYPE_LABELS } from "../types";
+import { Anomaly, Machine, ANOMALY_TYPE_LABELS } from "../types";
 import { SeverityBadge } from "../components/ui/Badge";
 import { Card } from "../components/ui/Card";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { AlertTriangle, CheckCircle2, Clock, Filter, ChevronRight } from "lucide-react";
-
-const SEVERITIES = ["", "critical", "high", "medium", "low"];
+import { AlertTriangle, CheckCircle2, Clock, Filter, ChevronRight, Monitor } from "lucide-react";
 
 export function Anomalies() {
   const navigate = useNavigate();
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
+  const [machines, setMachines] = useState<Machine[]>([]);
+  const [selectedMachine, setSelectedMachine] = useState<number | null>(null);
   const [severity, setSeverity] = useState("");
   const [hours, setHours] = useState(72);
   const [unresolvedOnly, setUnresolvedOnly] = useState(false);
 
+  useEffect(() => {
+    machinesApi.list().then((res) => setMachines(res.data)).catch(() => {});
+  }, []);
+
+  const machineName = (id: number) =>
+    machines.find((m) => m.id === id)?.name ?? `Máquina ${id}`;
+
   const fetchAnomalies = useCallback(async () => {
     const res = await anomaliesApi.list({
+      machine_id: selectedMachine ?? undefined,
       hours,
       severity: severity || undefined,
       unresolved_only: unresolvedOnly,
     });
     setAnomalies(res.data);
-  }, [hours, severity, unresolvedOnly]);
+  }, [selectedMachine, hours, severity, unresolvedOnly]);
 
   usePolling(fetchAnomalies, 30000);
 
@@ -41,6 +49,36 @@ export function Anomalies() {
         <h1 className="text-2xl font-bold text-white">Anomalias</h1>
         <p className="text-gray-400 text-sm mt-0.5">{anomalies.length} encontradas</p>
       </div>
+
+      {/* Seletor de máquina */}
+      {machines.length > 1 && (
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => setSelectedMachine(null)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+              selectedMachine === null
+                ? "bg-blue-600/20 text-blue-400 border-blue-600/40"
+                : "text-gray-400 border-gray-700 hover:border-gray-600"
+            }`}
+          >
+            Todas as máquinas
+          </button>
+          {machines.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setSelectedMachine(m.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
+                selectedMachine === m.id
+                  ? "bg-blue-600/20 text-blue-400 border-blue-600/40"
+                  : "text-gray-400 border-gray-700 hover:border-gray-600"
+              }`}
+            >
+              <Monitor size={12} className="inline mr-1.5" />
+              {m.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -112,7 +150,11 @@ export function Anomalies() {
                 <p className="text-gray-400 text-xs mt-1 line-clamp-2">{a.explanation.summary}</p>
               )}
 
-              <div className="flex items-center gap-3 mt-2">
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <span className="flex items-center gap-1 text-xs text-blue-300/80 bg-blue-400/10 border border-blue-400/20 px-2 py-0.5 rounded">
+                  <Monitor size={10} />
+                  {machineName(a.machine_id)}
+                </span>
                 <span className="flex items-center gap-1 text-gray-600 text-xs">
                   <Clock size={10} />
                   {format(new Date(a.detected_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}

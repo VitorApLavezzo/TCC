@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import Base, engine
 from app.models import User, Machine, Metric, ProcessSnapshot, Anomaly, AIExplanation
-from app.routers import auth, machines, metrics, anomalies, ws, explanations
+from app.routers import auth, machines, metrics, anomalies, ws, explanations, agent_files
 
 
 @asynccontextmanager
@@ -38,6 +38,7 @@ app.include_router(metrics.router)
 app.include_router(anomalies.router)
 app.include_router(ws.router)
 app.include_router(explanations.router)
+app.include_router(agent_files.router)
 
 
 @app.get("/health")

@@ -1,16 +1,61 @@
-import { useState, FormEvent } from "react";
+import { useState, useEffect, useRef, FormEvent } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { authApi } from "../services/api";
 import { Activity, Eye, EyeOff } from "lucide-react";
 
 export function Login() {
-  const { login } = useAuth();
+  const { login, loginWithToken } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const googleBtnRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    authApi.config().then((res) => {
+      const clientId = res.data.google_client_id;
+      if (!clientId || cancelled) return;
+
+      const renderButton = () => {
+        const g = (window as any).google;
+        if (!g?.accounts?.id || !googleBtnRef.current) return;
+        g.accounts.id.initialize({
+          client_id: clientId,
+          callback: async (resp: { credential: string }) => {
+            try {
+              const r = await authApi.googleLogin(resp.credential);
+              await loginWithToken(r.data.access_token);
+              navigate("/");
+            } catch {
+              setError("Falha no login com Google.");
+            }
+          },
+        });
+        g.accounts.id.renderButton(googleBtnRef.current, {
+          theme: "filled_black",
+          size: "large",
+          width: 320,
+          text: "signin_with",
+          locale: "pt-BR",
+        });
+      };
+
+      if ((window as any).google?.accounts?.id) {
+        renderButton();
+      } else {
+        const script = document.createElement("script");
+        script.src = "https://accounts.google.com/gsi/client";
+        script.async = true;
+        script.onload = renderButton;
+        document.head.appendChild(script);
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -83,6 +128,8 @@ export function Login() {
           >
             {loading ? "Entrando..." : "Entrar"}
           </button>
+
+          <div ref={googleBtnRef} className="flex justify-center" />
 
           <p className="text-center text-xs text-gray-500">
             Não tem conta?{" "}

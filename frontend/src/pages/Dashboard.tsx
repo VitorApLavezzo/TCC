@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { anomaliesApi, metricsApi, machinesApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
@@ -73,6 +73,22 @@ export function Dashboard() {
   }, []);
 
   usePolling(fetchAll, 60000);
+
+  // Troca de máquina: limpa os dados da anterior e busca os da nova imediatamente
+  // (sem isso, o dashboard ficava até 60s mostrando a máquina antiga)
+  useEffect(() => {
+    if (!selectedMachine) return;
+    setMetrics([]);
+    setLatestMetric(null);
+    setIsLive(false);
+    Promise.all([
+      metricsApi.list(selectedMachine, 3),
+      metricsApi.latest(selectedMachine).catch(() => ({ data: null })),
+    ]).then(([mRes, lRes]) => {
+      setMetrics(mRes.data.slice(-MAX_CHART_POINTS));
+      setLatestMetric(lRes.data);
+    });
+  }, [selectedMachine]);
 
   useWebSocket(selectedMachine ? `/ws/machine/${selectedMachine}` : null, (msg) => {
     if (msg.type === "metric") {

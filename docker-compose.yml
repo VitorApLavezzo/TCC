@@ -16,9 +16,14 @@ services:
     ports:
       - "5432:5432"
 
+  # Opcional — só sobe com: docker compose --profile local-ollama up -d
+  # Use quando o stack rodar na mesma máquina que tem a GPU.
+  # Se o Ollama roda em OUTRA máquina (ex: seu PC), deixe desligado e
+  # aponte OLLAMA_BASE_URL no .env para o IP dela.
   ollama:
     image: ollama/ollama
     restart: unless-stopped
+    profiles: ["local-ollama"]
     environment:
       OLLAMA_KEEP_ALIVE: -1
     volumes:
@@ -36,21 +41,26 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/anomaly_db
       SECRET_KEY: ${SECRET_KEY:-change-this-in-production}
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: qwen2.5:14b
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:14b}
+      CLOUD_LLM_BASE_URL: ${CLOUD_LLM_BASE_URL:-https://api.groq.com/openai/v1}
+      CLOUD_LLM_API_KEY: ${CLOUD_LLM_API_KEY:-}
+      CLOUD_LLM_MODEL: ${CLOUD_LLM_MODEL:-llama-3.3-70b-versatile}
     volumes:
       - ./backend:/app
+      - ./agent:/app/agent_dist:ro
       - ml_models:/app/ml/models
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
-      ollama:
-        condition: service_started
 
   frontend:
     build: ./frontend
@@ -66,7 +76,12 @@ services:
     environment:
       AGENT_API_URL: http://backend:8000
       AGENT_API_TOKEN: ${AGENT_API_TOKEN:-}
+      AGENT_ENROLL_CODE: ${AGENT_ENROLL_CODE:-}
+      AGENT_CONFIG_DIR: /app/data
+      AGENT_NO_TRAY: "1"
       COLLECTION_INTERVAL: ${COLLECTION_INTERVAL:-30}
+    volumes:
+      - agent_data:/app/data
     privileged: true
     depends_on:
       - backend
@@ -75,3 +90,4 @@ volumes:
   postgres_data:
   ml_models:
   ollama_data:
+  agent_data:

@@ -42,10 +42,35 @@ def _call_ollama(prompt: str) -> str:
         "stream": False,
         "options": {"temperature": 0.3},
     }
-    with httpx.Client(timeout=120.0) as client:
+    # connect=5s: se o host do Ollama estiver desligado, falha rápido e passa para o próximo provedor
+    with httpx.Client(timeout=httpx.Timeout(120.0, connect=5.0)) as client:
         response = client.post(url, json=payload)
         response.raise_for_status()
         return response.json()["response"]
+
+
+def _call_cloud_llm(prompt: str) -> str:
+    """Fallback em nuvem via API compatível com OpenAI (Groq, OpenRouter, etc.)."""
+    url = settings.CLOUD_LLM_BASE_URL.rstrip("/") + "/chat/completions"
+    payload = {
+        "model": settings.CLOUD_LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+    }
+    headers = {"Authorization": f"Bearer {settings.CLOUD_LLM_API_KEY}"}
+    with httpx.Client(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
+        response = client.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+
+
+def _extract_json(raw: str) -> Dict[str, Any]:
+    """Extrai o JSON da resposta mesmo se o modelo retornar texto antes/depois."""
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start == -1 or end == 0:
+        raise ValueError("No JSON found in response")
+    return json.loads(raw[start:end])
 
 
 def generate_explanation(anomaly: Anomaly, metric: Metric, machine: Machine, db: Session) -> Optional[Dict[str, Any]]:
@@ -121,38 +146,58 @@ def generate_explanation(anomaly: Anomaly, metric: Metric, machine: Machine, db:
         "recent_history": history_summary,
     }
 
-    # Prompt compacto para melhor performance em modelos locais
     anomaly_info = context["anomaly"]
     metrics_info = context["current_metrics"]
     top_proc = context["top_processes"][0] if context["top_processes"] else None
 
-    prompt = f"""Analise esta anomalia em um computador e responda em JSON.
+    # Comportamento "normal" da máquina, para a IA poder comparar
+    hist = context["recent_history"]
+    if hist:
+        avg = lambda k: sum((h.get(k) or 0) for h in hist) / len(hist)
+        baseline_line = (
+            f"COMPORTAMENTO NORMAL DESTA MÁQUINA (média da última hora): "
+            f"CPU {avg('cpu_percent'):.0f}% | RAM {avg('mem_percent'):.0f}% | Conexões {avg('net_connections'):.0f}"
+        )
+    else:
+        baseline_line = ""
 
-ANOMALIA: {anomaly_info["type"]} | Severidade: {anomaly_info["severity"]}
-PROCESSO: {anomaly_info["responsible_process"] or "desconhecido"}
-CPU: {metrics_info["cpu_percent"]}% | RAM: {metrics_info["mem_percent"]}% | Disco: {metrics_info["disk_percent"]}% | Conexões: {metrics_info["net_connections"]}
-{"PROCESSO TOP: " + top_proc["name"] + " CPU:" + str(top_proc["cpu_percent"]) + "% MEM:" + str(top_proc["mem_percent"]) + "%" if top_proc else ""}
-DETALHES: {json.dumps(anomaly_info.get("behavior_details") or anomaly_info.get("affected_metrics", {}), ensure_ascii=False)}
+    prompt = f"""Você explica problemas de computador para pessoas SEM conhecimento técnico (donas de casa, estudantes, idosos). Um sistema de monitoramento detectou algo anormal neste computador:
 
-Responda APENAS com JSON válido:
-{{"summary":"frase curta resumindo o problema","detailed_explanation":"explicação em 2 parágrafos","possible_causes":["causa 1","causa 2","causa 3"],"recommendations":["ação 1","ação 2","ação 3"],"severity_justification":"justificativa breve"}}"""
+PROBLEMA DETECTADO: {anomaly_info["type"]} | Severidade: {anomaly_info["severity"]}
+COMPUTADOR: {context["machine"]["name"]} ({context["machine"]["os"]})
+PROGRAMA ENVOLVIDO: {anomaly_info["responsible_process"] or "não identificado"}
+AGORA: CPU {metrics_info["cpu_percent"]}% | RAM {metrics_info["mem_percent"]}% | Disco {metrics_info["disk_percent"]}% | Conexões de rede {metrics_info["net_connections"]}
+{baseline_line}
+{"PROGRAMA QUE MAIS CONSOME: " + top_proc["name"] + " (CPU " + str(top_proc["cpu_percent"]) + "%, RAM " + str(top_proc["mem_percent"]) + "%)" if top_proc else ""}
+DETALHES TÉCNICOS: {json.dumps(anomaly_info.get("behavior_details") or anomaly_info.get("affected_metrics", {}), ensure_ascii=False)}
 
-    try:
-        raw = _call_ollama(prompt)
+Responda APENAS com JSON válido neste formato:
+{{"summary":"...","detailed_explanation":"...","possible_causes":["...","...","..."],"recommendations":["...","...","..."],"severity_justification":"..."}}
 
-        # Extrai JSON mesmo se o modelo retornar texto antes/depois
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start == -1 or end == 0:
-            raise ValueError("No JSON found in response")
+REGRAS DE ESCRITA (siga TODAS):
+- Português do Brasil, simples, direto, como se explicasse para um amigo leigo
+- summary: UMA frase dizendo o que está acontecendo e o efeito prático. Ex: "O programa Chrome está usando quase toda a memória, o que pode deixar o computador lento"
+- detailed_explanation: 2 parágrafos curtos. Primeiro: o que foi detectado e o que a pessoa pode sentir na prática (lentidão, travamento, risco). Segundo: por que isso é ANORMAL para ESTE computador, comparando com o comportamento normal dele mostrado acima
+- Todo termo técnico deve vir com explicação entre parênteses. Ex: "conexões de rede (quantidade de comunicações abertas com a internet)"
+- possible_causes: exatamente 3, da MAIS provável para a MENOS provável, começando com "Mais provável:", "Possível:" e "Menos provável:". Causas concretas do dia a dia, não genéricas
+- recommendations: 3 a 4 passos práticos em ordem (do mais fácil ao mais avançado), cada um dizendo EXATAMENTE onde clicar ou o que digitar. Ex: "Aperte Ctrl+Shift+Esc para abrir o Gerenciador de Tarefas e veja qual programa está no topo da lista"
+- severity_justification: 1 frase dizendo o nível de urgência em linguagem cotidiana. Ex: "Severidade alta: vale resolver ainda hoje, pois o computador pode travar" """
 
-        result = json.loads(raw[start:end])
-        result["model_used"] = settings.OLLAMA_MODEL
-        return result
+    # Cadeia de provedores: Ollama local → nuvem (se configurada) → análise estática
+    providers = [(f"ollama/{settings.OLLAMA_MODEL}", _call_ollama)]
+    if settings.CLOUD_LLM_API_KEY:
+        providers.append((f"cloud/{settings.CLOUD_LLM_MODEL}", _call_cloud_llm))
 
-    except Exception as e:
-        print(f"Ollama error: {e}")
-        return _generate_fallback_explanation(anomaly, metric)
+    for provider_name, call in providers:
+        try:
+            raw = call(prompt)
+            result = _extract_json(raw)
+            result["model_used"] = provider_name
+            return result
+        except Exception as e:
+            print(f"[AI] Provedor {provider_name} falhou: {e}")
+
+    return _generate_fallback_explanation(anomaly, metric)
 
 
 def _generate_fallback_explanation(anomaly: Anomaly, metric: Metric) -> Dict[str, Any]:
@@ -322,8 +367,19 @@ def _generate_fallback_explanation(anomaly: Anomaly, metric: Metric) -> Dict[str
         ],
     }
 
-    causes = []
-    recs = []
+    generic_causes = [
+        "Comportamento fora do padrão histórico desta máquina detectado pelo modelo de ML",
+        "Combinação incomum de métricas (CPU, memória, rede) em relação ao baseline",
+        "Processo ou tarefa executando de forma diferente do habitual",
+    ]
+    generic_recs = [
+        "Verifique os processos em execução no Gerenciador de Tarefas ou com 'top'",
+        "Compare as métricas atuais com o histórico no dashboard",
+        "Monitore a máquina nas próximas horas para ver se o comportamento persiste",
+        "Execute um antivírus se não identificar causa legítima",
+    ]
+    causes = causes_map.get(anomaly.anomaly_type, generic_causes)
+    recs = recs_map.get(anomaly.anomaly_type, generic_recs)
 
     process_text = f" O processo **{anomaly.responsible_process}** foi identificado como responsável." if anomaly.responsible_process else ""
     sev_label = SEVERITY_LABELS.get(anomaly.severity, anomaly.severity)

@@ -32,6 +32,8 @@ export const authApi = {
   register: (email: string, username: string, password: string) =>
     api.post("/auth/register", { email, username, password }),
   me: () => api.get("/auth/me"),
+  config: () => api.get("/auth/config"),
+  googleLogin: (credential: string) => api.post("/auth/google", { credential }),
 };
 
 export const machinesApi = {
@@ -39,6 +41,7 @@ export const machinesApi = {
   get: (id: number) => api.get(`/machines/${id}`),
   create: (data: { name: string; hostname: string; os_type?: string }) =>
     api.post("/machines", data),
+  createEnrollCode: () => api.post("/machines/enroll-code"),
   update: (id: number, data: object) => api.patch(`/machines/${id}`, data),
   delete: (id: number) => api.delete(`/machines/${id}`),
   regenerateToken: (id: number) => api.post(`/machines/${id}/regenerate-token`),

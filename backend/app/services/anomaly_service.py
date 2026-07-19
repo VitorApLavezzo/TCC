@@ -29,9 +29,9 @@ def process_metric(metric: Metric, machine: Machine, db: Session):
     # 2. Isolation Forest (desvio estatístico)
     is_statistical_anomaly, score = ml_service.predict_anomaly(machine.id, metric)
 
-    # Retreino incremental
+    # Retreino incremental — mais frequente = modelo acompanha melhor o comportamento atual
     sample_count = db.query(Metric).filter(Metric.machine_id == machine.id).count()
-    if sample_count % 50 == 0 or sample_count == settings.MIN_TRAINING_SAMPLES:
+    if sample_count % settings.RETRAIN_EVERY == 0 or sample_count == settings.MIN_TRAINING_SAMPLES:
         ml_service.train_model(machine.id, db)
 
     # Decide se é anomalia

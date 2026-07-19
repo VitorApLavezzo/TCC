@@ -33,7 +33,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <aside className="w-60 bg-gray-900 border-r border-gray-800 flex flex-col fixed top-0 left-0 h-screen z-10">
         <div className="p-5 border-b border-gray-800">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-900/40">
               <Activity size={16} className="text-white" />
             </div>
             <div>
@@ -86,7 +86,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
       {/* Main */}
       <main className="flex-1 overflow-auto ml-60">
-        <div className="p-8">{children}</div>
+        <div className="p-8 max-w-6xl mx-auto">{children}</div>
       </main>
     </div>
   );

@@ -29,7 +29,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 
 def get_machine_by_token(x_agent_token: str = Header(...), db: Session = Depends(get_db)) -> Machine:
-    machine = db.query(Machine).filter(Machine.agent_token == x_agent_token, Machine.is_active == True).first()
+    # is_active=False significa "coleta pausada", não "acesso revogado" — o token continua válido
+    # e o endpoint de ingest decide descartar os dados
+    machine = db.query(Machine).filter(Machine.agent_token == x_agent_token).first()
     if not machine:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent token")
     return machine
