@@ -21,6 +21,13 @@ async def ingest_metrics(
     db: Session = Depends(get_db),
     machine: Machine = Depends(get_machine_by_token),
 ):
+    if not machine.is_active:
+        # Coleta pausada pelo painel: mantém o "visto por último" mas descarta os dados
+        from datetime import datetime as dt
+        machine.last_seen = dt.utcnow()
+        db.commit()
+        return {"metric_id": None, "anomaly_detected": False, "anomaly_id": None, "paused": True}
+
     processes = payload.processes or []
     metric_data = payload.model_dump(exclude={"processes"})
     if "cpu_per_core" in metric_data and metric_data["cpu_per_core"] is not None:
