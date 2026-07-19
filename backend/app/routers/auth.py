@@ -1,6 +1,11 @@
+import secrets
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from jose import jwt as jose_jwt
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from app.config import settings
 from app.database import get_db
 from app.models.user import User
 from app.schemas.user import UserCreate, UserOut, Token
@@ -8,6 +13,73 @@ from app.core.security import get_password_hash, verify_password, create_access_
 from app.core.dependencies import get_current_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
+
+
+class GoogleLogin(BaseModel):
+    credential: str
+
+
+@router.get("/config")
+def auth_config():
+    """Configurações públicas de autenticação para o frontend."""
+    return {"google_client_id": settings.GOOGLE_CLIENT_ID or None}
+
+
+@router.post("/google", response_model=Token)
+def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
+    if not settings.GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=400, detail="Login com Google não configurado")
+
+    try:
+        certs = httpx.get(GOOGLE_CERTS_URL, timeout=10).json()
+        header = jose_jwt.get_unverified_header(body.credential)
+        key = next((k for k in certs["keys"] if k["kid"] == header["kid"]), None)
+        if not key:
+            raise ValueError("Chave de assinatura não encontrada")
+        claims = jose_jwt.decode(
+            body.credential,
+            key,
+            algorithms=["RS256"],
+            audience=settings.GOOGLE_CLIENT_ID,
+        )
+        if claims.get("iss") not in GOOGLE_ISSUERS:
+            raise ValueError("Emissor inválido")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token do Google inválido")
+
+    email = claims.get("email")
+    if not email or not claims.get("email_verified"):
+        raise HTTPException(status_code=401, detail="E-mail do Google não verificado")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        # Primeiro acesso: cria a conta automaticamente
+        base_username = email.split("@")[0]
+        username = base_username
+        suffix = 1
+        while db.query(User).filter(User.username == username).first():
+            suffix += 1
+            username = f"{base_username}{suffix}"
+        user = User(
+            email=email,
+            username=username,
+            # Senha aleatória — conta Google entra sempre pelo botão do Google
+            hashed_password=get_password_hash(secrets.token_urlsafe(24)),
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="Usuário desativado")
+
+    token = create_access_token(data={"sub": str(user.id)})
+    return {"access_token": token, "token_type": "bearer"}
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
