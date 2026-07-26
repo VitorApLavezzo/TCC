@@ -47,6 +47,13 @@ export const machinesApi = {
   regenerateToken: (id: number) => api.post(`/machines/${id}/regenerate-token`),
 };
 
+export const bulkKeysApi = {
+  list: () => api.get("/machines/enroll-keys"),
+  create: (data: { label?: string; max_uses?: number | null; expires_days?: number }) =>
+    api.post("/machines/enroll-keys", data),
+  revoke: (id: number) => api.delete(`/machines/enroll-keys/${id}`),
+};
+
 export const metricsApi = {
   list: (machineId: number, hours = 24) =>
     api.get(`/metrics/${machineId}?hours=${hours}`),

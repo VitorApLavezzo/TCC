@@ -225,6 +225,141 @@ echo "============================================"
 `;
 }
 
+/**
+ * Variante SILENCIOSA do instalador Windows, para distribuição em massa via GPO
+ * (script de inicialização do computador, rodando como SYSTEM antes do login).
+ * Diferenças da variante interativa:
+ * - Nenhum `pause`/prompt — precisa rodar sem ninguém na frente da tela
+ * - Não tenta instalar Python via winget (winget é pouco confiável em contexto
+ *   SYSTEM/sem sessão interativa) — assume Python já presente na imagem/baseline de TI
+ * - Sem ícone de bandeja (`--no-tray`): sessão SYSTEM não tem área de trabalho
+ * - Usa o Agendador de Tarefas (schtasks, gatilho ONSTART como SYSTEM) em vez da
+ *   pasta Startup — assim o agente roda sempre, mesmo sem nenhum usuário logado
+ */
+export function windowsSilentInstaller(serverUrl: string, auth: InstallerAuth): string {
+  const script = `@echo off
+setlocal
+set "SERVER=${serverUrl}"
+set "DIR=%ProgramData%\\AnomalyDetect"
+set "LOG=%DIR%\\install.log"
+
+where python >nul 2>nul
+if errorlevel 1 (
+    echo [%date% %time%] Python nao encontrado - instale via imagem/baseline de TI antes de distribuir. >> "%LOG%"
+    exit /b 1
+)
+
+mkdir "%DIR%" 2>nul
+cd /d "%DIR%"
+curl -fsS "%SERVER%/api/agent/download/agent.py" -o agent.py >> "%LOG%" 2>&1
+curl -fsS "%SERVER%/api/agent/download/collector.py" -o collector.py >> "%LOG%" 2>&1
+curl -fsS "%SERVER%/api/agent/download/requirements.txt" -o requirements.txt >> "%LOG%" 2>&1
+python -m pip install --quiet --disable-pip-version-check -r requirements.txt >> "%LOG%" 2>&1
+
+set "AGENT_API_URL=%SERVER%"
+${authEnvBat(auth)}
+python agent.py --enroll-only >> "%LOG%" 2>&1
+if errorlevel 1 (
+    echo [%date% %time%] Falha no pareamento >> "%LOG%"
+    exit /b 1
+)
+
+schtasks /create /tn "AnomalyDetect Agent" /tr "pythonw \\"%DIR%\\agent.py\\" --no-tray" /sc onstart /ru SYSTEM /rl highest /f >> "%LOG%" 2>&1
+schtasks /run /tn "AnomalyDetect Agent" >> "%LOG%" 2>&1
+
+echo [%date% %time%] Instalacao concluida >> "%LOG%"
+exit /b 0
+`;
+  return script.replace(/\n/g, "\r\n");
+}
+
+/**
+ * Script para instalar em N computadores de uma vez via PowerShell Remoting (WinRM),
+ * a partir de UMA máquina de TI com credenciais de administrador — em vez de logar
+ * em cada computador individualmente. Usa a chave reutilizável de instalação em massa.
+ */
+export function massDeployPowerShell(serverUrl: string, bulkKeyCode: string): string {
+  return `# AnomalyDetect - Instalacao em massa via PowerShell Remoting (WinRM)
+#
+# PRE-REQUISITOS:
+# - WinRM habilitado nos computadores de destino (em dominios AD, normalmente ja
+#   esta ou pode ser ligado via GPO "Windows Remote Management"; para testar em
+#   1 maquina: Enable-PSRemoting -Force)
+# - Voce precisa ter permissao de administrador nessas maquinas (conta de dominio)
+# - Python 3 instalado nos computadores de destino (baseline/imagem de TI)
+#
+# USO:
+# 1. Crie um arquivo computadores.txt com um hostname ou IP por linha
+# 2. Ajuste $server e $bulkKey abaixo se necessario
+# 3. Execute este script em uma janela do PowerShell "Executar como administrador"
+
+$computers = Get-Content ".\\computadores.txt"
+$server = "${serverUrl}"
+$bulkKey = "${bulkKeyCode}"
+
+$installScript = {
+    param($server, $bulkKey)
+    $dir = "$env:ProgramData\\AnomalyDetect"
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Set-Location $dir
+    Invoke-WebRequest "$server/api/agent/download/agent.py" -OutFile agent.py -UseBasicParsing
+    Invoke-WebRequest "$server/api/agent/download/collector.py" -OutFile collector.py -UseBasicParsing
+    Invoke-WebRequest "$server/api/agent/download/requirements.txt" -OutFile requirements.txt -UseBasicParsing
+    python -m pip install --quiet --disable-pip-version-check -r requirements.txt
+
+    $env:AGENT_API_URL = $server
+    $env:AGENT_ENROLL_CODE = $bulkKey
+    python agent.py --enroll-only
+
+    schtasks /create /tn "AnomalyDetect Agent" /tr "pythonw \`"$dir\\agent.py\`" --no-tray" /sc onstart /ru SYSTEM /rl highest /f
+    schtasks /run /tn "AnomalyDetect Agent"
+}
+
+foreach ($c in $computers) {
+    Write-Host "Instalando em $c..." -NoNewline
+    try {
+        Invoke-Command -ComputerName $c -ScriptBlock $installScript -ArgumentList $server, $bulkKey -ErrorAction Stop
+        Write-Host " OK" -ForegroundColor Green
+    } catch {
+        Write-Host " FALHOU: $_" -ForegroundColor Red
+    }
+}
+
+Write-Host ""
+Write-Host "Concluido. As maquinas que tiveram sucesso ja devem aparecer no painel."
+`;
+}
+
+export function downloadMassDeployScript(bulkKeyCode: string) {
+  const serverUrl = resolveServerUrl(true);
+  if (!serverUrl) return;
+  const content = massDeployPowerShell(serverUrl, bulkKeyCode);
+  const blob = new Blob([content], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "instalar-em-massa.ps1";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export function downloadSilentInstaller(bulkKeyCode: string) {
+  const serverUrl = resolveServerUrl(true);
+  if (!serverUrl) return;
+  const content = windowsSilentInstaller(serverUrl, { code: bulkKeyCode });
+  const blob = new Blob([content], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "instalar-silencioso-gpo.bat";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function windowsUninstaller(serverUrl: string, token: string): string {
   const script = `@echo off
 title AnomalyDetect - Remover monitoramento

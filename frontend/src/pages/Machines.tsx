@@ -1,15 +1,31 @@
-import { useState, useCallback } from "react";
-import { machinesApi } from "../services/api";
+import { useState, useCallback, useEffect } from "react";
+import { machinesApi, bulkKeysApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
 import { Machine } from "../types";
 import { Card } from "../components/ui/Card";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Monitor, Plus, Copy, CheckCheck, Trash2, Circle, X, Download, Terminal, Pause, Play } from "lucide-react";
-import { downloadInstaller, downloadUninstaller, serverOneLiner, isLocalOrigin } from "../utils/installers";
+import {
+  Monitor, Plus, Copy, CheckCheck, Trash2, Circle, X, Download, Terminal, Pause, Play,
+  Building2, Ban, ChevronDown,
+} from "lucide-react";
+import {
+  downloadInstaller, downloadUninstaller, downloadSilentInstaller, downloadMassDeployScript,
+  serverOneLiner, isLocalOrigin,
+} from "../utils/installers";
 
 interface EnrollCode {
   code: string;
+  expires_at: string;
+}
+
+interface BulkKey {
+  id: number;
+  code: string;
+  label?: string | null;
+  max_uses?: number | null;
+  use_count: number;
+  revoked: boolean;
   expires_at: string;
 }
 
@@ -21,12 +37,52 @@ export function Machines() {
   const [copiedCmd, setCopiedCmd] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkKeys, setBulkKeys] = useState<BulkKey[]>([]);
+  const [bulkLabel, setBulkLabel] = useState("");
+  const [bulkCreating, setBulkCreating] = useState(false);
+  const [copiedBulkId, setCopiedBulkId] = useState<number | null>(null);
+
   const fetchMachines = useCallback(async () => {
     const res = await machinesApi.list();
     setMachines(res.data);
   }, []);
 
   usePolling(fetchMachines, 15000);
+
+  const fetchBulkKeys = useCallback(async () => {
+    const res = await bulkKeysApi.list();
+    setBulkKeys(res.data);
+  }, []);
+
+  useEffect(() => {
+    if (showBulk) fetchBulkKeys();
+  }, [showBulk, fetchBulkKeys]);
+
+  const handleCreateBulkKey = async () => {
+    setBulkCreating(true);
+    try {
+      await bulkKeysApi.create({ label: bulkLabel || undefined, expires_days: 365 });
+      setBulkLabel("");
+      await fetchBulkKeys();
+    } catch (e) {
+      alert("Erro ao criar a chave de instalação em massa.");
+    } finally {
+      setBulkCreating(false);
+    }
+  };
+
+  const handleRevokeBulkKey = async (id: number) => {
+    if (!confirm("Revogar esta chave? Máquinas já instaladas continuam funcionando; novas instalações com ela serão recusadas.")) return;
+    await bulkKeysApi.revoke(id);
+    await fetchBulkKeys();
+  };
+
+  const copyBulkCommand = async (key: BulkKey) => {
+    await navigator.clipboard.writeText(serverOneLiner({ code: key.code }));
+    setCopiedBulkId(key.id);
+    setTimeout(() => setCopiedBulkId(null), 2000);
+  };
 
   const handleNewMachine = async () => {
     setLoading(true);
@@ -184,6 +240,140 @@ export function Machines() {
           </p>
         </div>
       )}
+
+      {/* Instalação em massa — para empresas com muitas máquinas */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl">
+        <button
+          onClick={() => setShowBulk(!showBulk)}
+          className="w-full flex items-center justify-between px-5 py-4 text-left"
+        >
+          <div className="flex items-center gap-2.5">
+            <Building2 size={16} className="text-purple-400" />
+            <div>
+              <p className="text-white text-sm font-semibold">Instalação em massa (TI / empresas)</p>
+              <p className="text-gray-500 text-xs mt-0.5">
+                Para dezenas ou centenas de computadores — evita instalar máquina por máquina
+              </p>
+            </div>
+          </div>
+          <ChevronDown size={16} className={`text-gray-500 transition-transform ${showBulk ? "rotate-180" : ""}`} />
+        </button>
+
+        {showBulk && (
+          <div className="px-5 pb-5 space-y-4 border-t border-gray-800 pt-4">
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Diferente do código acima (uso único, 30 min), a <strong>chave de instalação em massa</strong> pode
+              ser usada por quantas máquinas você quiser, sem validade curta. Embuta essa chave num script de
+              distribuição da sua TI (GPO do Active Directory, RMM, ou o script de PowerShell abaixo) e todos os
+              computadores se registram sozinhos, sem ninguém tocar em cada um individualmente.
+            </p>
+
+            <div className="flex gap-2 items-end flex-wrap">
+              <div className="flex-1 min-w-[200px]">
+                <label className="block text-xs text-gray-500 mb-1">Nome da chave (opcional)</label>
+                <input
+                  value={bulkLabel}
+                  onChange={(e) => setBulkLabel(e.target.value)}
+                  placeholder="Ex: Notebooks - Setor Financeiro"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-purple-500"
+                />
+              </div>
+              <button
+                onClick={handleCreateBulkKey}
+                disabled={bulkCreating}
+                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              >
+                <Plus size={15} /> {bulkCreating ? "Gerando..." : "Gerar chave"}
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {bulkKeys.length === 0 && (
+                <p className="text-xs text-gray-600">Nenhuma chave criada ainda.</p>
+              )}
+              {bulkKeys.map((key) => (
+                <div key={key.id} className={`bg-gray-800 rounded-lg p-3 ${key.revoked ? "opacity-50" : ""}`}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <p className="text-sm text-white font-medium">
+                        {key.label || "Sem nome"}
+                        {key.revoked && <span className="text-red-400 text-xs ml-2">(revogada)</span>}
+                      </p>
+                      <p className="text-xs text-gray-500 font-mono mt-0.5">
+                        {key.code} · {key.use_count} máquina{key.use_count === 1 ? "" : "s"} instalada{key.use_count === 1 ? "" : "s"}
+                        {key.max_uses ? ` / ${key.max_uses} máx.` : ""} · válida até{" "}
+                        {format(new Date(key.expires_at), "dd/MM/yyyy", { locale: ptBR })}
+                      </p>
+                    </div>
+                    {!key.revoked && (
+                      <button
+                        onClick={() => handleRevokeBulkKey(key.id)}
+                        title="Revogar chave"
+                        className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors flex-shrink-0"
+                      >
+                        <Ban size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {!key.revoked && (
+                    <div className="flex gap-2 flex-wrap mt-3 pt-3 border-t border-gray-700/50">
+                      <button
+                        onClick={() => downloadSilentInstaller(key.code)}
+                        title="Instalador silencioso para distribuir via GPO (sem janelas, roda como SYSTEM)"
+                        className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        <Download size={12} /> Instalador silencioso (GPO)
+                      </button>
+                      <button
+                        onClick={() => downloadMassDeployScript(key.code)}
+                        title="Script PowerShell para instalar em uma lista de computadores via WinRM"
+                        className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        <Terminal size={12} /> Script de push (PowerShell)
+                      </button>
+                      <button
+                        onClick={() => copyBulkCommand(key)}
+                        title="Comando de uma linha (servidores Linux)"
+                        className="flex items-center gap-1.5 text-gray-400 hover:text-white text-xs px-2 py-1.5 transition-colors"
+                      >
+                        {copiedBulkId === key.id ? <CheckCheck size={12} className="text-green-400" /> : <Copy size={12} />}
+                        comando Linux
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <details className="bg-gray-800/60 rounded-lg px-4 py-3">
+              <summary className="text-xs text-gray-400 cursor-pointer select-none">
+                Como isso funciona na prática numa empresa?
+              </summary>
+              <div className="pt-3 space-y-2 text-xs text-gray-300">
+                <p>
+                  <strong>Windows (domínio com Active Directory):</strong> peça para a TI adicionar o "Instalador
+                  silencioso" como um <em>script de inicialização do computador</em> na GPO (roda sozinho no boot,
+                  antes do login, em todo o parque). Ele não abre nenhuma janela e assume que o Python já está na
+                  imagem padrão dos computadores.
+                </p>
+                <p>
+                  <strong>Sem GPO, mas com acesso administrativo:</strong> use o "Script de push (PowerShell)" — ele
+                  usa PowerShell Remoting (WinRM) para instalar em uma lista de computadores a partir de uma única
+                  máquina, sem precisar logar em cada uma.
+                </p>
+                <p>
+                  <strong>Servidores Linux:</strong> o "comando Linux" funciona junto com qualquer ferramenta de
+                  automação (Ansible, script SSH em lote, etc.) — é a mesma linha usada na instalação individual.
+                </p>
+                <p className="text-gray-500 pt-1 border-t border-gray-700/50">
+                  Revogar uma chave não afeta as máquinas já instaladas com ela — apenas impede novos registros.
+                </p>
+              </div>
+            </details>
+          </div>
+        )}
+      </div>
 
       <div className="space-y-3">
         {machines.map((m) => {
