@@ -39,6 +39,26 @@ class EnrollmentCodeOut(BaseModel):
         from_attributes = True
 
 
+class BulkKeyCreate(BaseModel):
+    label: Optional[str] = None
+    max_uses: Optional[int] = None  # None = ilimitado
+    expires_days: int = 365
+
+
+class BulkKeyOut(BaseModel):
+    id: int
+    code: str
+    label: Optional[str]
+    max_uses: Optional[int]
+    use_count: int
+    revoked: bool
+    expires_at: datetime
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class AgentEnrollRequest(BaseModel):
     code: str
     hostname: str

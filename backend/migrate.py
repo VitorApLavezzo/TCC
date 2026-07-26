@@ -28,6 +28,12 @@ alterations = [
     "ALTER TABLE processes ADD COLUMN IF NOT EXISTS ppid INTEGER",
     "ALTER TABLE processes ADD COLUMN IF NOT EXISTS create_time FLOAT",
     "ALTER TABLE processes ADD COLUMN IF NOT EXISTS cmdline TEXT",
+    # EnrollmentCode: chaves reutilizáveis de instalação em massa
+    "ALTER TABLE enrollment_codes ADD COLUMN IF NOT EXISTS label VARCHAR",
+    "ALTER TABLE enrollment_codes ADD COLUMN IF NOT EXISTS reusable BOOLEAN DEFAULT FALSE NOT NULL",
+    "ALTER TABLE enrollment_codes ADD COLUMN IF NOT EXISTS max_uses INTEGER",
+    "ALTER TABLE enrollment_codes ADD COLUMN IF NOT EXISTS use_count INTEGER DEFAULT 0 NOT NULL",
+    "ALTER TABLE enrollment_codes ADD COLUMN IF NOT EXISTS revoked BOOLEAN DEFAULT FALSE NOT NULL",
 ]
 
 with engine.connect() as conn:

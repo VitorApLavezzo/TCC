@@ -10,6 +10,7 @@ from app.models.enrollment import EnrollmentCode
 from app.schemas.machine import (
     MachineCreate, MachineOut, MachineUpdate,
     EnrollmentCodeOut, AgentEnrollRequest, AgentEnrollResponse,
+    BulkKeyCreate, BulkKeyOut,
 )
 from app.core.dependencies import get_current_user
 
@@ -39,24 +40,68 @@ def create_enrollment_code(db: Session = Depends(get_db), current_user: User = D
     return enrollment
 
 
+@router.post("/enroll-keys", response_model=BulkKeyOut, status_code=status.HTTP_201_CREATED)
+def create_bulk_key(body: BulkKeyCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Cria uma chave de instalação REUTILIZÁVEL, para implantar o agente em massa
+    (centenas de máquinas) via GPO, RMM ou script de TI — ao contrário do código de
+    pareamento único, esta chave não expira em 30 minutos nem é consumida no 1º uso.
+    """
+    key = EnrollmentCode(
+        code=_generate_enroll_code(),
+        user_id=current_user.id,
+        label=body.label,
+        reusable=True,
+        max_uses=body.max_uses,
+        expires_at=datetime.utcnow() + timedelta(days=body.expires_days),
+    )
+    db.add(key)
+    db.commit()
+    db.refresh(key)
+    return key
+
+
+@router.get("/enroll-keys", response_model=List[BulkKeyOut])
+def list_bulk_keys(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return (
+        db.query(EnrollmentCode)
+        .filter(EnrollmentCode.user_id == current_user.id, EnrollmentCode.reusable == True)
+        .order_by(EnrollmentCode.created_at.desc())
+        .all()
+    )
+
+
+@router.delete("/enroll-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_bulk_key(key_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Revoga a chave — máquinas já registradas continuam funcionando normalmente,
+    apenas novos registros com esta chave passam a ser recusados."""
+    key = db.query(EnrollmentCode).filter(
+        EnrollmentCode.id == key_id, EnrollmentCode.user_id == current_user.id, EnrollmentCode.reusable == True
+    ).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="Chave não encontrada")
+    key.revoked = True
+    db.commit()
+
+
 @router.post("/enroll", response_model=AgentEnrollResponse)
 def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
-    """Chamado pelo agente: troca o código de pareamento pelo token definitivo.
+    """Chamado pelo agente: troca o código/chave pelo token definitivo desta máquina.
 
-    O agente envia hostname/SO detectados automaticamente — o usuário não digita nada.
+    O agente envia hostname/SO detectados automaticamente — ninguém digita nada.
+    Aceita tanto o código de pareamento de uso único quanto uma chave reutilizável
+    de instalação em massa (ver /enroll-keys).
     """
     code = payload.code.strip().upper().replace(" ", "")
-    enrollment = (
-        db.query(EnrollmentCode)
-        .filter(
-            EnrollmentCode.code == code,
-            EnrollmentCode.machine_id.is_(None),
-            EnrollmentCode.expires_at >= datetime.utcnow(),
-        )
-        .first()
-    )
-    if not enrollment:
-        raise HTTPException(status_code=400, detail="Código de pareamento inválido, expirado ou já utilizado")
+    enrollment = db.query(EnrollmentCode).filter(EnrollmentCode.code == code).first()
+
+    if not enrollment or enrollment.expires_at < datetime.utcnow() or enrollment.revoked:
+        raise HTTPException(status_code=400, detail="Código de pareamento inválido, expirado ou revogado")
+
+    if enrollment.reusable:
+        if enrollment.max_uses is not None and enrollment.use_count >= enrollment.max_uses:
+            raise HTTPException(status_code=400, detail="Este código atingiu o limite de máquinas permitido")
+    elif enrollment.machine_id is not None:
+        raise HTTPException(status_code=400, detail="Código de pareamento já utilizado")
 
     machine = Machine(
         name=payload.name or payload.hostname,
@@ -69,7 +114,11 @@ def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
     )
     db.add(machine)
     db.flush()
-    enrollment.machine_id = machine.id
+
+    enrollment.use_count += 1
+    if not enrollment.reusable:
+        enrollment.machine_id = machine.id  # marca o código de uso único como consumido
+
     db.commit()
     db.refresh(machine)
     return AgentEnrollResponse(
