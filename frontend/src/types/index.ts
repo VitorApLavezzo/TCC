@@ -77,6 +77,8 @@ export interface Metric {
   battery_percent?: number;
   battery_plugged?: boolean;
   battery_secs_left?: number;
+  battery_health_percent?: number;
+  battery_cycle_count?: number;
 }
 
 export interface AIExplanation {

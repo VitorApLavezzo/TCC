@@ -272,6 +272,35 @@ export function Dashboard() {
                     ? `~${Math.floor((lm.battery_secs_left||0)/3600)}h${Math.floor(((lm.battery_secs_left||0)%3600)/60)}m restantes`
                     : "Descarregando"}
                 </p>
+                {lm.battery_health_percent != null && (
+                  <div className="mt-3 pt-3 border-t border-gray-800">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-500">Saúde da bateria</span>
+                      <span className={`text-sm font-semibold ${
+                        lm.battery_health_percent >= 80 ? "text-green-400"
+                        : lm.battery_health_percent >= 50 ? "text-yellow-400"
+                        : "text-red-400"
+                      }`}>
+                        {lm.battery_health_percent.toFixed(0)}%
+                        {" · "}
+                        {lm.battery_health_percent >= 80 ? "Boa" : lm.battery_health_percent >= 50 ? "Regular" : "Considere trocar"}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-800 rounded-full h-1.5 mt-1.5">
+                      <div
+                        className={`h-1.5 rounded-full ${
+                          lm.battery_health_percent >= 80 ? "bg-green-500"
+                          : lm.battery_health_percent >= 50 ? "bg-yellow-500"
+                          : "bg-red-500"
+                        }`}
+                        style={{ width: `${Math.min(lm.battery_health_percent, 100)}%` }}
+                      />
+                    </div>
+                    {lm.battery_cycle_count != null && (
+                      <p className="text-xs text-gray-600 mt-1.5">{lm.battery_cycle_count} ciclos de carga</p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
