@@ -1,3 +1,4 @@
+import os
 import platform
 import time
 import psutil
@@ -103,6 +104,8 @@ def collect_metrics() -> Dict[str, Any]:
         "battery_percent": battery.get("percent"),
         "battery_plugged": battery.get("plugged"),
         "battery_secs_left": battery.get("secs_left"),
+        "battery_health_percent": battery.get("health_percent"),
+        "battery_cycle_count": battery.get("cycle_count"),
 
         # Processos
         "process_count": len(psutil.pids()),
@@ -260,14 +263,96 @@ def collect_battery() -> Dict[str, Any]:
     try:
         b = psutil.sensors_battery()
         if b:
-            return {
+            result = {
                 "percent": round(b.percent, 1),
                 "plugged": b.power_plugged,
                 "secs_left": b.secsleft if b.secsleft != psutil.POWER_TIME_UNLIMITED else None,
             }
+            health = _get_battery_health()
+            if health:
+                result["health_percent"] = health.get("health_percent")
+                result["cycle_count"] = health.get("cycle_count")
+            return result
     except Exception:
         pass
     return {}
+
+
+# Saúde da bateria (capacidade máxima atual vs. capacidade de fábrica) muda muito
+# lentamente — recalcula no máximo a cada 30 min para não gerar custo (o Windows
+# especialmente é "caro": gera um relatório em arquivo a cada chamada do powercfg).
+_BATTERY_HEALTH_INTERVAL = 1800
+_battery_health_cache: Dict[str, Any] = {}
+_battery_health_last_check = 0.0
+
+
+def _get_battery_health() -> Optional[Dict[str, Any]]:
+    global _battery_health_cache, _battery_health_last_check
+    now = time.time()
+    if _battery_health_cache and (now - _battery_health_last_check) < _BATTERY_HEALTH_INTERVAL:
+        return _battery_health_cache
+
+    _battery_health_last_check = now
+    health = _battery_health_windows() if platform.system() == "Windows" else _battery_health_linux()
+    if health:
+        _battery_health_cache = health
+    return _battery_health_cache or None
+
+
+def _battery_health_linux() -> Optional[Dict[str, Any]]:
+    """Lê a capacidade máxima atual vs. capacidade de fábrica via sysfs."""
+    import glob
+
+    def read_int(path: str) -> Optional[int]:
+        try:
+            with open(path) as f:
+                return int(f.read().strip())
+        except (OSError, ValueError):
+            return None
+
+    for bat_dir in sorted(glob.glob("/sys/class/power_supply/BAT*")):
+        for full_name, design_name in [("energy_full", "energy_full_design"), ("charge_full", "charge_full_design")]:
+            full = read_int(os.path.join(bat_dir, full_name))
+            design = read_int(os.path.join(bat_dir, design_name))
+            if full and design:
+                cycle_count = read_int(os.path.join(bat_dir, "cycle_count"))
+                return {
+                    "health_percent": round(min(full / design * 100, 100.0), 1),
+                    "cycle_count": cycle_count or None,
+                }
+    return None
+
+
+def _battery_health_windows() -> Optional[Dict[str, Any]]:
+    """Gera o relatório de bateria do Windows (powercfg) e extrai capacidade de projeto vs. atual."""
+    import subprocess
+    import tempfile
+    import xml.etree.ElementTree as ET
+
+    def find_text(root, tag_suffix: str) -> Optional[str]:
+        for el in root.iter():
+            if el.tag.endswith(tag_suffix) and el.text:
+                return el.text
+        return None
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = os.path.join(tmp, "battery-report.xml")
+            subprocess.run(
+                ["powercfg", "/batteryreport", "/xml", "/output", report_path],
+                capture_output=True, timeout=20, check=True,
+            )
+            root = ET.parse(report_path).getroot()
+            design = find_text(root, "DesignCapacity")
+            full = find_text(root, "FullChargeCapacity")
+            if design and full and int(design) > 0:
+                return {
+                    "health_percent": round(min(int(full) / int(design) * 100, 100.0), 1),
+                    "cycle_count": None,
+                }
+    except Exception:
+        pass
+    return None
 
 
 def collect_disk_partitions() -> List[Dict[str, Any]]:
