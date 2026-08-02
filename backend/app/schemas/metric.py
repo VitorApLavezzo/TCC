@@ -74,6 +74,8 @@ class MetricCreate(BaseModel):
     battery_percent: Optional[float] = None
     battery_plugged: Optional[bool] = None
     battery_secs_left: Optional[float] = None
+    battery_health_percent: Optional[float] = None
+    battery_cycle_count: Optional[int] = None
 
     process_count: int
     processes: Optional[List[ProcessData]] = []
@@ -93,6 +95,7 @@ class MetricOut(BaseModel):
     gpu_metrics: Optional[Any]
     battery_percent: Optional[float]
     battery_plugged: Optional[bool]
+    battery_health_percent: Optional[float]
     swap_percent: Optional[float]
 
     class Config:
@@ -121,6 +124,7 @@ class MetricDetailed(MetricOut):
     load_avg_15: Optional[float]
     temperatures: Optional[Any]
     battery_secs_left: Optional[float]
+    battery_cycle_count: Optional[int]
 
     class Config:
         from_attributes = True

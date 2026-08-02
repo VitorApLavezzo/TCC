@@ -86,6 +86,8 @@ async def ingest_metrics(
         "battery_percent": metric.battery_percent,
         "battery_plugged": metric.battery_plugged,
         "battery_secs_left": metric.battery_secs_left,
+        "battery_health_percent": metric.battery_health_percent,
+        "battery_cycle_count": metric.battery_cycle_count,
         "process_count": metric.process_count,
     }
     await manager.broadcast_metric(machine.id, metric_payload)

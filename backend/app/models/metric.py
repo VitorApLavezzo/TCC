@@ -59,6 +59,8 @@ class Metric(Base):
     battery_percent = Column(Float)
     battery_plugged = Column(Boolean)
     battery_secs_left = Column(Float)
+    battery_health_percent = Column(Float)  # capacidade máxima atual vs. de fábrica
+    battery_cycle_count = Column(Integer)
 
     process_count = Column(Integer)
 

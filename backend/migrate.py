@@ -24,6 +24,8 @@ alterations = [
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS battery_percent FLOAT",
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS battery_plugged BOOLEAN",
     "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS battery_secs_left FLOAT",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS battery_health_percent FLOAT",
+    "ALTER TABLE metrics ADD COLUMN IF NOT EXISTS battery_cycle_count INTEGER",
     # ProcessSnapshot novos campos
     "ALTER TABLE processes ADD COLUMN IF NOT EXISTS ppid INTEGER",
     "ALTER TABLE processes ADD COLUMN IF NOT EXISTS create_time FLOAT",
