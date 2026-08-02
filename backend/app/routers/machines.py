@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
@@ -94,7 +94,9 @@ def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
     code = payload.code.strip().upper().replace(" ", "")
     enrollment = db.query(EnrollmentCode).filter(EnrollmentCode.code == code).first()
 
-    if not enrollment or enrollment.expires_at < datetime.utcnow() or enrollment.revoked:
+    # expires_at vem do banco como timezone-aware (coluna DateTime(timezone=True));
+    # datetime.utcnow() é naive — comparar os dois direto gera TypeError
+    if not enrollment or enrollment.expires_at < datetime.now(timezone.utc) or enrollment.revoked:
         raise HTTPException(status_code=400, detail="Código de pareamento inválido, expirado ou revogado")
 
     if enrollment.reusable:
