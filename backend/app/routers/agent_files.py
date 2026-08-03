@@ -78,13 +78,31 @@ if python3 -m venv --system-site-packages venv 2>/dev/null; then
 else
     PY="python3"
 fi
+
+# Alguns sistemas mínimos (ex: Ubuntu server) não têm pip nem venv por padrão —
+# tenta reparar antes de desistir, com uma mensagem clara em vez de um erro críptico
+if ! "$PY" -m pip --version >/dev/null 2>&1; then
+    "$PY" -m ensurepip --upgrade >/dev/null 2>&1 || true
+fi
+if ! "$PY" -m pip --version >/dev/null 2>&1; then
+    echo "ERRO: pip não está disponível para $PY."
+    echo "Instale os pacotes necessários e rode este script de novo, por exemplo:"
+    echo "  sudo apt install python3-venv python3-pip   # Debian/Ubuntu"
+    echo "  sudo dnf install python3-pip                # Fedora/RHEL"
+    exit 1
+fi
+
 "$PY" -m pip install --quiet -r requirements.txt
 
 echo "Registrando esta máquina no painel..."
 AGENT_API_URL="$SERVER" {auth_env} "$PY" agent.py --enroll-only
 
-echo "Configurando início automático (cron @reboot)..."
-( crontab -l 2>/dev/null | grep -v "anomalydetect/agent.py" ; echo "@reboot cd $DIR && $PY $DIR/agent.py >/dev/null 2>&1" ) | crontab -
+if command -v crontab >/dev/null 2>&1; then
+    echo "Configurando início automático (cron @reboot)..."
+    ( crontab -l 2>/dev/null | grep -v "anomalydetect/agent.py" ; echo "@reboot cd $DIR && $PY $DIR/agent.py >/dev/null 2>&1" ) | crontab -
+else
+    echo "Aviso: 'cron' não encontrado — pulando início automático no boot (instale cron e rode este script de novo para habilitar)."
+fi
 
 echo "Iniciando o agente..."
 pkill -f "$DIR/agent.py" 2>/dev/null && sleep 1 || true
