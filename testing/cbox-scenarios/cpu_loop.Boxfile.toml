@@ -1,0 +1,16 @@
+# Cenário: cpu_loop — processo travado consumindo um núcleo inteiro,
+# sustentado ao longo das coletas. É o cenário mais rápido de validar:
+# detect_cpu_loop exige apenas as últimas 5 coletas com o processo
+# dominante (>80% CPU) em pelo menos 3 delas.
+name = "test-cpu-loop"
+image = "docker.io/library/ubuntu:22.04"
+packages = ["python3", "python3-venv", "python3-pip", "curl"]
+docker = "none"
+
+[box]
+hostname = "test-cpu-loop"
+isolated = true
+
+[[provision]]
+type = "shell"
+run = "nohup python3 -c 'while True: pass' >/tmp/fault.log 2>&1 &"
