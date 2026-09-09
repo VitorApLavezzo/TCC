@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { authApi } from "../services/api";
-import { Activity, Eye, EyeOff } from "lucide-react";
+import { authApi, errorMessage } from "../services/api";
+import { Eye, EyeOff } from "lucide-react";
+import { Button } from "../components/ui/Button";
 
 export function Login() {
   const { login, loginWithToken } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -14,48 +16,60 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const googleBtnRef = useRef<HTMLDivElement>(null);
 
+  // Explica por que a pessoa está nesta tela. Antes ela chegava aqui sem
+  // contexto — depois de criar conta, ou por sessão expirada.
+  const justRegistered = params.get("conta") === "criada";
+  const sessionExpired = params.get("sessao") === "expirada";
+
   useEffect(() => {
     let cancelled = false;
-    authApi.config().then((res) => {
-      const clientId = res.data.google_client_id;
-      if (!clientId || cancelled) return;
+    authApi
+      .config()
+      .then((res) => {
+        const clientId = res.data.google_client_id;
+        if (!clientId || cancelled) return;
 
-      const renderButton = () => {
-        const g = (window as any).google;
-        if (!g?.accounts?.id || !googleBtnRef.current) return;
-        g.accounts.id.initialize({
-          client_id: clientId,
-          callback: async (resp: { credential: string }) => {
-            try {
-              const r = await authApi.googleLogin(resp.credential);
-              await loginWithToken(r.data.access_token);
-              navigate("/");
-            } catch {
-              setError("Falha no login com Google.");
-            }
-          },
-        });
-        g.accounts.id.renderButton(googleBtnRef.current, {
-          theme: "filled_black",
-          size: "large",
-          width: 320,
-          text: "signin_with",
-          locale: "pt-BR",
-        });
-      };
+        const renderButton = () => {
+          const g = (window as any).google;
+          if (!g?.accounts?.id || !googleBtnRef.current) return;
+          g.accounts.id.initialize({
+            client_id: clientId,
+            callback: async (resp: { credential: string }) => {
+              try {
+                const r = await authApi.googleLogin(resp.credential);
+                await loginWithToken(r.data.access_token);
+                navigate("/");
+              } catch (err) {
+                setError(errorMessage(err, "O login com o Google não foi aceito."));
+              }
+            },
+          });
+          g.accounts.id.renderButton(googleBtnRef.current, {
+            theme: "outline",
+            size: "large",
+            width: 320,
+            text: "signin_with",
+            locale: "pt-BR",
+          });
+        };
 
-      if ((window as any).google?.accounts?.id) {
-        renderButton();
-      } else {
-        const script = document.createElement("script");
-        script.src = "https://accounts.google.com/gsi/client";
-        script.async = true;
-        script.onload = renderButton;
-        document.head.appendChild(script);
-      }
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+        if ((window as any).google?.accounts?.id) {
+          renderButton();
+        } else {
+          const script = document.createElement("script");
+          script.src = "https://accounts.google.com/gsi/client";
+          script.async = true;
+          script.onload = renderButton;
+          document.head.appendChild(script);
+        }
+      })
+      .catch(() => {
+        // Sem configuração de Google: a entrada por usuário e senha basta.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loginWithToken, navigate]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -64,77 +78,101 @@ export function Login() {
     try {
       await login(username, password);
       navigate("/");
-    } catch {
-      setError("Usuário ou senha incorretos.");
+    } catch (err: any) {
+      setError(
+        err?.response
+          ? "Usuário ou senha incorretos."
+          : "Não conseguimos falar com o servidor. Verifique se ele está ligado."
+      );
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-blue-600 rounded-2xl mb-4">
-            <Activity size={28} className="text-white" />
+    <div className="flex min-h-screen items-center justify-center bg-canvas p-4">
+      <div className="w-full max-w-[22rem]">
+        <header className="mb-7">
+          <div className="flex items-center gap-2">
+            <span className="h-4 w-1 rounded-full bg-fg" aria-hidden="true" />
+            <span className="text-sm font-semibold tracking-tight text-fg">AnomalyDetect</span>
           </div>
-          <h1 className="text-2xl font-bold text-white">AnomalyDetect</h1>
-          <p className="text-gray-400 text-sm mt-1">Monitoramento Inteligente com IA</p>
-        </div>
+          <h1 className="mt-5 text-lg font-semibold tracking-tight text-fg">Entrar</h1>
+          <p className="mt-1.5 text-sm leading-relaxed text-fg-2">
+            Acompanhe a saúde dos seus computadores e entenda, em português, o que fazer quando algo sai do normal.
+          </p>
+        </header>
 
-        <form onSubmit={handleSubmit} className="bg-gray-900 border border-gray-800 rounded-2xl p-6 space-y-4">
+        {justRegistered && (
+          <p className="mb-4 rounded-panel border border-ok/30 bg-ok/8 px-3.5 py-2.5 text-sm text-ok">
+            Conta criada. Entre com o usuário e a senha que você acabou de escolher.
+          </p>
+        )}
+        {sessionExpired && (
+          <p className="mb-4 rounded-panel border border-hairline bg-sunken px-3.5 py-2.5 text-sm text-fg-2">
+            Sua sessão expirou por segurança. Entre de novo para continuar.
+          </p>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           <div>
-            <label className="block text-xs font-medium text-gray-400 mb-1.5">Usuário</label>
+            <label htmlFor="usuario" className="mb-1.5 block text-xs text-fg-2">
+              Usuário
+            </label>
             <input
+              id="usuario"
               type="text"
+              autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+              className="field"
               placeholder="seu_usuario"
             />
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-gray-400 mb-1.5">Senha</label>
+            <label htmlFor="senha" className="mb-1.5 block text-xs text-fg-2">
+              Senha
+            </label>
             <div className="relative">
               <input
+                id="senha"
                 type={showPass ? "text" : "password"}
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 pr-10 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-blue-500 transition-colors"
+                className="field pr-10"
                 placeholder="••••••••"
               />
               <button
                 type="button"
-                onClick={() => setShowPass(!showPass)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                onClick={() => setShowPass((v) => !v)}
+                aria-label={showPass ? "Ocultar a senha" : "Mostrar a senha"}
+                className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-control text-fg-3 hover:text-fg"
               >
-                {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                {showPass ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
               </button>
             </div>
           </div>
 
           {error && (
-            <p className="text-red-400 text-xs bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
+            <p role="alert" className="rounded-control border border-crit/30 bg-crit/8 px-3 py-2 text-xs text-crit">
               {error}
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium rounded-lg py-2.5 text-sm transition-colors"
-          >
-            {loading ? "Entrando..." : "Entrar"}
-          </button>
+          <Button type="submit" variant="primary" loading={loading} loadingLabel="Entrando..." className="h-9 w-full">
+            Entrar
+          </Button>
 
           <div ref={googleBtnRef} className="flex justify-center" />
 
-          <p className="text-center text-xs text-gray-500">
+          <p className="pt-1 text-center text-xs text-fg-3">
             Não tem conta?{" "}
-            <Link to="/register" className="text-blue-400 hover:text-blue-300">
-              Criar conta
+            <Link to="/register" className="text-accent hover:underline">
+              Criar uma agora
             </Link>
           </p>
         </form>

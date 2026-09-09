@@ -11,6 +11,7 @@ from app.core.dependencies import get_current_user, get_machine_by_token
 from app.core.websocket import manager
 from app.services.anomaly_service import process_metric
 from app.models.user import User
+from app.config import settings
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
@@ -150,3 +151,38 @@ def get_latest_metric(
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="No metrics yet")
     return metric
+
+
+@router.get("/{machine_id}/learning")
+def get_learning_status(
+    machine_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Quanto o sistema já aprendeu sobre esta máquina.
+
+    O painel usa isso para dizer ao usuário que a detecção ainda está
+    calibrando — sem isso, "nenhuma anomalia" é indistinguível de "quebrado".
+    """
+    import os
+    from app.services.ml_service import _model_path
+
+    machine = (
+        db.query(Machine)
+        .filter(Machine.id == machine_id, Machine.owner_id == current_user.id)
+        .first()
+    )
+    if not machine:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Machine not found")
+
+    collected = db.query(Metric).filter(Metric.machine_id == machine_id).count()
+    needed = settings.MIN_TRAINING_SAMPLES
+    trained = os.path.exists(_model_path(machine_id))
+
+    return {
+        "collected": collected,
+        "needed": needed,
+        "ml_ready": trained and collected >= needed,
+        "retrain_every": settings.RETRAIN_EVERY,
+    }

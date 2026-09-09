@@ -132,12 +132,13 @@ export const ANOMALY_TYPE_LABELS: Record<string, string> = {
   unknown: "Anomalia Desconhecida",
 };
 
-export const SEVERITY_COLORS: Record<string, string> = {
-  low: "text-blue-400 bg-blue-400/10 border-blue-400/30",
-  medium: "text-yellow-400 bg-yellow-400/10 border-yellow-400/30",
-  high: "text-orange-400 bg-orange-400/10 border-orange-400/30",
-  critical: "text-red-400 bg-red-400/10 border-red-400/30",
-};
+/** Quanto o sistema já aprendeu sobre uma máquina. */
+export interface LearningStatus {
+  collected: number;
+  needed: number;
+  ml_ready: boolean;
+  retrain_every: number;
+}
 
 export const SEVERITY_LABELS: Record<string, string> = {
   low: "Baixa",

@@ -3,29 +3,107 @@
 @tailwind utilities;
 
 @layer base {
+  /*
+   * Um neutro frio de verdade, não um preto tingido. A interface é feita
+   * quase inteiramente destes tons; saturação é reservada a estado de saúde.
+   */
+  :root,
+  [data-theme="dark"] {
+    --canvas: 22 25 29;
+    --surface: 27 31 36;
+    --sunken: 34 39 46;
+    --hairline: 39 45 52;
+    --edge: 57 65 74;
+    --fg: 230 233 236;
+    --fg-2: 160 168 178;
+    --fg-3: 138 147 157;
+    --inverse: 236 239 242;
+    --inverse-fg: 22 25 29;
+    --accent: 122 154 214;
+    --ok: 79 169 124;
+    --warn: 217 160 54;
+    --crit: 226 104 107;
+  }
+
+  [data-theme="light"] {
+    --canvas: 247 248 249;
+    --surface: 255 255 255;
+    --sunken: 241 243 245;
+    --hairline: 227 230 233;
+    --edge: 203 209 215;
+    --fg: 26 29 33;
+    --fg-2: 91 100 110;
+    --fg-3: 107 116 126;
+    --inverse: 26 29 33;
+    --inverse-fg: 255 255 255;
+    --accent: 44 95 168;
+    --ok: 27 127 77;
+    --warn: 154 102 6;
+    --crit: 179 39 44;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+  [data-theme="light"] {
+    color-scheme: light;
+  }
+
   body {
-    @apply bg-gray-950 text-white;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    @apply bg-canvas text-fg font-sans text-base antialiased;
+    font-feature-settings: "cv05" 1;
+  }
+
+  /* Todo dado numérico alinha em coluna sem recorrer a monoespaçada. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /*
+   * Anel de foco único, sempre visível. Nenhum campo remove o outline sem
+   * substituto — era o que cegava a navegação por teclado.
+   */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-canvas;
+  }
+
+  ::selection {
+    @apply bg-accent/25;
+  }
+
+  /* Campos: uma única aparência em todo o produto. */
+  .field {
+    @apply w-full rounded-control border border-edge bg-surface px-3 py-2 text-base text-fg;
+    @apply placeholder:text-fg-3 focus:border-accent;
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 10px;
+    height: 10px;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-gray-900;
+    @apply bg-transparent;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-gray-700 rounded-full;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-600;
+    @apply rounded-full border-2 border-solid border-transparent bg-edge bg-clip-content;
   }
 }
 
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+@layer utilities {
+  .clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -1,8 +1,10 @@
 import axios from "axios";
+import { reportFailure, reportSuccess } from "../lib/connection";
 
 const api = axios.create({
   baseURL: "/api",
   headers: { "Content-Type": "application/json" },
+  timeout: 20000,
 });
 
 api.interceptors.request.use((config) => {
@@ -12,15 +14,44 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    reportSuccess();
+    return res;
+  },
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem("token");
-      window.location.href = "/login";
+      // `sessao=expirada` faz o login explicar por que a pessoa voltou pra cá,
+      // em vez de simplesmente aparecer na tela de login sem motivo.
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.href = "/login?sessao=expirada";
+      }
+      return Promise.reject(err);
+    }
+
+    // Sem `err.response` = a requisição não chegou ao servidor (rede caída,
+    // backend fora, timeout). Isso é o que o indicador de conexão mostra.
+    if (!err.response || err.response.status >= 500) {
+      reportFailure();
+    } else {
+      // O servidor respondeu, ainda que recusando: a conexão está de pé.
+      reportSuccess();
     }
     return Promise.reject(err);
   }
 );
+
+/** Mensagem em português a partir de um erro de requisição qualquer. */
+export function errorMessage(err: any, fallback = "Não foi possível concluir a ação.") {
+  if (!err?.response) return "Sem conexão com o servidor.";
+  const detail = err.response.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail) && detail[0]?.msg) return String(detail[0].msg);
+  if (err.response.status === 403) return "Você não tem permissão para isso.";
+  if (err.response.status === 404) return "Este item não existe mais.";
+  if (err.response.status >= 500) return "O servidor encontrou um erro.";
+  return fallback;
+}
 
 export const authApi = {
   login: (username: string, password: string) => {
@@ -39,8 +70,7 @@ export const authApi = {
 export const machinesApi = {
   list: () => api.get("/machines"),
   get: (id: number) => api.get(`/machines/${id}`),
-  create: (data: { name: string; hostname: string; os_type?: string }) =>
-    api.post("/machines", data),
+  create: (data: { name: string; hostname: string; os_type?: string }) => api.post("/machines", data),
   createEnrollCode: () => api.post("/machines/enroll-code"),
   update: (id: number, data: object) => api.patch(`/machines/${id}`, data),
   delete: (id: number) => api.delete(`/machines/${id}`),
@@ -55,9 +85,10 @@ export const bulkKeysApi = {
 };
 
 export const metricsApi = {
-  list: (machineId: number, hours = 24) =>
-    api.get(`/metrics/${machineId}?hours=${hours}`),
+  list: (machineId: number, hours = 24) => api.get(`/metrics/${machineId}?hours=${hours}`),
   latest: (machineId: number) => api.get(`/metrics/${machineId}/latest`),
+  /** Progresso do aprendizado: quantas coletas já existem e se o modelo treinou. */
+  learning: (machineId: number) => api.get(`/metrics/${machineId}/learning`),
 };
 
 export const explanationsApi = {
@@ -68,8 +99,7 @@ export const anomaliesApi = {
   list: (params?: { machine_id?: number; hours?: number; severity?: string; unresolved_only?: boolean }) =>
     api.get("/anomalies", { params }),
   get: (id: number) => api.get(`/anomalies/${id}`),
-  resolve: (id: number, is_resolved: boolean) =>
-    api.patch(`/anomalies/${id}/resolve`, { is_resolved }),
+  resolve: (id: number, is_resolved: boolean) => api.patch(`/anomalies/${id}/resolve`, { is_resolved }),
   stats: (hours = 24) => api.get(`/anomalies/stats/summary?hours=${hours}`),
 };
 

@@ -1,21 +1,35 @@
 import { clsx } from "clsx";
-import { SEVERITY_COLORS, SEVERITY_LABELS } from "../../types";
+import { SEVERITY_LABELS } from "../../types";
+import { StatusDot } from "./Layout";
 
-interface BadgeProps {
-  severity: string;
-  className?: string;
-}
+const TONE: Record<string, "ok" | "warn" | "crit" | "idle"> = {
+  low: "idle",
+  medium: "warn",
+  high: "warn",
+  critical: "crit",
+};
 
-export function SeverityBadge({ severity, className }: BadgeProps) {
+/**
+ * Severidade como ponto + palavra, não como pílula colorida.
+ *
+ * Numa lista de vinte avisos, vinte pílulas com fundo competem entre si e com
+ * o próprio título. O ponto carrega a cor; o texto carrega o significado.
+ */
+export function Severity({ severity, className }: { severity: string; className?: string }) {
+  const tone = TONE[severity] ?? "idle";
   return (
-    <span
-      className={clsx(
-        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border",
-        SEVERITY_COLORS[severity] || "text-gray-400 bg-gray-400/10 border-gray-400/30",
-        className
-      )}
-    >
-      {SEVERITY_LABELS[severity] || severity}
+    <span className={clsx("inline-flex items-center gap-1.5", className)}>
+      <StatusDot tone={tone} />
+      <span
+        className={clsx(
+          "text-xs",
+          tone === "crit" && "font-medium text-crit",
+          tone === "warn" && "text-warn",
+          tone === "idle" && "text-fg-3"
+        )}
+      >
+        {SEVERITY_LABELS[severity] || severity}
+      </span>
     </span>
   );
 }

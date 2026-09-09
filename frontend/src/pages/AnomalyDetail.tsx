@@ -1,298 +1,338 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { anomaliesApi, explanationsApi, machinesApi } from "../services/api";
-import { Anomaly, ANOMALY_TYPE_LABELS } from "../types";
-import { SeverityBadge } from "../components/ui/Badge";
-import { Card } from "../components/ui/Card";
+import { anomaliesApi, explanationsApi, machinesApi, metricsApi, errorMessage } from "../services/api";
+import { Anomaly, Metric, ANOMALY_TYPE_LABELS } from "../types";
+import { Severity } from "../components/ui/Badge";
+import { Section, Panel, DataList, DataRow, StatusDot } from "../components/ui/Layout";
+import { Button, TextButton } from "../components/ui/Button";
+import { Explain } from "../components/ui/Explain";
+import { Skeleton } from "../components/ui/Skeleton";
+import { EmptyState } from "../components/ui/EmptyState";
+import { MetricChart } from "../components/charts/MetricChart";
+import { useToast } from "../components/ui/Toast";
+import { ANOMALY_TYPE_HINTS, SEVERITY_URGENCY } from "../lib/glossary";
+import { health, LEVEL_CLASS } from "../lib/health";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import {
-  ArrowLeft,
-  AlertTriangle,
-  Brain,
-  Lightbulb,
-  Wrench,
-  CheckCircle2,
-  Clock,
-  Cpu,
-  Activity,
-} from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+
+/** Qual métrica ilustra melhor cada tipo de anomalia. */
+const CHART_FOR: Record<string, { key: keyof Metric; label: string; term: string; threshold?: number }> = {
+  high_cpu: { key: "cpu_percent", label: "Processador (%)", term: "cpu", threshold: 80 },
+  cpu_loop: { key: "cpu_percent", label: "Processador (%)", term: "cpu", threshold: 80 },
+  high_memory: { key: "mem_percent", label: "Memória (%)", term: "memoria", threshold: 85 },
+  memory_leak: { key: "mem_percent", label: "Memória (%)", term: "memoria", threshold: 85 },
+  disk_full: { key: "disk_percent", label: "Disco (%)", term: "disco", threshold: 85 },
+  network_spike: { key: "net_connections", label: "Conexões de rede", term: "conexoes" },
+  ddos_indicator: { key: "net_connections", label: "Conexões de rede", term: "conexoes" },
+  resource_exhaustion: { key: "cpu_percent", label: "Processador (%)", term: "cpu", threshold: 80 },
+};
 
 export function AnomalyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const toast = useToast();
   const [anomaly, setAnomaly] = useState<Anomaly | null>(null);
-  const [machineName, setMachineName] = useState<string>("");
+  const [machineName, setMachineName] = useState("");
+  const [context, setContext] = useState<Metric[]>([]);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
+  const [notFound, setNotFound] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    pollingRef.current = null;
   };
 
   useEffect(() => {
     if (!id) return;
-    anomaliesApi.get(Number(id))
+    let cancelled = false;
+
+    anomaliesApi
+      .get(Number(id))
       .then((res) => {
-        setAnomaly(res.data);
-        machinesApi.get(res.data.machine_id)
-          .then((mr) => setMachineName(mr.data.name))
+        if (cancelled) return;
+        const a: Anomaly = res.data;
+        setAnomaly(a);
+
+        machinesApi
+          .get(a.machine_id)
+          .then((mr) => !cancelled && setMachineName(mr.data.name))
+          .catch(() => {});
+
+        // Janela em volta da detecção, para o gráfico mostrar o pico.
+        const hoursAgo = Math.ceil((Date.now() - new Date(a.detected_at).getTime()) / 3600000) + 2;
+        metricsApi
+          .list(a.machine_id, Math.min(Math.max(hoursAgo, 3), 168))
+          .then((mr) => !cancelled && setContext(mr.data))
           .catch(() => {});
       })
-      .catch(() => navigate("/anomalies"))
-      .finally(() => setLoading(false));
-    return () => stopPolling();
+      .catch(() => !cancelled && setNotFound(true))
+      .finally(() => !cancelled && setLoading(false));
+
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
   }, [id]);
 
+  // Enquanto a IA não devolve as causas, recarrega sozinho.
   useEffect(() => {
     if (!anomaly) return;
-    const hasCauses = (anomaly.explanation?.possible_causes?.length ?? 0) > 0;
-    if (hasCauses) { stopPolling(); return; }
-
+    if ((anomaly.explanation?.possible_causes?.length ?? 0) > 0) {
+      stopPolling();
+      return;
+    }
     stopPolling();
     pollingRef.current = setInterval(async () => {
       try {
         const res = await anomaliesApi.get(anomaly.id);
-        const updated = res.data;
-        if ((updated.explanation?.possible_causes?.length ?? 0) > 0) {
-          setAnomaly(updated);
+        if ((res.data.explanation?.possible_causes?.length ?? 0) > 0) {
+          setAnomaly(res.data);
           stopPolling();
         }
-      } catch {}
+      } catch {
+        // Falha momentânea: a próxima tentativa continua daqui.
+      }
     }, 4000);
-
     return () => stopPolling();
   }, [anomaly?.id, anomaly?.explanation?.possible_causes?.length]);
 
-  const handleRegenerate = async () => {
+  const handleRegenerate = useCallback(async () => {
     if (!anomaly) return;
     setRegenerating(true);
     try {
       const res = await explanationsApi.regenerate(anomaly.id);
-      setAnomaly({ ...anomaly, explanation: res.data });
-    } catch (e) {
-      alert("Erro ao regenerar. Verifique se o Ollama está rodando.");
+      setAnomaly((prev) => (prev ? { ...prev, explanation: res.data } : prev));
+      toast.success("Explicação gerada.");
+    } catch (err) {
+      toast.error(
+        errorMessage(err, "Não foi possível gerar a explicação."),
+        "O serviço de IA pode estar indisponível. As causas aparecem assim que ele responder."
+      );
     } finally {
       setRegenerating(false);
     }
-  };
+  }, [anomaly, toast]);
 
   const handleResolve = async () => {
     if (!anomaly) return;
-    const res = await anomaliesApi.resolve(anomaly.id, !anomaly.is_resolved);
-    setAnomaly(res.data);
+    try {
+      const res = await anomaliesApi.resolve(anomaly.id, !anomaly.is_resolved);
+      setAnomaly(res.data);
+      toast.success(anomaly.is_resolved ? "Aviso reaberto." : "Aviso resolvido.");
+    } catch (err) {
+      toast.error(errorMessage(err, "Não foi possível mudar o estado deste aviso."));
+    }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent" />
+      <div className="max-w-3xl space-y-6">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-7 w-72" />
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-32 w-full rounded-panel" />
       </div>
     );
   }
 
-  if (!anomaly) return null;
+  if (notFound || !anomaly) {
+    return (
+      <div className="max-w-3xl">
+        <EmptyState
+          title="Este aviso não existe mais"
+          body="Ele pode ter sido removido junto com o computador a que pertencia."
+          action={
+            <Button variant="primary" onClick={() => navigate("/anomalies")}>
+              Voltar para os avisos
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
 
   const exp = anomaly.explanation;
+  const typeLabel = ANOMALY_TYPE_LABELS[anomaly.anomaly_type] || anomaly.anomaly_type;
+  const hint = ANOMALY_TYPE_HINTS[anomaly.anomaly_type];
+  const chart = CHART_FOR[anomaly.anomaly_type];
+  const urgency =
+    anomaly.severity === "critical"
+      ? LEVEL_CLASS.crit
+      : anomaly.severity === "low"
+        ? LEVEL_CLASS.unknown
+        : LEVEL_CLASS.warn;
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <div className="flex items-center gap-4">
-        <button onClick={() => navigate("/anomalies")} className="text-gray-400 hover:text-white transition-colors">
-          <ArrowLeft size={20} />
-        </button>
-        <div className="flex-1">
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-xl font-bold text-white">
-              {ANOMALY_TYPE_LABELS[anomaly.anomaly_type] || anomaly.anomaly_type}
-            </h1>
-            <SeverityBadge severity={anomaly.severity} />
-            {anomaly.is_resolved && (
-              <span className="text-xs text-green-400 bg-green-400/10 border border-green-400/20 px-2 py-0.5 rounded-full flex items-center gap-1">
-                <CheckCircle2 size={11} /> Resolvida
-              </span>
-            )}
-          </div>
-          <p className="text-gray-500 text-xs mt-1 flex items-center gap-3 flex-wrap">
-            {machineName && (
-              <span className="flex items-center gap-1 text-blue-300/80">
-                <Cpu size={11} />
-                {machineName}
-              </span>
-            )}
-            <span className="flex items-center gap-1">
-              <Clock size={11} />
-              Detectada em {format(new Date(anomaly.detected_at), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}
+    <div className="max-w-3xl space-y-8">
+      <TextButton onClick={() => navigate("/anomalies")} className="inline-flex items-center gap-1.5 text-fg-2">
+        <ArrowLeft size={12} aria-hidden="true" />
+        Todos os avisos
+      </TextButton>
+
+      <header className="border-b border-hairline pb-4">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <h1 className="text-lg font-semibold tracking-tight text-fg">{typeLabel}</h1>
+          {anomaly.is_resolved ? (
+            <span className="flex items-center gap-1.5 text-xs text-fg-3">
+              <StatusDot tone="idle" />
+              Resolvida
             </span>
-          </p>
+          ) : (
+            <Severity severity={anomaly.severity} />
+          )}
         </div>
-        <button
-          onClick={handleResolve}
-          className={`text-sm px-4 py-2 rounded-lg border transition-colors font-medium ${
-            anomaly.is_resolved
-              ? "text-orange-400 border-orange-400/30 hover:bg-orange-400/10"
-              : "text-green-400 border-green-400/30 hover:bg-green-400/10"
-          }`}
-        >
-          {anomaly.is_resolved ? "Reabrir" : "Marcar Resolvida"}
-        </button>
-      </div>
+        {hint && <p className="mt-2 max-w-prose text-sm leading-relaxed text-fg-2">{hint}</p>}
+        <p className="tnum mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-3">
+          {machineName && <span>{machineName}</span>}
+          <span>{format(new Date(anomaly.detected_at), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}</span>
+        </p>
 
-      {/* Urgência em linguagem cotidiana */}
-      <div className={`rounded-xl px-4 py-3 border text-sm flex items-center gap-2 ${
-        anomaly.severity === "critical" ? "bg-red-400/10 border-red-400/30 text-red-300"
-        : anomaly.severity === "high" ? "bg-orange-400/10 border-orange-400/30 text-orange-300"
-        : anomaly.severity === "medium" ? "bg-yellow-400/10 border-yellow-400/30 text-yellow-300"
-        : "bg-blue-400/10 border-blue-400/30 text-blue-300"
-      }`}>
-        <AlertTriangle size={15} className="flex-shrink-0" />
-        {anomaly.severity === "critical" && "Aja agora: este problema pode travar o computador ou indicar uma ameaça séria."}
-        {anomaly.severity === "high" && "Requer atenção hoje: o computador pode ficar lento ou instável se nada for feito."}
-        {anomaly.severity === "medium" && "Vale investigar quando puder: não é urgente, mas não deve ser ignorado."}
-        {anomaly.severity === "low" && "Apenas informativo: nenhuma ação urgente é necessária."}
-      </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button variant={anomaly.is_resolved ? "secondary" : "primary"} onClick={handleResolve}>
+            {anomaly.is_resolved ? "Reabrir aviso" : "Marcar como resolvido"}
+          </Button>
+          {exp && (
+            <Button variant="quiet" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>
+              Gerar nova explicação
+            </Button>
+          )}
+        </div>
+      </header>
 
-      {/* O que aconteceu */}
-      {exp && (
-        <div className="bg-gradient-to-br from-blue-950/50 to-purple-950/50 border border-blue-800/40 rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <Brain size={16} className="text-blue-400" />
-            <span className="text-blue-300 text-sm font-semibold">O que aconteceu?</span>
-            {exp.model_used && (
-              <span className="text-xs text-gray-600 ml-auto" title="Modelo de IA que gerou esta análise">{exp.model_used}</span>
+      {/* Único bloco com fundo tingido da aplicação — reservado à urgência. */}
+      <p className={`rounded-panel border px-4 py-2.5 text-sm ${urgency.border} ${urgency.bg} ${urgency.text}`}>
+        {SEVERITY_URGENCY[anomaly.severity]}
+      </p>
+
+      <Section title="O que aconteceu" actions={exp?.model_used ? <span className="text-micro text-fg-3">{exp.model_used}</span> : undefined}>
+        {exp ? (
+          <div className="space-y-3">
+            <p className="max-w-prose text-base leading-relaxed text-fg">{exp.summary}</p>
+            {exp.detailed_explanation && (
+              <p className="max-w-prose whitespace-pre-line text-sm leading-relaxed text-fg-2">
+                {exp.detailed_explanation}
+              </p>
+            )}
+            {exp.severity_justification && (
+              <p className="max-w-prose text-xs leading-relaxed text-fg-3">{exp.severity_justification}</p>
             )}
           </div>
-          <p className="text-white text-sm leading-relaxed">{exp.summary}</p>
-          {exp.detailed_explanation && (
-            <p className="text-gray-300 text-sm leading-relaxed mt-3 border-t border-blue-800/30 pt-3 whitespace-pre-line">
-              {exp.detailed_explanation}
-            </p>
-          )}
-          {exp.severity_justification && (
-            <p className="text-gray-400 text-xs mt-3 italic">{exp.severity_justification}</p>
-          )}
-        </div>
+        ) : (
+          <EmptyState
+            title="A explicação em linguagem simples ainda não chegou"
+            body="Os dados técnicos abaixo já estão completos. A análise escrita depende do serviço de IA, que pode estar ocupado ou desligado."
+            action={
+              <Button variant="primary" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>
+                Gerar a explicação agora
+              </Button>
+            }
+          />
+        )}
+      </Section>
+
+      {chart && context.length > 1 && (
+        <Section title="O momento em que aconteceu" description="A linha vertical marca o instante da detecção">
+          <MetricChart
+            metrics={context}
+            dataKey={chart.key}
+            label={chart.label}
+            term={chart.term}
+            threshold={chart.threshold}
+            markAt={anomaly.detected_at}
+            unit={chart.key === "net_connections" ? "" : "%"}
+            domain={
+              chart.key === "net_connections"
+                ? [0, Math.max(...context.map((m) => m.net_connections ?? 0)) + 10]
+                : undefined
+            }
+          />
+        </Section>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Metrics snapshot */}
-        <Card>
-          <div className="flex items-center gap-2 mb-4">
-            <Activity size={15} className="text-gray-400" />
-            <h2 className="text-sm font-semibold text-white">Métricas Afetadas</h2>
-          </div>
-          {anomaly.affected_metrics && Object.keys(anomaly.affected_metrics).length > 0 ? (
-            <div className="space-y-2">
-              {Object.entries(anomaly.affected_metrics)
-                .filter(([key, val]) => key !== "_behavior" && typeof val !== "object")
-                .map(([key, val]) => (
-                <div key={key} className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400 capitalize">{key.replace(/_/g, " ")}</span>
-                  <span className="text-sm font-mono text-white">
-                    {typeof val === "number" ? `${val.toFixed(1)}%` : String(val)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-gray-600 text-xs">Nenhuma métrica específica registrada.</p>
-          )}
-          {anomaly.responsible_process && (
-            <div className="mt-3 pt-3 border-t border-gray-800">
-              <p className="text-xs text-gray-500">Processo responsável</p>
-              <p className="text-sm text-orange-400 font-mono mt-0.5">{anomaly.responsible_process}</p>
-            </div>
-          )}
-          {anomaly.anomaly_score !== null && anomaly.anomaly_score !== undefined && (
-            <div className="mt-2">
-              <p className="text-xs text-gray-500">Score de anomalia (Isolation Forest)</p>
-              <p className="text-sm text-gray-300 font-mono mt-0.5">{anomaly.anomaly_score.toFixed(4)}</p>
-            </div>
-          )}
-        </Card>
+      {exp?.recommendations && exp.recommendations.length > 0 && (
+        <Section title="O que fazer agora" description="Na ordem, do mais simples para o mais avançado">
+          <ol className="divide-y divide-hairline border-y border-hairline">
+            {exp.recommendations.map((rec, i) => (
+              <li key={i} className="flex gap-3 py-3">
+                <span className="tnum w-4 flex-shrink-0 text-sm text-fg-3">{i + 1}</span>
+                <span className="max-w-prose text-sm leading-relaxed text-fg-2">{rec}</span>
+              </li>
+            ))}
+          </ol>
+        </Section>
+      )}
 
-        {/* Possible causes */}
-        {exp && (!exp.possible_causes || exp.possible_causes.length === 0) && (
-          <Card className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="flex gap-1">
-                <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: "300ms" }} />
-              </div>
-              <div>
-                <p className="text-sm text-white font-medium">Analisando com IA...</p>
-                <p className="text-xs text-gray-500 mt-0.5">O Ollama está processando. Atualiza automaticamente.</p>
-              </div>
-            </div>
-            <button
-              onClick={handleRegenerate}
-              disabled={regenerating}
-              className="flex-shrink-0 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg transition-colors"
-            >
-              {regenerating ? "Gerando..." : "Tentar agora"}
-            </button>
-          </Card>
-        )}
-
-        {exp?.possible_causes && exp.possible_causes.length > 0 && (
-          <Card>
-            <div className="flex items-center gap-2 mb-1">
-              <Lightbulb size={15} className="text-yellow-400" />
-              <h2 className="text-sm font-semibold text-white">Possíveis Causas</h2>
-            </div>
-            <p className="text-xs text-gray-500 mb-4">Da mais provável para a menos provável</p>
-            <ul className="space-y-2">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <Section title="Por que isso pode ter acontecido" flush>
+          {exp?.possible_causes && exp.possible_causes.length > 0 ? (
+            <ol className="divide-y divide-hairline border-t border-hairline">
               {exp.possible_causes.map((cause, i) => (
-                <li key={i} className="flex items-start gap-2 text-xs text-gray-300">
-                  <span className="text-yellow-400 font-bold mt-0.5 flex-shrink-0">{i + 1}.</span>
-                  {cause}
+                <li key={i} className="flex gap-3 py-2.5">
+                  <span className="tnum w-4 flex-shrink-0 text-sm text-fg-3">{i + 1}</span>
+                  <span className="text-sm leading-relaxed text-fg-2">{cause}</span>
                 </li>
               ))}
-            </ul>
-          </Card>
-        )}
+            </ol>
+          ) : exp ? (
+            <p className="border-t border-hairline pt-3 text-sm text-fg-3">
+              Analisando as causas. Esta parte atualiza sozinha quando a IA terminar.
+            </p>
+          ) : (
+            <p className="border-t border-hairline pt-3 text-sm text-fg-3">
+              As causas prováveis vêm junto com a explicação da IA.
+            </p>
+          )}
+        </Section>
+
+        <Section title="Dados da leitura" flush>
+          <Panel className="mt-3 px-4 py-2">
+            <DataList>
+              {anomaly.affected_metrics && Object.keys(anomaly.affected_metrics).length > 0 ? (
+                Object.entries(anomaly.affected_metrics)
+                  .filter(([key, val]) => key !== "_behavior" && typeof val !== "object")
+                  .map(([key, val]) => {
+                    const reading =
+                      typeof val !== "number"
+                        ? null
+                        : key.includes("cpu")
+                          ? health.cpu(val)
+                          : key.includes("mem")
+                            ? health.memory(val)
+                            : key.includes("disk")
+                              ? health.disk(val)
+                              : null;
+                    return (
+                      <DataRow
+                        key={key}
+                        label={key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}
+                        value={typeof val === "number" ? `${val.toFixed(1)}%` : String(val)}
+                        note={reading?.label}
+                        tone={reading && reading.level !== "unknown" ? reading.level : undefined}
+                      />
+                    );
+                  })
+              ) : (
+                <DataRow label="Métricas" value="nenhuma registrada" />
+              )}
+
+              {anomaly.responsible_process && (
+                <DataRow label="Programa responsável" value={anomaly.responsible_process} mono />
+              )}
+
+              {anomaly.anomaly_score !== null && anomaly.anomaly_score !== undefined && (
+                <DataRow
+                  label="Desvio do padrão"
+                  value={anomaly.anomaly_score.toFixed(4)}
+                  hint={<Explain term="score" />}
+                />
+              )}
+            </DataList>
+          </Panel>
+        </Section>
       </div>
-
-      {/* Recommendations */}
-      {exp?.recommendations && exp.recommendations.length > 0 && (
-        <Card>
-          <div className="flex items-center gap-2 mb-1">
-            <Wrench size={15} className="text-green-400" />
-            <h2 className="text-sm font-semibold text-white">O que fazer agora</h2>
-          </div>
-          <p className="text-xs text-gray-500 mb-4">Siga os passos na ordem — do mais simples para o mais avançado</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {exp.recommendations.map((rec, i) => (
-              <div key={i} className="flex items-start gap-3 bg-gray-800/50 rounded-lg px-3 py-2.5">
-                <div className="w-5 h-5 rounded-full bg-green-400/20 text-green-400 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
-                  {i + 1}
-                </div>
-                <p className="text-xs text-gray-300 leading-relaxed">{rec}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {!exp && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center">
-          <Brain size={32} className="text-gray-700 mx-auto mb-3" />
-          <p className="text-gray-500 text-sm">Explicação da IA ainda não disponível.</p>
-          <p className="text-gray-600 text-xs mt-1">Verifique se o Ollama está rodando e o modelo foi baixado.</p>
-          <button
-            onClick={handleRegenerate}
-            disabled={regenerating}
-            className="mt-4 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg transition-colors"
-          >
-            {regenerating ? "Gerando..." : "Gerar explicação agora"}
-          </button>
-        </div>
-      )}
     </div>
   );
 }
