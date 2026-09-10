@@ -1,4 +1,5 @@
 import json
+import subprocess
 import httpx
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
@@ -62,6 +63,37 @@ def _call_cloud_llm(prompt: str) -> str:
         response = client.post(url, json=payload, headers=headers)
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
+
+
+def _call_claude_cli(prompt: str) -> str:
+    """Chama o Claude Code CLI em modo headless.
+
+    O prompt vai por stdin (evita limite de tamanho de argumento) e a resposta
+    volta em JSON, de onde extraimos o campo "result" com o texto do modelo.
+    Requer o CLI instalado na imagem e ~/.claude/.credentials.json montado.
+    """
+    cmd = [
+        settings.CLAUDE_CLI_PATH,
+        "-p",
+        "--output-format", "json",
+        "--model", settings.CLAUDE_CLI_MODEL,
+    ]
+    proc = subprocess.run(
+        cmd,
+        input=prompt,
+        capture_output=True,
+        text=True,
+        timeout=settings.CLAUDE_CLI_TIMEOUT,
+        cwd="/tmp",
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"claude cli retornou {proc.returncode}: {(proc.stderr or proc.stdout).strip()[:300]}"
+        )
+    envelope = json.loads(proc.stdout)
+    if envelope.get("is_error"):
+        raise RuntimeError(f"claude cli reportou erro: {str(envelope.get('result'))[:300]}")
+    return envelope["result"]
 
 
 def _extract_json(raw: str) -> Dict[str, Any]:
@@ -183,8 +215,14 @@ REGRAS DE ESCRITA (siga TODAS):
 - recommendations: 3 a 4 passos práticos em ordem (do mais fácil ao mais avançado), cada um dizendo EXATAMENTE onde clicar ou o que digitar. Ex: "Aperte Ctrl+Shift+Esc para abrir o Gerenciador de Tarefas e veja qual programa está no topo da lista"
 - severity_justification: 1 frase dizendo o nível de urgência em linguagem cotidiana. Ex: "Severidade alta: vale resolver ainda hoje, pois o computador pode travar" """
 
-    # Cadeia de provedores: Ollama local → nuvem (se configurada) → análise estática
-    providers = [(f"ollama/{settings.OLLAMA_MODEL}", _call_ollama)]
+    # Cadeia de provedores, na ordem de preferência:
+    #   Claude CLI (se habilitado) → Ollama local → nuvem (se configurada) → análise estática
+    # O Claude CLI vem primeiro porque habilitá-lo é uma escolha explícita;
+    # o Ollama continua como fallback local caso o CLI falhe ou expire.
+    providers = []
+    if settings.CLAUDE_CLI_ENABLED:
+        providers.append((f"claude-cli/{settings.CLAUDE_CLI_MODEL}", _call_claude_cli))
+    providers.append((f"ollama/{settings.OLLAMA_MODEL}", _call_ollama))
     if settings.CLOUD_LLM_API_KEY:
         providers.append((f"cloud/{settings.CLOUD_LLM_MODEL}", _call_cloud_llm))
 

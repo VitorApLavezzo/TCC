@@ -52,9 +52,16 @@ services:
       CLOUD_LLM_BASE_URL: ${CLOUD_LLM_BASE_URL:-https://api.groq.com/openai/v1}
       CLOUD_LLM_API_KEY: ${CLOUD_LLM_API_KEY:-}
       CLOUD_LLM_MODEL: ${CLOUD_LLM_MODEL:-llama-3.3-70b-versatile}
+      # Claude Code CLI headless como provedor de explicações
+      CLAUDE_CLI_ENABLED: ${CLAUDE_CLI_ENABLED:-false}
+      CLAUDE_CLI_MODEL: ${CLAUDE_CLI_MODEL:-sonnet}
+      CLAUDE_CLI_TIMEOUT: ${CLAUDE_CLI_TIMEOUT:-120}
     volumes:
       - ./backend:/app
       - ./agent:/app/agent_dist:ro
+      # ~/.claude do host, somente-leitura: o entrypoint copia a credencial
+      # para dentro do container, então a renovação do token nunca escreve aqui
+      - ${CLAUDE_HOST_CONFIG:-./.claude-host}:/claude-host:ro
       - ml_models:/app/ml/models
     ports:
       - "8000:8000"

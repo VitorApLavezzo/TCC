@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     CLOUD_LLM_API_KEY: str = ""
     CLOUD_LLM_MODEL: str = "llama-3.3-70b-versatile"
 
+    # Claude Code CLI em modo headless (usa a assinatura autenticada em ~/.claude)
+    # Quando habilitado, vira o primeiro provedor da cadeia de explicações.
+    CLAUDE_CLI_ENABLED: bool = False
+    CLAUDE_CLI_PATH: str = "claude"
+    CLAUDE_CLI_MODEL: str = "sonnet"
+    CLAUDE_CLI_TIMEOUT: int = 120
+
     ANOMALY_SCORE_THRESHOLD: float = -0.15
     MIN_TRAINING_SAMPLES: int = 100
     # 3% de contaminação: menos alarmes falsos que os 5% originais

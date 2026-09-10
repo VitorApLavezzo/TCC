@@ -1,6 +1,7 @@
 # Segredos / configuração local
 .env
 agent/agent_config.json
+.claude-host/
 
 
 # Python
