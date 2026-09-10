@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { authApi, errorMessage } from "../services/api";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "../components/ui/Button";
+import { Wordmark } from "../components/ui/SignalMark";
 
 const MIN_PASSWORD = 8;
 
@@ -50,10 +51,7 @@ export function Register() {
     <div className="flex min-h-screen items-center justify-center bg-canvas p-4">
       <div className="w-full max-w-[22rem]">
         <header className="mb-7">
-          <div className="flex items-center gap-2">
-            <span className="h-4 w-1 rounded-full bg-fg" aria-hidden="true" />
-            <span className="text-sm font-semibold tracking-tight text-fg">AnomalyDetect</span>
-          </div>
+          <Wordmark />
           <h1 className="mt-5 text-lg font-semibold tracking-tight text-fg">Criar sua conta</h1>
           <p className="mt-1.5 text-sm text-fg-2">Depois disso você conecta seus computadores em três passos.</p>
         </header>

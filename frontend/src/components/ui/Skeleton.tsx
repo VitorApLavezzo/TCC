@@ -8,20 +8,20 @@ export function Skeleton({ className }: { className?: string }) {
   return <div aria-hidden="true" className={clsx("animate-pulse rounded bg-sunken", className)} />;
 }
 
-/** Esqueleto da faixa de sinais vitais, com a mesma malha do componente real. */
+/** Esqueleto dos canais, com a mesma malha e as mesmas alturas do real. */
 export function VitalsSkeleton() {
   return (
     <div
       role="status"
       aria-label="Carregando as leituras"
-      className="grid grid-cols-2 divide-hairline rounded-panel border border-hairline bg-surface sm:divide-x lg:grid-cols-4"
+      className="grid grid-cols-1 gap-px overflow-hidden rounded-panel border border-hairline bg-hairline sm:grid-cols-2 lg:grid-cols-4"
     >
       {[0, 1, 2, 3].map((i) => (
-        <div key={i} className={clsx("px-5 py-4", i < 2 && "border-b border-hairline lg:border-b-0")}>
-          <Skeleton className="h-3 w-16" />
-          <Skeleton className="mt-2.5 h-6 w-14" />
-          <Skeleton className="mt-3 h-5 w-full" />
-          <Skeleton className="mt-2.5 h-3 w-12" />
+        <div key={i} className="bg-surface px-4 pb-3.5 pt-3">
+          <Skeleton className="h-2.5 w-20" />
+          <Skeleton className="mt-3 h-6 w-16" />
+          <Skeleton className="mt-3.5 h-[38px] w-full" />
+          <Skeleton className="mt-2 h-2.5 w-16" />
         </div>
       ))}
     </div>

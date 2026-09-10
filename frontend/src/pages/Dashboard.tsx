@@ -3,23 +3,21 @@ import { useNavigate } from "react-router-dom";
 import { anomaliesApi, metricsApi, machinesApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { Machine, Metric, Anomaly, LearningStatus, ANOMALY_TYPE_LABELS } from "../types";
+import { Machine, Metric, Anomaly, LearningStatus } from "../types";
 import { Verdict } from "../components/Verdict";
+import { AnomalyEvent, AnomalyTimeline } from "../components/AnomalyEvent";
 import { FreshnessTag } from "../components/FreshnessTag";
 import { StaleBanner } from "../components/StaleBanner";
 import { MetricChart } from "../components/charts/MetricChart";
-import { Severity } from "../components/ui/Badge";
-import { PageHeader, Section, Panel, DataList, DataRow, StatusDot } from "../components/ui/Layout";
+import { PageHeader, Section, Panel, PanelLabel, DataList, DataRow } from "../components/ui/Layout";
 import { VitalStrip, VitalItem, Meter } from "../components/ui/VitalStrip";
 import { Explain } from "../components/ui/Explain";
 import { Button, TextButton } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { VitalsSkeleton, Skeleton } from "../components/ui/Skeleton";
-import { health, toneOf, worstLevel } from "../lib/health";
+import { health, toneOf, worstLevel, bandFor, THRESHOLDS } from "../lib/health";
 import { bytesPerSec, formatUptime, gigabytes, pluralize, timeAgo } from "../lib/format";
 import { useStatus } from "../context/StatusContext";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 
 const MAX_CHART_POINTS = 60;
 
@@ -119,6 +117,11 @@ export function Dashboard() {
 
   // Quatro medidas, escolhidas por relevância — não por quantas cabem na tela.
   // A quarta é temperatura quando o sensor existe, senão memória virtual.
+  // A cabeça do traço só é "ao vivo" enquanto o WebSocket estiver aberto; a
+  // chave de pulso muda a cada leitura e dispara um único anel no ponto.
+  const liveHead = wsStatus === "open";
+  const pulseKey = lm?.timestamp;
+
   const vitals: VitalItem[] = lm
     ? [
         {
@@ -129,6 +132,9 @@ export function Dashboard() {
           reading: cpu,
           history: series("cpu_percent"),
           historyMax: 100,
+          band: bandFor("cpu"),
+          live: liveHead,
+          pulseKey,
           detail: lm.cpu_freq_current ? `${(lm.cpu_freq_current / 1000).toFixed(1)} GHz` : undefined,
         },
         {
@@ -139,6 +145,9 @@ export function Dashboard() {
           reading: mem,
           history: series("mem_percent"),
           historyMax: 100,
+          band: bandFor("memory"),
+          live: liveHead,
+          pulseKey,
           detail: lm.mem_total ? `${gigabytes(lm.mem_used)} / ${gigabytes(lm.mem_total, 0)}` : undefined,
         },
         {
@@ -149,6 +158,9 @@ export function Dashboard() {
           reading: disk,
           history: series("disk_percent"),
           historyMax: 100,
+          band: bandFor("disk"),
+          live: liveHead,
+          pulseKey,
           detail: lm.disk_free ? `${gigabytes(lm.disk_free, 0)} livres` : undefined,
         },
         cpuTemp !== null
@@ -158,6 +170,8 @@ export function Dashboard() {
               value: cpuTemp.toFixed(0),
               unit: "°C",
               reading: temp,
+              band: bandFor("cpuTemp"),
+              historyMax: 100,
             }
           : {
               label: "Memória virtual",
@@ -167,10 +181,25 @@ export function Dashboard() {
               reading: swap,
               history: series("swap_percent"),
               historyMax: 100,
+              band: bandFor("swap"),
+              live: liveHead,
+              pulseKey,
               detail: lm.swap_total ? `de ${gigabytes(lm.swap_total, 0)}` : undefined,
             },
       ]
     : [];
+
+  /*
+   * Qual medida está puxando o estado geral. O veredito diz "sob pressão";
+   * sem isto a pessoa precisa varrer os quatro canais para descobrir qual.
+   * Só aponta quando há de fato um desvio — em estado normal não há o que
+   * culpar, e a frase viraria ruído.
+   */
+  const driver = (() => {
+    const worst = vitals.find((v) => v.reading.level === "crit") ?? vitals.find((v) => v.reading.level === "warn");
+    if (!worst) return null;
+    return { label: worst.label.toLowerCase(), value: `${worst.value}${worst.unit ?? ""}` };
+  })();
 
   if (poll.initialLoading) {
     return (
@@ -243,6 +272,7 @@ export function Dashboard() {
           level={overall}
           openAnomalies={openAnomalies}
           learning={learning}
+          driver={driver}
           onOpenAnomaly={(id) => navigate(`/anomalies/${id}`)}
           onSeeAll={() => navigate("/anomalies")}
         />
@@ -267,7 +297,7 @@ export function Dashboard() {
           <Section title="Detalhes">
             <Panel className="grid grid-cols-1 divide-y divide-hairline md:grid-cols-3 md:divide-x md:divide-y-0">
               <div className="px-5 py-4">
-                <p className="mb-1 text-xs font-medium text-fg-3">Sistema</p>
+                <PanelLabel className="mb-2">Sistema</PanelLabel>
                 <DataList>
                   <DataRow label="Ligado há" value={formatUptime(lm.uptime_seconds)} hint={<Explain term="uptime" />} />
                   <DataRow
@@ -287,7 +317,7 @@ export function Dashboard() {
               </div>
 
               <div className="px-5 py-4">
-                <p className="mb-1 text-xs font-medium text-fg-3">Rede e disco</p>
+                <PanelLabel className="mb-2">Rede e disco</PanelLabel>
                 <DataList>
                   <DataRow label="Enviando" value={bytesPerSec(lm.net_bytes_sent)} />
                   <DataRow label="Recebendo" value={bytesPerSec(lm.net_bytes_recv)} />
@@ -302,9 +332,9 @@ export function Dashboard() {
               </div>
 
               <div className="px-5 py-4">
-                <p className="mb-1 text-xs font-medium text-fg-3">
+                <PanelLabel className="mb-2">
                   {hasBattery ? "Bateria" : gpu ? "Placa de vídeo" : "Memória virtual"}
-                </p>
+                </PanelLabel>
                 <DataList>
                   {hasBattery ? (
                     <>
@@ -368,7 +398,7 @@ export function Dashboard() {
                 coluna mostra a bateria e a placa vem numa linha própria. */}
             {hasBattery && gpu && (
               <Panel className="mt-3 px-5 py-4">
-                <p className="mb-1 text-xs font-medium text-fg-3">Placa de vídeo — {gpu.name}</p>
+                <PanelLabel className="mb-2">Placa de vídeo — {gpu.name}</PanelLabel>
                 <DataList className="md:grid md:grid-cols-3 md:gap-x-8 md:divide-y-0">
                   <DataRow
                     label="Uso"
@@ -388,10 +418,10 @@ export function Dashboard() {
 
             {lm.disk_partitions && lm.disk_partitions.length > 1 && (
               <Panel className="mt-3 px-5 py-4">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-fg-3">
+                <PanelLabel className="mb-2.5 flex items-center gap-1.5">
                   Divisões do disco
                   <Explain term="particoes" />
-                </p>
+                </PanelLabel>
                 {lm.disk_partitions.map((p) => (
                   <Meter
                     key={p.mountpoint}
@@ -411,9 +441,27 @@ export function Dashboard() {
               description={`${metrics.length} leituras · a mais recente ${timeAgo(lm.timestamp, now)}`}
             >
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <MetricChart metrics={metrics} dataKey="cpu_percent" label="Processador (%)" term="cpu" threshold={80} />
-                <MetricChart metrics={metrics} dataKey="mem_percent" label="Memória (%)" term="memoria" threshold={85} />
-                <MetricChart metrics={metrics} dataKey="disk_percent" label="Disco (%)" term="disco" threshold={85} />
+                <MetricChart
+                  metrics={metrics}
+                  dataKey="cpu_percent"
+                  label="Processador"
+                  term="cpu"
+                  threshold={THRESHOLDS.cpu.warn}
+                />
+                <MetricChart
+                  metrics={metrics}
+                  dataKey="mem_percent"
+                  label="Memória"
+                  term="memoria"
+                  threshold={THRESHOLDS.memory.warn}
+                />
+                <MetricChart
+                  metrics={metrics}
+                  dataKey="disk_percent"
+                  label="Disco"
+                  term="disco"
+                  threshold={THRESHOLDS.disk.warn}
+                />
                 <MetricChart
                   metrics={metrics}
                   dataKey="net_connections"
@@ -443,39 +491,11 @@ export function Dashboard() {
             </span>
           </p>
         ) : (
-          <ul className="divide-y divide-hairline">
+          <AnomalyTimeline>
             {machineAnomalies.slice(0, 6).map((a) => (
-              <li key={a.id}>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/anomalies/${a.id}`)}
-                  className="-mx-2 flex w-[calc(100%+1rem)] items-baseline gap-3 rounded-control px-2 py-2.5 text-left transition-colors hover:bg-sunken"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                      <span className="text-sm text-fg">{ANOMALY_TYPE_LABELS[a.anomaly_type] || a.anomaly_type}</span>
-                      {a.is_resolved ? (
-                        <span className="flex items-center gap-1.5 text-xs text-fg-3">
-                          <StatusDot tone="idle" />
-                          Resolvida
-                        </span>
-                      ) : (
-                        <Severity severity={a.severity} />
-                      )}
-                    </span>
-                    {a.explanation?.summary && (
-                      <span className="clamp-2 mt-0.5 block text-xs leading-relaxed text-fg-2">
-                        {a.explanation.summary}
-                      </span>
-                    )}
-                  </span>
-                  <span className="tnum flex-shrink-0 text-xs text-fg-3">
-                    {format(new Date(a.detected_at), "dd/MM HH:mm", { locale: ptBR })}
-                  </span>
-                </button>
-              </li>
+              <AnomalyEvent key={a.id} anomaly={a} onOpen={() => navigate(`/anomalies/${a.id}`)} />
             ))}
-          </ul>
+          </AnomalyTimeline>
         )}
       </Section>
 

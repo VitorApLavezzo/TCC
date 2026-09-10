@@ -3,16 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { anomaliesApi, machinesApi, errorMessage } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
 import { Anomaly, Machine, ANOMALY_TYPE_LABELS } from "../types";
-import { Severity } from "../components/ui/Badge";
+import { AnomalyEvent, AnomalyTimeline } from "../components/AnomalyEvent";
 import { Button, TextButton } from "../components/ui/Button";
-import { PageHeader, StatusDot } from "../components/ui/Layout";
+import { PageHeader } from "../components/ui/Layout";
 import { EmptyState } from "../components/ui/EmptyState";
 import { ListSkeleton } from "../components/ui/Skeleton";
 import { StaleBanner } from "../components/StaleBanner";
 import { useToast } from "../components/ui/Toast";
 import { pluralize } from "../lib/format";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { X } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -255,62 +253,32 @@ export function Anomalies() {
           </p>
 
           {/*
-            Lista com filete entre linhas em vez de um cartão por item. Vinte
-            cartões com borda e sombra própria fazem a página parecer um
-            mostruário; aqui a leitura corre em coluna, como numa tabela.
+            A mesma fita de eventos do painel: horário à esquerda, tique na
+            calha, conteúdo à direita. Ler a página de cima a baixo é percorrer
+            a linha do tempo das detecções.
           */}
-          <ul className="divide-y divide-hairline border-y border-hairline">
+          <AnomalyTimeline>
             {pageItems.map((a) => (
-              <li key={a.id} className="flex items-start gap-3 py-3">
-                <button
-                  type="button"
-                  onClick={() => navigate(`/anomalies/${a.id}`)}
-                  aria-label={`Abrir o aviso ${ANOMALY_TYPE_LABELS[a.anomaly_type] || a.anomaly_type} de ${machineName(a.machine_id)}`}
-                  className="-my-1 -ml-2 min-w-0 flex-1 rounded-control px-2 py-1 text-left transition-colors hover:bg-sunken"
-                >
-                  <span className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                    <span className="text-sm font-medium text-fg">
-                      {ANOMALY_TYPE_LABELS[a.anomaly_type] || a.anomaly_type}
-                    </span>
-                    {a.is_resolved ? (
-                      <span className="flex items-center gap-1.5 text-xs text-fg-3">
-                        <StatusDot tone="idle" />
-                        Resolvida
-                      </span>
-                    ) : (
-                      <Severity severity={a.severity} />
-                    )}
-                  </span>
-
-                  {a.explanation?.summary && (
-                    <span className="clamp-2 mt-1 block max-w-prose text-xs leading-relaxed text-fg-2">
-                      {a.explanation.summary}
-                    </span>
-                  )}
-
-                  <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-micro text-fg-3">
-                    <span>{machineName(a.machine_id)}</span>
-                    <span className="tnum">
-                      {format(new Date(a.detected_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                    </span>
-                    {a.responsible_process && <span className="font-mono">{a.responsible_process}</span>}
-                  </span>
-                </button>
-
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  loading={resolving === a.id}
-                  loadingLabel="..."
-                  onClick={(e) => handleResolve(e, a)}
-                  aria-label={a.is_resolved ? "Reabrir este aviso" : "Marcar este aviso como resolvido"}
-                  className="flex-shrink-0"
-                >
-                  {a.is_resolved ? "Reabrir" : "Resolver"}
-                </Button>
-              </li>
+              <AnomalyEvent
+                key={a.id}
+                anomaly={a}
+                machineName={machines.length > 1 ? machineName(a.machine_id) : undefined}
+                onOpen={() => navigate(`/anomalies/${a.id}`)}
+                action={
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={resolving === a.id}
+                    loadingLabel="..."
+                    onClick={(e) => handleResolve(e, a)}
+                    aria-label={a.is_resolved ? "Reabrir este aviso" : "Marcar este aviso como resolvido"}
+                  >
+                    {a.is_resolved ? "Reabrir" : "Resolver"}
+                  </Button>
+                }
+              />
             ))}
-          </ul>
+          </AnomalyTimeline>
 
           {totalPages > 1 && (
             <nav aria-label="Páginas de avisos" className="flex items-center justify-between gap-3">

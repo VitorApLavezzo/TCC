@@ -4,42 +4,54 @@
 
 @layer base {
   /*
-   * Um neutro frio de verdade, não um preto tingido. A interface é feita
-   * quase inteiramente destes tons; saturação é reservada a estado de saúde.
+   * Grafite neutro puro (R=G=B). Quatro degraus de superfície dão profundidade
+   * sem sombra: fundo, superfície, elevada e interativa. A única cor com peso
+   * é o estado de saúde — e o íris, reservado a interação e detecção.
+   *
+   * Todo tom de texto aqui passa de 4,5:1 sobre a superfície mais clara em
+   * que aparece, incluindo o hover. O fg-3 carrega os rótulos pequenos, que
+   * é justamente onde escurecer um degrau a mais quebraria a leitura.
    */
   :root,
   [data-theme="dark"] {
-    --canvas: 22 25 29;
-    --surface: 27 31 36;
-    --sunken: 34 39 46;
-    --hairline: 39 45 52;
-    --edge: 57 65 74;
-    --fg: 230 233 236;
-    --fg-2: 160 168 178;
-    --fg-3: 138 147 157;
-    --inverse: 236 239 242;
-    --inverse-fg: 22 25 29;
-    --accent: 122 154 214;
-    --ok: 79 169 124;
-    --warn: 217 160 54;
-    --crit: 226 104 107;
+    --canvas: 17 17 19;
+    --surface: 24 24 27;
+    --raised: 31 31 35;
+    --sunken: 39 39 44;
+    --hairline: 37 37 42;
+    --edge: 58 58 65;
+    --fg: 237 237 240;
+    --fg-2: 161 161 170;
+    --fg-3: 136 136 145;
+    --inverse: 237 237 240;
+    --inverse-fg: 17 17 19;
+    --accent: 124 122 232;
+    --ok: 82 176 130;
+    --warn: 216 158 62;
+    --crit: 226 100 104;
+    /* Opacidades da faixa do normal, calibradas por tema. */
+    --band-fill: 0.05;
+    --band-line: 0.16;
   }
 
   [data-theme="light"] {
-    --canvas: 247 248 249;
+    --canvas: 246 246 248;
     --surface: 255 255 255;
-    --sunken: 241 243 245;
-    --hairline: 227 230 233;
-    --edge: 203 209 215;
-    --fg: 26 29 33;
-    --fg-2: 91 100 110;
-    --fg-3: 107 116 126;
-    --inverse: 26 29 33;
+    --raised: 255 255 255;
+    --sunken: 240 240 243;
+    --hairline: 228 228 233;
+    --edge: 201 201 209;
+    --fg: 24 24 27;
+    --fg-2: 88 88 97;
+    --fg-3: 113 113 122;
+    --inverse: 24 24 27;
     --inverse-fg: 255 255 255;
-    --accent: 44 95 168;
-    --ok: 27 127 77;
-    --warn: 154 102 6;
-    --crit: 179 39 44;
+    --accent: 79 74 200;
+    --ok: 25 122 79;
+    --warn: 148 99 8;
+    --crit: 181 40 46;
+    --band-fill: 0.07;
+    --band-line: 0.22;
   }
 
   html {
@@ -51,18 +63,13 @@
 
   body {
     @apply bg-canvas text-fg font-sans text-base antialiased;
-    font-feature-settings: "cv05" 1;
   }
 
-  /* Todo dado numérico alinha em coluna sem recorrer a monoespaçada. */
+  /* Todo dado numérico alinha em coluna. */
   .tnum {
     font-variant-numeric: tabular-nums;
   }
 
-  /*
-   * Anel de foco único, sempre visível. Nenhum campo remove o outline sem
-   * substituto — era o que cegava a navegação por teclado.
-   */
   :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
     @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-canvas;
   }
@@ -71,10 +78,9 @@
     @apply bg-accent/25;
   }
 
-  /* Campos: uma única aparência em todo o produto. */
   .field {
     @apply w-full rounded-control border border-edge bg-surface px-3 py-2 text-base text-fg;
-    @apply placeholder:text-fg-3 focus:border-accent;
+    @apply transition-colors placeholder:text-fg-3 focus:border-accent;
   }
 
   ::-webkit-scrollbar {
@@ -87,12 +93,32 @@
   ::-webkit-scrollbar-thumb {
     @apply rounded-full border-2 border-solid border-transparent bg-edge bg-clip-content;
   }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-fg-3;
+  }
+}
+
+@layer components {
+  /*
+   * Rótulo de canal. A única caixa alta do produto — marca o que é nome de
+   * instrumento, em oposição a prosa.
+   */
+  .channel-label {
+    @apply text-micro font-semibold uppercase tracking-channel text-fg-3;
+  }
+
 }
 
 @layer utilities {
   .clamp-2 {
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }

@@ -26,12 +26,25 @@ const LEVEL_LABEL: Record<Level, string> = {
  *
  * `bg` é uma tinta de 8% em vez de um tom sólido: fundo colorido é usado só
  * na faixa de urgência de um aviso, nunca como preenchimento de painel.
+ * `border` acompanha essa tinta; `borderStrong` é a cor cheia, para quando
+ * a borda carrega o significado sozinha, sem fundo atrás.
  */
-export const LEVEL_CLASS: Record<Level, { text: string; bg: string; border: string; fill: string }> = {
-  ok: { text: "text-ok", bg: "bg-ok/8", border: "border-ok/30", fill: "bg-ok" },
-  warn: { text: "text-warn", bg: "bg-warn/8", border: "border-warn/30", fill: "bg-warn" },
-  crit: { text: "text-crit", bg: "bg-crit/8", border: "border-crit/30", fill: "bg-crit" },
-  unknown: { text: "text-fg-3", bg: "bg-sunken", border: "border-hairline", fill: "bg-fg-3" },
+export const LEVEL_CLASS: Record<
+  Level,
+  { text: string; bg: string; border: string; borderStrong: string; fill: string }
+> = {
+  ok: { text: "text-ok", bg: "bg-ok/8", border: "border-ok/30", borderStrong: "border-ok", fill: "bg-ok" },
+  warn: { text: "text-warn", bg: "bg-warn/8", border: "border-warn/30", borderStrong: "border-warn", fill: "bg-warn" },
+  crit: { text: "text-crit", bg: "bg-crit/8", border: "border-crit/30", borderStrong: "border-crit", fill: "bg-crit" },
+  unknown: {
+    text: "text-fg-2",
+    bg: "bg-sunken",
+    border: "border-hairline",
+    // `edge` e não `hairline`: numa barra de 2px o filete some contra o fundo,
+    // e severidade baixa continua precisando ser vista para ser dispensada.
+    borderStrong: "border-edge",
+    fill: "bg-fg-3",
+  },
 };
 
 export function levelLabel(level: Level) {
@@ -54,6 +67,30 @@ export function worstLevel(levels: Level[]): Level {
   return "unknown";
 }
 
+/**
+ * Os limites de cada medida, expostos para o desenho da faixa do normal.
+ *
+ * São os mesmos números que decidem o rótulo de estado — a faixa desenhada
+ * atrás do traço é, literalmente, a regra que classifica a leitura. Nenhum
+ * valor aqui é ilustrativo.
+ */
+export const THRESHOLDS: Record<string, { warn: number; crit: number; max: number }> = {
+  cpu: { warn: 80, crit: 92, max: 100 },
+  memory: { warn: 85, crit: 94, max: 100 },
+  disk: { warn: 85, crit: 95, max: 100 },
+  swap: { warn: 40, crit: 75, max: 100 },
+  cpuTemp: { warn: 75, crit: 88, max: 100 },
+  gpuTemp: { warn: 80, crit: 90, max: 100 },
+  gpuLoad: { warn: 90, crit: 97, max: 100 },
+  gpuMemory: { warn: 88, crit: 96, max: 100 },
+};
+
+/** Faixa normal de uma medida, no formato que o SignalTrace desenha. */
+export function bandFor(metric: keyof typeof THRESHOLDS): { from: number; to: number } | null {
+  const t = THRESHOLDS[metric];
+  return t ? { from: 0, to: t.warn } : null;
+}
+
 function byThreshold(value: number | null | undefined, warn: number, crit: number): Reading {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return { level: "unknown", label: LEVEL_LABEL.unknown };
@@ -62,15 +99,21 @@ function byThreshold(value: number | null | undefined, warn: number, crit: numbe
   return { level, label: LEVEL_LABEL[level] };
 }
 
+/** Aplica os limites declarados em THRESHOLDS a uma leitura. */
+function rated(metric: keyof typeof THRESHOLDS) {
+  const t = THRESHOLDS[metric];
+  return (v?: number | null) => byThreshold(v, t.warn, t.crit);
+}
+
 export const health = {
-  cpu: (v?: number | null) => byThreshold(v, 80, 92),
-  memory: (v?: number | null) => byThreshold(v, 85, 94),
-  disk: (v?: number | null) => byThreshold(v, 85, 95),
-  swap: (v?: number | null) => byThreshold(v, 40, 75),
-  cpuTemp: (v?: number | null) => byThreshold(v, 75, 88),
-  gpuTemp: (v?: number | null) => byThreshold(v, 80, 90),
-  gpuLoad: (v?: number | null) => byThreshold(v, 90, 97),
-  gpuMemory: (v?: number | null) => byThreshold(v, 88, 96),
+  cpu: rated("cpu"),
+  memory: rated("memory"),
+  disk: rated("disk"),
+  swap: rated("swap"),
+  cpuTemp: rated("cpuTemp"),
+  gpuTemp: rated("gpuTemp"),
+  gpuLoad: rated("gpuLoad"),
+  gpuMemory: rated("gpuMemory"),
 
   /** Bateria e saúde de bateria invertem: quanto menor, pior. */
   battery: (v?: number | null): Reading => {

@@ -21,15 +21,17 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
  * estado normal.
  */
 const VARIANT: Record<Variant, string> = {
-  primary: "bg-inverse text-inverse-fg font-medium hover:opacity-90",
-  secondary: "border border-edge text-fg hover:bg-sunken",
-  quiet: "text-fg-2 hover:bg-sunken hover:text-fg",
-  danger: "border border-edge text-crit hover:bg-crit/10 hover:border-crit/50",
+  primary: "bg-inverse text-inverse-fg font-medium hover:opacity-90 active:opacity-80",
+  secondary: "border border-edge text-fg hover:bg-raised hover:border-fg-3 active:bg-sunken",
+  quiet: "text-fg-2 hover:bg-raised hover:text-fg active:bg-sunken",
+  danger: "border border-edge text-crit hover:bg-crit/10 hover:border-crit/50 active:bg-crit/15",
 };
 
+// Alturas de alvo de toque: 32px e 36px. A escala anterior começava em 28px,
+// abaixo do mínimo confortavel para dedo.
 const SIZE: Record<Size, string> = {
-  sm: "h-7 gap-1.5 px-2.5 text-xs",
-  md: "h-8 gap-2 px-3 text-sm",
+  sm: "h-8 gap-1.5 px-2.5 text-xs",
+  md: "h-9 gap-2 px-3.5 text-sm",
 };
 
 export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
@@ -43,7 +45,7 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={clsx(
-        "inline-flex items-center justify-center whitespace-nowrap rounded-control transition-colors",
+        "inline-flex items-center justify-center whitespace-nowrap rounded-control transition-all duration-150",
         "disabled:cursor-not-allowed disabled:opacity-45",
         VARIANT[variant],
         SIZE[size],
@@ -78,8 +80,8 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={clsx(
-        "inline-flex h-7 w-7 items-center justify-center rounded-control transition-colors",
-        tone === "quiet" && "text-fg-3 hover:bg-sunken hover:text-fg",
+        "inline-flex h-8 w-8 items-center justify-center rounded-control transition-colors",
+        tone === "quiet" && "text-fg-3 hover:bg-raised hover:text-fg",
         tone === "danger" && "text-fg-3 hover:bg-crit/10 hover:text-crit",
         "disabled:cursor-not-allowed disabled:opacity-45",
         className

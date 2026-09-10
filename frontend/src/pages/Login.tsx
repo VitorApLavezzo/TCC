@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { authApi, errorMessage } from "../services/api";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "../components/ui/Button";
+import { Wordmark } from "../components/ui/SignalMark";
 
 export function Login() {
   const { login, loginWithToken } = useAuth();
@@ -93,10 +94,7 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center bg-canvas p-4">
       <div className="w-full max-w-[22rem]">
         <header className="mb-7">
-          <div className="flex items-center gap-2">
-            <span className="h-4 w-1 rounded-full bg-fg" aria-hidden="true" />
-            <span className="text-sm font-semibold tracking-tight text-fg">AnomalyDetect</span>
-          </div>
+          <Wordmark />
           <h1 className="mt-5 text-lg font-semibold tracking-tight text-fg">Entrar</h1>
           <p className="mt-1.5 text-sm leading-relaxed text-fg-2">
             Acompanhe a saúde dos seus computadores e entenda, em português, o que fazer quando algo sai do normal.

@@ -73,7 +73,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             className={clsx(
-              "pointer-events-auto flex items-start gap-2.5 rounded-panel border border-edge bg-surface px-3.5 py-3 shadow-float"
+              "pointer-events-auto flex animate-rise items-start gap-2.5 rounded-panel border border-edge bg-surface px-3.5 py-3 shadow-float"
             )}
           >
             <StatusDot tone={DOT[t.kind]} className="mt-1.5" />

@@ -97,7 +97,7 @@ export function BulkEnrollPanel() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="-mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-sunken"
+        className="-mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-raised"
       >
         <span>
           <span className="block text-sm font-medium text-fg">Instalar em muitos computadores de uma vez</span>

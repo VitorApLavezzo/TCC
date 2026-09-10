@@ -8,6 +8,7 @@ import { useTheme } from "../context/ThemeContext";
 import { anomaliesApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
 import { StatusDot } from "./ui/Layout";
+import { SignalMark } from "./ui/SignalMark";
 
 const NAV = [
   { to: "/", label: "Painel" },
@@ -18,10 +19,10 @@ const NAV = [
 /**
  * Shell da aplicação: navegação lateral no desktop, gaveta no celular.
  *
- * A versão anterior fixava `w-60` e `ml-60` sem nenhum breakpoint — no celular
- * a barra cobria um terço da tela e não fechava. A navegação também perdeu os
- * ícones: três itens com nomes claros não precisam de reforço pictórico, e os
- * ícones só somavam ruído numa coluna estreita.
+ * A navegação não tem ícones: três itens com nomes claros não precisam de
+ * reforço pictórico, e ícones só somariam ruído numa coluna estreita. O item
+ * ativo é marcado por um tique na íris — a mesma marca que assinala uma
+ * detecção nos gráficos.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
@@ -55,8 +56,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const nav = (
     <>
-      <div className="flex h-14 flex-shrink-0 items-center gap-2 border-b border-hairline px-4">
-        <span className="h-4 w-1 rounded-full bg-fg" aria-hidden="true" />
+      <div className="flex h-14 flex-shrink-0 items-center gap-2.5 border-b border-hairline px-4">
+        <SignalMark className="text-accent" />
         <span className="text-sm font-semibold tracking-tight text-fg">AnomalyDetect</span>
       </div>
 
@@ -70,20 +71,21 @@ export function AppShell({ children }: { children: ReactNode }) {
               to={to}
               aria-current={active ? "page" : undefined}
               className={clsx(
-                "relative flex items-center justify-between gap-2 rounded-control px-3 py-1.5 text-sm transition-colors",
-                active ? "bg-sunken font-medium text-fg" : "text-fg-2 hover:bg-sunken hover:text-fg"
+                "relative flex items-center justify-between gap-2 rounded-control py-1.5 pl-4 pr-3 text-sm transition-colors duration-150",
+                active ? "bg-raised font-medium text-fg" : "text-fg-2 hover:bg-raised hover:text-fg"
               )}
             >
-              {/* Marcador de seleção: uma barra, não um bloco colorido. */}
-              {active && (
-                <span
-                  className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent"
-                  aria-hidden="true"
-                />
-              )}
+              {/* Tique de seleção — a mesma marca que assinala uma detecção. */}
+              <span
+                className={clsx(
+                  "absolute inset-y-1.5 left-0 w-[2px] rounded-full transition-colors duration-150",
+                  active ? "bg-accent" : "bg-transparent"
+                )}
+                aria-hidden="true"
+              />
               <span>{label}</span>
               {badge !== null && (
-                <span className="tnum text-xs text-fg-3" aria-label={`${badge} em aberto`}>
+                <span className="tnum font-mono text-micro text-fg-3" aria-label={`${badge} em aberto`}>
                   {badge > 99 ? "99+" : badge}
                 </span>
               )}
@@ -102,8 +104,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Link
           to="/account"
           className={clsx(
-            "flex items-center gap-2.5 rounded-control px-3 py-2 transition-colors hover:bg-sunken",
-            location.pathname === "/account" && "bg-sunken"
+            "flex items-center gap-2.5 rounded-control px-3 py-2 transition-colors hover:bg-raised",
+            location.pathname === "/account" && "bg-raised"
           )}
         >
           <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-sunken text-micro font-semibold text-fg-2">
@@ -119,14 +121,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             type="button"
             onClick={toggle}
             aria-label={theme === "dark" ? "Usar o tema claro" : "Usar o tema escuro"}
-            className="flex h-7 w-7 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-sunken hover:text-fg"
+            className="flex h-7 w-7 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-raised hover:text-fg"
           >
             {theme === "dark" ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
           </button>
           <button
             type="button"
             onClick={handleLogout}
-            className="flex-1 rounded-control px-2 py-1.5 text-left text-xs text-fg-3 transition-colors hover:bg-sunken hover:text-fg"
+            className="flex-1 rounded-control px-2 py-1.5 text-left text-xs text-fg-3 transition-colors hover:bg-raised hover:text-fg"
           >
             Sair da conta
           </button>
@@ -150,13 +152,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           onClick={() => setDrawerOpen(true)}
           aria-label="Abrir o menu"
           aria-expanded={drawerOpen}
-          className="flex h-8 w-8 items-center justify-center rounded-control text-fg-2 hover:bg-sunken hover:text-fg"
+          className="flex h-8 w-8 items-center justify-center rounded-control text-fg-2 hover:bg-raised hover:text-fg"
         >
           <Menu size={17} aria-hidden="true" />
         </button>
-        <span className="text-sm font-semibold tracking-tight text-fg">AnomalyDetect</span>
+        <span className="flex items-center gap-2">
+          <SignalMark className="text-accent" />
+          <span className="text-sm font-semibold tracking-tight text-fg">AnomalyDetect</span>
+        </span>
         {pending > 0 && (
-          <span className="tnum ml-auto text-xs text-fg-2">
+          <span className="tnum ml-auto font-mono text-xs text-fg-2">
             {pending} {pending === 1 ? "aviso" : "avisos"}
           </span>
         )}
@@ -164,7 +169,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {drawerOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
+          <div className="absolute inset-0 bg-black/60" onClick={() => setDrawerOpen(false)} aria-hidden="true" />
           <div
             role="dialog"
             aria-modal="true"
@@ -175,7 +180,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               type="button"
               onClick={() => setDrawerOpen(false)}
               aria-label="Fechar o menu"
-              className="absolute right-2 top-3 flex h-8 w-8 items-center justify-center rounded-control text-fg-3 hover:bg-sunken hover:text-fg"
+              className="absolute right-2 top-3 flex h-8 w-8 items-center justify-center rounded-control text-fg-3 hover:bg-raised hover:text-fg"
             >
               <X size={16} aria-hidden="true" />
             </button>

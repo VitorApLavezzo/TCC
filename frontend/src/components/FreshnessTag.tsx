@@ -2,6 +2,7 @@ import { useStatus } from "../context/StatusContext";
 import { timeAgo } from "../lib/format";
 import { Explain } from "./ui/Explain";
 import { StatusDot } from "./ui/Layout";
+import { LiveDot } from "./ui/SignalTrace";
 import { WSStatus } from "../hooks/useWebSocket";
 
 /** Quantos segundos sem leitura já contam como "o agente parou". */
@@ -39,7 +40,7 @@ export function FreshnessTag({
 
   if (age < STALE_AFTER_MS) {
     return (
-      <Tag tone="ok">
+      <Tag tone="ok" breathing={wsStatus === "open"}>
         {wsStatus === "open" ? (
           <>
             Ao vivo
@@ -60,10 +61,23 @@ export function FreshnessTag({
   );
 }
 
-function Tag({ children, tone }: { children: React.ReactNode; tone: "ok" | "warn" | "idle" }) {
+/**
+ * `breathing` só é usado no estado "ao vivo": é a única animação contínua do
+ * produto, de baixa amplitude e ciclo longo. Serve para dizer que o sistema
+ * está observando agora — em qualquer outro estado ela seria só distração.
+ */
+function Tag({
+  children,
+  tone,
+  breathing,
+}: {
+  children: React.ReactNode;
+  tone: "ok" | "warn" | "idle";
+  breathing?: boolean;
+}) {
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-fg-2">
-      <StatusDot tone={tone} />
+      {breathing ? <LiveDot tone="ok" breathing /> : <StatusDot tone={tone} />}
       {children}
     </span>
   );

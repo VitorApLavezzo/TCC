@@ -5,29 +5,45 @@ import { Anomaly, Metric, ANOMALY_TYPE_LABELS } from "../types";
 import { Severity } from "../components/ui/Badge";
 import { Section, Panel, DataList, DataRow, StatusDot } from "../components/ui/Layout";
 import { Button, TextButton } from "../components/ui/Button";
+import { Disclosure } from "../components/ui/Disclosure";
+import { ActionSteps, RankedCauses } from "../components/AnomalyExplanation";
 import { Explain } from "../components/ui/Explain";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { MetricChart } from "../components/charts/MetricChart";
 import { useToast } from "../components/ui/Toast";
 import { ANOMALY_TYPE_HINTS, SEVERITY_URGENCY } from "../lib/glossary";
-import { health, LEVEL_CLASS } from "../lib/health";
+import { health, LEVEL_CLASS, THRESHOLDS } from "../lib/health";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ArrowLeft } from "lucide-react";
 
 /** Qual métrica ilustra melhor cada tipo de anomalia. */
+const CPU = { key: "cpu_percent" as keyof Metric, label: "Processador", term: "cpu", threshold: THRESHOLDS.cpu.warn };
+const MEM = { key: "mem_percent" as keyof Metric, label: "Memória", term: "memoria", threshold: THRESHOLDS.memory.warn };
+const NET = { key: "net_connections" as keyof Metric, label: "Conexões de rede", term: "conexoes" };
+
 const CHART_FOR: Record<string, { key: keyof Metric; label: string; term: string; threshold?: number }> = {
-  high_cpu: { key: "cpu_percent", label: "Processador (%)", term: "cpu", threshold: 80 },
-  cpu_loop: { key: "cpu_percent", label: "Processador (%)", term: "cpu", threshold: 80 },
-  high_memory: { key: "mem_percent", label: "Memória (%)", term: "memoria", threshold: 85 },
-  memory_leak: { key: "mem_percent", label: "Memória (%)", term: "memoria", threshold: 85 },
-  disk_full: { key: "disk_percent", label: "Disco (%)", term: "disco", threshold: 85 },
-  network_spike: { key: "net_connections", label: "Conexões de rede", term: "conexoes" },
-  ddos_indicator: { key: "net_connections", label: "Conexões de rede", term: "conexoes" },
-  resource_exhaustion: { key: "cpu_percent", label: "Processador (%)", term: "cpu", threshold: 80 },
+  high_cpu: CPU,
+  cpu_loop: CPU,
+  resource_exhaustion: CPU,
+  high_memory: MEM,
+  memory_leak: MEM,
+  disk_full: { key: "disk_percent", label: "Disco", term: "disco", threshold: THRESHOLDS.disk.warn },
+  network_spike: NET,
+  ddos_indicator: NET,
 };
 
+/**
+ * O detalhe de um aviso.
+ *
+ * A tela responde, nesta ordem: o que houve, se é urgente, o que fazer, a
+ * prova, por que aconteceu. O aprofundamento fica fechado.
+ *
+ * A ordem importa porque a IA escreve cerca de três mil caracteres por aviso.
+ * Empilhados com o mesmo peso, ninguém lê nenhum — e o primeiro passo prático
+ * ficava depois de dois parágrafos longos e de um gráfico.
+ */
 export function AnomalyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -156,8 +172,26 @@ export function AnomalyDetail() {
 
   const exp = anomaly.explanation;
   const typeLabel = ANOMALY_TYPE_LABELS[anomaly.anomaly_type] || anomaly.anomaly_type;
-  const hint = ANOMALY_TYPE_HINTS[anomaly.anomaly_type];
   const chart = CHART_FOR[anomaly.anomaly_type];
+
+  /*
+   * Uma frase de urgência, não três.
+   *
+   * Antes o selo de severidade, a frase fixa por severidade e a justificativa
+   * da IA apareciam juntas e podiam se contradizer na mesma tela: o selo dizia
+   * "Alta" enquanto a IA dizia "severidade baixa na prática". Quando a IA
+   * justificou, é a dela que vale — ela comparou com o histórico desta
+   * máquina. A frase fixa entra só enquanto a análise não chegou.
+   */
+  const verdict = exp?.severity_justification || SEVERITY_URGENCY[anomaly.severity];
+
+  /*
+   * A dica fixa do tipo só aparece enquanto não há resumo da IA. Com as duas
+   * na tela, ela repetia — e às vezes contradizia — o texto que a IA escreveu
+   * olhando os números reais desta máquina.
+   */
+  const lead = exp?.summary || ANOMALY_TYPE_HINTS[anomaly.anomaly_type];
+
   const urgency =
     anomaly.severity === "critical"
       ? LEVEL_CLASS.crit
@@ -165,15 +199,33 @@ export function AnomalyDetail() {
         ? LEVEL_CLASS.unknown
         : LEVEL_CLASS.warn;
 
+  const resolveButton = (
+    <Button variant={anomaly.is_resolved ? "secondary" : "primary"} onClick={handleResolve}>
+      {anomaly.is_resolved ? "Reabrir aviso" : "Marcar como resolvido"}
+    </Button>
+  );
+
   return (
-    <div className="max-w-3xl space-y-8">
+    <div className="max-w-3xl">
       <TextButton onClick={() => navigate("/anomalies")} className="inline-flex items-center gap-1.5 text-fg-2">
         <ArrowLeft size={12} aria-hidden="true" />
         Todos os avisos
       </TextButton>
 
-      <header className="border-b border-hairline pb-4">
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      <header className="mt-6">
+        {/*
+          Sobrancelha de detecção: o mesmo losango da fita de eventos, agora em
+          tamanho de título. Diz de saída que isto é um evento com hora marcada.
+        */}
+        <p className="flex items-center gap-2">
+          <span className="h-[7px] w-[7px] rotate-45 bg-accent" aria-hidden="true" />
+          <span className="channel-label">Detectado</span>
+          <span className="tnum font-mono text-micro text-fg-2">
+            {format(new Date(anomaly.detected_at), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}
+          </span>
+        </p>
+
+        <div className="mt-2.5 flex flex-wrap items-baseline gap-x-4 gap-y-1">
           <h1 className="text-lg font-semibold tracking-tight text-fg">{typeLabel}</h1>
           {anomaly.is_resolved ? (
             <span className="flex items-center gap-1.5 text-xs text-fg-3">
@@ -184,57 +236,77 @@ export function AnomalyDetail() {
             <Severity severity={anomaly.severity} />
           )}
         </div>
-        {hint && <p className="mt-2 max-w-prose text-sm leading-relaxed text-fg-2">{hint}</p>}
-        <p className="tnum mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-3">
-          {machineName && <span>{machineName}</span>}
-          <span>{format(new Date(anomaly.detected_at), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}</span>
-        </p>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Button variant={anomaly.is_resolved ? "secondary" : "primary"} onClick={handleResolve}>
-            {anomaly.is_resolved ? "Reabrir aviso" : "Marcar como resolvido"}
-          </Button>
-          {exp && (
-            <Button variant="quiet" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>
-              Gerar nova explicação
-            </Button>
-          )}
-        </div>
+        {(machineName || anomaly.responsible_process) && (
+          <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-3">
+            {machineName && <span>{machineName}</span>}
+            {anomaly.responsible_process && <span className="font-mono text-fg-2">{anomaly.responsible_process}</span>}
+          </p>
+        )}
       </header>
 
-      {/* Único bloco com fundo tingido da aplicação — reservado à urgência. */}
-      <p className={`rounded-panel border px-4 py-2.5 text-sm ${urgency.border} ${urgency.bg} ${urgency.text}`}>
-        {SEVERITY_URGENCY[anomaly.severity]}
-      </p>
+      <div className="mt-6 border-t border-hairline pt-5">
+        {lead ? (
+          <>
+            {/*
+              A resposta. É o único parágrafo em corpo maior da tela: quem ler
+              só isto e a linha de urgência abaixo já sabe o que houve e se
+              precisa agir hoje.
+            */}
+            <p className="max-w-prose text-md leading-relaxed text-fg">{lead}</p>
 
-      <Section title="O que aconteceu" actions={exp?.model_used ? <span className="text-micro text-fg-3">{exp.model_used}</span> : undefined}>
-        {exp ? (
-          <div className="space-y-3">
-            <p className="max-w-prose text-base leading-relaxed text-fg">{exp.summary}</p>
-            {exp.detailed_explanation && (
-              <p className="max-w-prose whitespace-pre-line text-sm leading-relaxed text-fg-2">
-                {exp.detailed_explanation}
-              </p>
-            )}
-            {exp.severity_justification && (
-              <p className="max-w-prose text-xs leading-relaxed text-fg-3">{exp.severity_justification}</p>
-            )}
-          </div>
+            {/*
+              O veredito precisa de presença: é ele que responde "é grave?".
+              A versão anterior usava uma barra de 30% de opacidade e, em
+              severidade baixa, ficava indistinguível de um parágrafo
+              indentado por acidente. Agora a barra é cheia e o rótulo diz o
+              que a frase é, para ela não se confundir com mais um texto.
+            */}
+            <div className={`mt-5 max-w-prose border-l-2 pl-4 ${urgency.borderStrong}`}>
+              <p className="channel-label">Urgência</p>
+              <p className={`mt-1 text-sm leading-relaxed ${urgency.text}`}>{verdict}</p>
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              {resolveButton}
+              {exp && (
+                <Button variant="quiet" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>
+                  Gerar nova explicação
+                </Button>
+              )}
+              {exp?.model_used && <span className="ml-auto text-micro text-fg-3">{exp.model_used}</span>}
+            </div>
+          </>
         ) : (
-          <EmptyState
-            title="A explicação em linguagem simples ainda não chegou"
-            body="Os dados técnicos abaixo já estão completos. A análise escrita depende do serviço de IA, que pode estar ocupado ou desligado."
-            action={
-              <Button variant="primary" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>
-                Gerar a explicação agora
-              </Button>
-            }
-          />
+          <>
+            <EmptyState
+              title="A explicação em linguagem simples ainda não chegou"
+              body="Os números da detecção, mais abaixo, já estão completos. A análise escrita depende do serviço de IA, que pode estar ocupado ou desligado."
+              action={
+                <Button variant="primary" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>
+                  Gerar a explicação agora
+                </Button>
+              }
+            />
+            <div className="mt-4">{resolveButton}</div>
+          </>
         )}
-      </Section>
+      </div>
 
+      {/* O acionável vem antes da prova e antes do aprofundamento. */}
+      {exp?.recommendations && exp.recommendations.length > 0 && (
+        <Section className="mt-9" title="O que fazer agora" description="Na ordem, do mais simples para o mais avançado">
+          <ActionSteps steps={exp.recommendations} />
+        </Section>
+      )}
+
+      {/* Uma pausa visual no meio do texto, e a prova do que foi dito. */}
       {chart && context.length > 1 && (
-        <Section title="O momento em que aconteceu" description="A linha vertical marca o instante da detecção">
+        <Section
+          className="mt-9"
+          title="O momento em que aconteceu"
+          description="A linha vertical marca o instante da detecção"
+        >
           <MetricChart
             metrics={context}
             dataKey={chart.key}
@@ -252,43 +324,35 @@ export function AnomalyDetail() {
         </Section>
       )}
 
-      {exp?.recommendations && exp.recommendations.length > 0 && (
-        <Section title="O que fazer agora" description="Na ordem, do mais simples para o mais avançado">
-          <ol className="divide-y divide-hairline border-y border-hairline">
-            {exp.recommendations.map((rec, i) => (
-              <li key={i} className="flex gap-3 py-3">
-                <span className="tnum w-4 flex-shrink-0 text-sm text-fg-3">{i + 1}</span>
-                <span className="max-w-prose text-sm leading-relaxed text-fg-2">{rec}</span>
-              </li>
-            ))}
-          </ol>
+      {exp?.possible_causes && exp.possible_causes.length > 0 && (
+        <Section className="mt-9" title="Por que isso pode ter acontecido" description="O sistema ordena por probabilidade">
+          <RankedCauses causes={exp.possible_causes} />
         </Section>
       )}
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <Section title="Por que isso pode ter acontecido" flush>
-          {exp?.possible_causes && exp.possible_causes.length > 0 ? (
-            <ol className="divide-y divide-hairline border-t border-hairline">
-              {exp.possible_causes.map((cause, i) => (
-                <li key={i} className="flex gap-3 py-2.5">
-                  <span className="tnum w-4 flex-shrink-0 text-sm text-fg-3">{i + 1}</span>
-                  <span className="text-sm leading-relaxed text-fg-2">{cause}</span>
-                </li>
-              ))}
-            </ol>
-          ) : exp ? (
-            <p className="border-t border-hairline pt-3 text-sm text-fg-3">
-              Analisando as causas. Esta parte atualiza sozinha quando a IA terminar.
+      {/*
+        Segundo nível: o texto longo da IA e a leitura crua. Nada foi removido
+        — mudou o momento em que aparece. Quem quer o detalhe abre; quem quer
+        resolver o problema não precisa atravessar mil e trezentos caracteres
+        para chegar ao primeiro passo.
+      */}
+      <div className="mt-10">
+        {exp?.detailed_explanation && (
+          <Disclosure title="Entenda em detalhe" note="a análise completa">
+            <p className="max-w-prose whitespace-pre-line text-sm leading-relaxed text-fg-2">
+              {exp.detailed_explanation}
             </p>
-          ) : (
-            <p className="border-t border-hairline pt-3 text-sm text-fg-3">
-              As causas prováveis vêm junto com a explicação da IA.
-            </p>
-          )}
-        </Section>
+          </Disclosure>
+        )}
 
-        <Section title="Dados da leitura" flush>
-          <Panel className="mt-3 px-4 py-2">
+        {exp && !exp.possible_causes?.length && (
+          <Disclosure title="Por que isso pode ter acontecido" note="ainda analisando">
+            <p className="text-sm text-fg-3">Analisando as causas. Esta parte atualiza sozinha quando a IA terminar.</p>
+          </Disclosure>
+        )}
+
+        <Disclosure title="Dados da leitura" note="números da detecção">
+          <Panel className="px-4 py-2">
             <DataList>
               {anomaly.affected_metrics && Object.keys(anomaly.affected_metrics).length > 0 ? (
                 Object.entries(anomaly.affected_metrics)
@@ -331,7 +395,7 @@ export function AnomalyDetail() {
               )}
             </DataList>
           </Panel>
-        </Section>
+        </Disclosure>
       </div>
     </div>
   );

@@ -2,21 +2,45 @@ import { clsx } from "clsx";
 import { Level } from "../lib/health";
 import { Anomaly, ANOMALY_TYPE_LABELS } from "../types";
 import { pluralize } from "../lib/format";
-import { StatusDot } from "./ui/Layout";
 import { TextButton } from "./ui/Button";
 import { Explain } from "./ui/Explain";
 
+/** As três zonas do estado, na ordem em que a máquina caminha entre elas. */
+const ZONES: { level: Exclude<Level, "unknown">; label: string }[] = [
+  { level: "ok", label: "normal" },
+  { level: "warn", label: "sob pressão" },
+  { level: "crit", label: "problema" },
+];
+
+const ZONE_FILL: Record<string, string> = {
+  ok: "bg-ok",
+  warn: "bg-warn",
+  crit: "bg-crit",
+};
+
+const ZONE_TEXT: Record<string, string> = {
+  ok: "text-ok",
+  warn: "text-warn",
+  crit: "text-crit",
+};
+
 /**
- * A conclusão, em uma frase, antes de qualquer número.
+ * A conclusão sobre a máquina, antes de qualquer número.
  *
- * Deixou de ser um painel colorido de destaque: agora é uma linha de texto com
- * um ponto de status. Quando está tudo bem, a tela não tem cor nenhuma — e é
- * justamente isso que faz um problema saltar quando aparece.
+ * Duas leituras em uma: a frase responde "o que está acontecendo", e a escala
+ * de três zonas responde "quão longe do normal isso está" sem exigir que a
+ * pessoa interprete uma porcentagem. As zonas são as mesmas três que o sistema
+ * usa para classificar toda medida, então não há precisão inventada: a máquina
+ * está inteiramente numa delas.
+ *
+ * Quando está tudo normal a tela não tem cor forte nenhuma — é o que faz um
+ * problema saltar sozinho quando aparece.
  */
 export function Verdict({
   level,
   openAnomalies,
   learning,
+  driver,
   onOpenAnomaly,
   onSeeAll,
 }: {
@@ -25,6 +49,8 @@ export function Verdict({
   /** Anomalias não resolvidas desta máquina, mais recente primeiro. */
   openAnomalies: Anomaly[];
   learning?: { collected: number; needed: number; ml_ready: boolean } | null;
+  /** Qual medida está puxando o estado — o "por quê" da frase. */
+  driver?: { label: string; value: string } | null;
   onOpenAnomaly: (id: number) => void;
   onSeeAll: () => void;
 }) {
@@ -60,31 +86,73 @@ export function Verdict({
           ? "A primeira leitura aparece assim que o agente enviar."
           : "Nenhum aviso em aberto neste computador.";
 
+  const activeZone = ZONES.findIndex((z) => z.level === tone);
+
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="flex items-baseline gap-2">
-          <StatusDot tone={tone === "unknown" ? "idle" : tone} className="translate-y-[-2px]" />
-          <span
-            className={clsx(
-              "text-lg font-semibold tracking-tight",
-              tone === "crit" ? "text-crit" : tone === "warn" ? "text-warn" : "text-fg"
+    <div className="grid gap-x-10 gap-y-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+      <div className="min-w-0">
+        <h2
+          className={clsx(
+            "text-xl font-semibold",
+            tone === "crit" ? "text-crit" : tone === "warn" ? "text-warn" : "text-fg"
+          )}
+        >
+          {headline}
+        </h2>
+        <p className="mt-1.5 max-w-prose text-sm leading-relaxed text-fg-2">{support}</p>
+
+        {(top || driver) && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5">
+            {driver && !openAnomalies.length && (
+              <p className="text-xs text-fg-3">
+                Puxado por <span className="text-fg-2">{driver.label}</span>{" "}
+                <span className="tnum font-mono text-fg-2">{driver.value}</span>
+              </p>
             )}
-          >
-            {headline}
-          </span>
-        </span>
-        <span className="text-sm text-fg-2">{support}</span>
-        {top && (
-          <span className="flex items-center gap-3">
-            <TextButton onClick={() => onOpenAnomaly(top.id)}>Ver o que aconteceu</TextButton>
-            {openAnomalies.length > 1 && <TextButton onClick={onSeeAll}>Ver todos</TextButton>}
-          </span>
+            {top && (
+              <>
+                <TextButton onClick={() => onOpenAnomaly(top.id)}>Ver o que aconteceu</TextButton>
+                {openAnomalies.length > 1 && <TextButton onClick={onSeeAll}>Ver todos</TextButton>}
+              </>
+            )}
+          </div>
         )}
       </div>
 
+      {/*
+        Escala de estado: as três zonas sempre visíveis, só a atual acesa.
+        Mostrar as outras é o que dá escala à informação — "sob pressão"
+        significa pouco sem "problema" desenhado logo adiante.
+      */}
+      <div
+        className="w-full sm:w-56"
+        role="img"
+        aria-label={`Estado: ${tone === "unknown" ? "sem leituras" : ZONES[activeZone]?.label}`}
+      >
+        <div className="flex gap-1">
+          {ZONES.map((z, i) => (
+            <div key={z.level} className="flex-1">
+              <div
+                className={clsx(
+                  "h-1 rounded-full transition-colors duration-500 ease-signal",
+                  i === activeZone ? ZONE_FILL[z.level] : "bg-hairline"
+                )}
+              />
+              <p
+                className={clsx(
+                  "mt-1.5 text-micro transition-colors duration-500",
+                  i === activeZone ? clsx("font-medium", ZONE_TEXT[z.level]) : "text-fg-3"
+                )}
+              >
+                {z.label}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {learning && !learning.ml_ready && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 sm:col-span-2">
           <div
             className="h-0.5 w-32 overflow-hidden rounded-full bg-sunken"
             role="progressbar"
@@ -94,12 +162,16 @@ export function Verdict({
             aria-valuemax={learning.needed}
           >
             <div
-              className="h-full bg-fg-3"
+              className="h-full bg-accent transition-[width] duration-700 ease-signal"
               style={{ width: `${Math.min((learning.collected / learning.needed) * 100, 100)}%` }}
             />
           </div>
-          <p className="tnum flex items-center gap-1.5 text-xs text-fg-3">
-            Aprendendo o normal deste computador — {learning.collected} de {learning.needed} leituras
+          <p className="flex items-center gap-1.5 text-xs text-fg-3">
+            Aprendendo o normal deste computador —{" "}
+            <span className="tnum font-mono">
+              {learning.collected} de {learning.needed}
+            </span>{" "}
+            leituras
             <Explain term="aprendizado" />
           </p>
         </div>

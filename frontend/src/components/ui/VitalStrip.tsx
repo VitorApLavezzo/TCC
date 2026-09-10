@@ -1,7 +1,7 @@
 import { clsx } from "clsx";
 import { Reading } from "../../lib/health";
 import { Explain } from "./Explain";
-import { Sparkline } from "./Sparkline";
+import { Band, SignalTrace } from "./SignalTrace";
 
 export interface VitalItem {
   label: string;
@@ -13,59 +13,69 @@ export interface VitalItem {
   detail?: string;
   history?: number[];
   historyMax?: number;
+  /** Faixa normal desta medida, desenhada atrás do traço. */
+  band?: Band | null;
   term?: string;
+  /** Marca a cabeça do traço como leitura corrente. */
+  live?: boolean;
+  /** Troque a chave a cada leitura nova para disparar o pulso. */
+  pulseKey?: number | string;
 }
 
 const TONE: Record<string, string> = {
-  ok: "text-ok",
+  ok: "text-fg-2",
   warn: "text-warn",
   crit: "text-crit",
   unknown: "text-fg-3",
 };
 
 /**
- * Painel de instrumentos: uma faixa com divisórias internas.
+ * Os sinais vitais como canais de um instrumento, não como cartões.
  *
- * A versão anterior fazia quatro cartões separados, cada um com borda, fundo
- * e sombra própria — quatro objetos disputando atenção para mostrar quatro
- * números do mesmo assunto. Aqui é um objeto só.
+ * Cada canal responde três perguntas na ordem em que elas surgem: quanto está
+ * agora (o número), se isso é bom (a palavra de estado) e como chegou até aí
+ * (o traço sobre a faixa normal). O número sozinho não diz nada a quem não
+ * sabe que 91% de memória é ruim — a faixa desenhada atrás diz.
  *
- * O número fica neutro; a cor aparece no rótulo de faixa embaixo. Assim uma
- * tela saudável não tem nenhuma cor forte, e um problema salta sozinho.
+ * O número fica neutro mesmo em atenção: a cor mora no traço que saiu da faixa
+ * e na palavra de estado. Assim uma máquina saudável não tem cor nenhuma.
  */
 export function VitalStrip({ items }: { items: VitalItem[] }) {
   return (
-    <div className="grid grid-cols-2 divide-hairline rounded-panel border border-hairline bg-surface sm:divide-x lg:grid-cols-4">
-      {items.map((item, i) => (
-        <div
-          key={item.label}
-          className={clsx(
-            "min-w-0 px-5 py-4",
-            // Divisórias horizontais só existem na quebra de duas colunas.
-            i < items.length - 2 && "border-b border-hairline lg:border-b-0",
-            i % 2 === 1 && "border-l border-hairline sm:border-l-0"
-          )}
-        >
+    <div className="grid grid-cols-1 gap-px overflow-hidden rounded-panel border border-hairline bg-hairline sm:grid-cols-2 lg:grid-cols-4">
+      {items.map((item) => (
+        <div key={item.label} className="min-w-0 bg-surface px-4 pb-3.5 pt-3">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm text-fg-2">{item.label}</span>
+            <span className="channel-label truncate">{item.label}</span>
             {item.term && <Explain term={item.term} />}
           </div>
 
-          <p className="tnum mt-2 text-2xl font-medium text-fg">
-            {item.value}
-            {item.unit && <span className="ml-1 text-base font-normal text-fg-2">{item.unit}</span>}
-          </p>
-
-          {item.history && item.history.length > 1 && (
-            <div className="mt-2.5 text-fg-3">
-              <Sparkline values={item.history} max={item.historyMax} />
-            </div>
-          )}
-
           <div className="mt-2.5 flex items-baseline justify-between gap-2">
+            <p className="tnum font-mono text-readout-sm font-medium text-fg">
+              {item.value}
+              {item.unit && <span className="ml-0.5 text-md font-normal text-fg-3">{item.unit}</span>}
+            </p>
             <span className={clsx("text-xs font-medium", TONE[item.reading.level])}>{item.reading.label}</span>
-            {item.detail && <span className="tnum truncate text-xs text-fg-3">{item.detail}</span>}
           </div>
+
+          <div className="mt-3">
+            <SignalTrace
+              values={item.history ?? []}
+              max={item.historyMax}
+              band={item.band}
+              level={item.reading.level}
+              height={38}
+              live={item.live}
+              pulseKey={item.pulseKey}
+              label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}`}
+            />
+          </div>
+
+          {item.detail && (
+            <p className="tnum mt-2 truncate font-mono text-micro text-fg-3" title={item.detail}>
+              {item.detail}
+            </p>
+          )}
         </div>
       ))}
     </div>
@@ -100,7 +110,7 @@ export function Meter({
       >
         <div
           className={clsx(
-            "h-full",
+            "h-full transition-[width] duration-700 ease-signal",
             tone === "ok" && "bg-fg-3",
             tone === "warn" && "bg-warn",
             tone === "crit" && "bg-crit",
@@ -109,8 +119,10 @@ export function Meter({
           style={{ width: `${Math.min(percent, 100)}%` }}
         />
       </div>
-      <span className="tnum w-10 flex-shrink-0 text-right text-xs text-fg">{percent.toFixed(0)}%</span>
-      {detail && <span className="tnum hidden w-24 flex-shrink-0 text-right text-xs text-fg-3 sm:block">{detail}</span>}
+      <span className="tnum w-10 flex-shrink-0 text-right font-mono text-xs text-fg">{percent.toFixed(0)}%</span>
+      {detail && (
+        <span className="tnum hidden w-24 flex-shrink-0 text-right font-mono text-xs text-fg-3 sm:block">{detail}</span>
+      )}
     </div>
   );
 }

@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from "recharts";
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ReferenceLine,
+  ReferenceArea,
+} from "recharts";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Metric } from "../../types";
@@ -12,7 +22,7 @@ interface MetricChartProps {
   unit?: string;
   domain?: [number, number];
   term?: string;
-  /** Linha tracejada marcando onde começa a faixa de atenção. */
+  /** Onde termina a faixa de comportamento normal desta medida. */
   threshold?: number;
   /** Instante a destacar — usado no detalhe do aviso. */
   markAt?: string | null;
@@ -20,7 +30,7 @@ interface MetricChartProps {
 
 /** Lê um token de cor do CSS para o Recharts, que não aceita classe utilitária. */
 function useToken(name: string) {
-  const [value, setValue] = useState("#8a939d");
+  const [value, setValue] = useState("#7a7a80");
   useEffect(() => {
     const read = () => {
       const raw = getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim();
@@ -35,18 +45,18 @@ function useToken(name: string) {
 }
 
 /**
- * Série temporal.
+ * Série temporal, com a mesma gramática do traço dos canais.
  *
- * Todas as séries usam o mesmo traço neutro: o gráfico existe para mostrar
- * forma e tendência, e dar uma cor diferente a cada métrica só faria o
- * conjunto parecer um mostruário. A única cor é a linha tracejada do limite
- * de atenção — que é informação de estado, não identidade da série.
+ * A faixa do normal é sombreada da base até o limite de atenção, e o traço
+ * segue neutro: o que a pessoa procura é a forma saindo da faixa, não uma
+ * linha bonita. Nenhuma série ganha cor própria — dar uma cor a cada métrica
+ * faria o conjunto parecer um mostruário e roubaria significado do vermelho.
  */
 export function MetricChart({ metrics, dataKey, label, unit = "%", domain, term, threshold, markAt }: MetricChartProps) {
   const line = useToken("fg-2");
   const grid = useToken("hairline");
   const axis = useToken("fg-3");
-  const warn = useToken("warn");
+  const accent = useToken("accent");
 
   const data = metrics.map((m) => ({
     time: format(new Date(m.timestamp), "HH:mm", { locale: ptBR }),
@@ -55,50 +65,82 @@ export function MetricChart({ metrics, dataKey, label, unit = "%", domain, term,
 
   const markTime = markAt ? format(new Date(markAt), "HH:mm", { locale: ptBR }) : null;
   const gradId = `grad-${String(dataKey)}`;
+  const yDomain = domain || [0, 100];
 
   const CustomTooltip = ({ active, payload, label: l }: any) => {
     if (!active || !payload?.length) return null;
+    const v = payload[0].value;
+    const out = threshold !== undefined && v > threshold;
     return (
       <div className="rounded-control border border-edge bg-surface px-2.5 py-1.5 shadow-float">
-        <p className="text-micro text-fg-3">{l}</p>
-        <p className="tnum text-sm font-medium text-fg">
-          {payload[0].value}
+        <p className="tnum font-mono text-micro text-fg-3">{l}</p>
+        <p className="tnum font-mono text-sm font-medium text-fg">
+          {v}
           {unit}
         </p>
+        {out && <p className="mt-0.5 text-micro text-warn">acima da faixa normal</p>}
       </div>
     );
   };
 
   return (
-    <div className="rounded-panel border border-hairline bg-surface px-4 pb-3 pt-3.5">
-      <div className="mb-2 flex items-center gap-1.5">
-        <h3 className="text-xs text-fg-2">{label}</h3>
-        {term && <Explain term={term} />}
+    <div className="rounded-panel border border-hairline bg-surface px-4 pb-3 pt-3">
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <h3 className="channel-label">{label}</h3>
+          {term && <Explain term={term} />}
+        </div>
+        {threshold !== undefined && (
+          <span className="tnum font-mono text-micro text-fg-3">
+            normal até {threshold}
+            {unit}
+          </span>
+        )}
       </div>
-      <ResponsiveContainer width="100%" height={128}>
+      <ResponsiveContainer width="100%" height={132}>
         <AreaChart data={data} margin={{ top: 4, right: 4, left: -26, bottom: 0 }}>
           <defs>
             <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={line} stopOpacity={0.14} />
+              <stop offset="0%" stopColor={line} stopOpacity={0.13} />
               <stop offset="100%" stopColor={line} stopOpacity={0} />
             </linearGradient>
           </defs>
+
+          {/* A faixa do normal, sombreada da base até o limite de atenção. */}
+          {threshold !== undefined && (
+            <ReferenceArea
+              y1={yDomain[0]}
+              y2={threshold}
+              fill={line}
+              fillOpacity={0.05}
+              stroke={line}
+              strokeOpacity={0.18}
+              strokeDasharray="3 3"
+              ifOverflow="extendDomain"
+            />
+          )}
+
           <CartesianGrid strokeDasharray="2 4" stroke={grid} vertical={false} />
           <XAxis
             dataKey="time"
-            tick={{ fill: axis, fontSize: 10 }}
+            tick={{ fill: axis, fontSize: 10, fontFamily: "IBM Plex Mono, monospace" }}
             tickLine={false}
             axisLine={false}
             interval="preserveStartEnd"
             minTickGap={32}
           />
-          <YAxis tick={{ fill: axis, fontSize: 10 }} tickLine={false} axisLine={false} domain={domain || [0, 100]} />
-          {threshold !== undefined && (
-            <ReferenceLine y={threshold} stroke={warn} strokeDasharray="3 3" strokeWidth={1} />
-          )}
-          {markTime && <ReferenceLine x={markTime} stroke={warn} strokeWidth={1} />}
+          <YAxis
+            tick={{ fill: axis, fontSize: 10, fontFamily: "IBM Plex Mono, monospace" }}
+            tickLine={false}
+            axisLine={false}
+            domain={yDomain}
+          />
+
+          {/* Marca do evento: mesma íris do tique de detecção no resto do produto. */}
+          {markTime && <ReferenceLine x={markTime} stroke={accent} strokeWidth={1.25} />}
+
           <Tooltip content={<CustomTooltip />} cursor={{ stroke: grid }} />
-          <Area type="monotone" dataKey="value" stroke={line} strokeWidth={1.25} fill={`url(#${gradId})`} />
+          <Area type="monotone" dataKey="value" stroke={line} strokeWidth={1.4} fill={`url(#${gradId})`} />
         </AreaChart>
       </ResponsiveContainer>
     </div>

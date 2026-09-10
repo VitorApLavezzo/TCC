@@ -6,8 +6,11 @@ import { ReactNode } from "react";
  *
  * A regra: seções são separadas por filete e espaço, não por caixas. Painel
  * com borda fica reservado a conteúdo que é mesmo um objeto — uma linha de
- * lista clicável, um estado da tela. Isso substitui o empilhamento de cards
- * dentro de cards que a versão anterior produzia.
+ * lista clicável, um estado da tela.
+ *
+ * A outra regra, tipográfica, atravessa todos estes componentes: prosa em
+ * Archivo, e tudo que a máquina mediu em IBM Plex Mono. Um valor sempre
+ * parece um valor, mesmo fora de contexto.
  */
 
 /** Cabeçalho da página: título, apoio e ação principal, fechado por filete. */
@@ -28,8 +31,8 @@ export function PageHeader({
     <header className="border-b border-hairline pb-4">
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="min-w-0">
-          <h1 className="text-md font-semibold tracking-tight text-fg">{title}</h1>
-          {description && <p className="mt-1 max-w-prose text-sm text-fg-2">{description}</p>}
+          <h1 className="text-lg font-semibold text-fg">{title}</h1>
+          {description && <p className="mt-1 max-w-prose text-sm leading-relaxed text-fg-2">{description}</p>}
         </div>
         {(actions || aside) && (
           <div className="flex flex-shrink-0 items-center gap-2">
@@ -66,7 +69,7 @@ export function Section({
       {title && (
         <div
           className={clsx(
-            "flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 pb-3.5",
+            "flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 pb-3",
             !flush && "border-b border-hairline"
           )}
         >
@@ -77,7 +80,7 @@ export function Section({
           {actions && <div className="flex flex-shrink-0 items-center gap-2">{actions}</div>}
         </div>
       )}
-      <div className={title ? "pt-5" : undefined}>{children}</div>
+      <div className={title ? "pt-4" : undefined}>{children}</div>
     </section>
   );
 }
@@ -96,7 +99,7 @@ export function Panel({
     <div
       className={clsx(
         "rounded-panel border border-hairline",
-        tone === "surface" ? "bg-surface" : "bg-sunken",
+        tone === "surface" ? "bg-surface" : "bg-raised",
         className
       )}
     >
@@ -105,9 +108,13 @@ export function Panel({
   );
 }
 
+/** Título de um bloco dentro de um painel — nome de instrumento, em caixa alta. */
+export function PanelLabel({ children, className }: { children: ReactNode; className?: string }) {
+  return <p className={clsx("channel-label", className)}>{children}</p>;
+}
+
 /**
  * Lista de definição: rótulo à esquerda, valor à direita, filete entre linhas.
- * Substitui os mini-cards que a versão anterior usava para cada medida.
  */
 export function DataList({ children, className }: { children: ReactNode; className?: string }) {
   return <dl className={clsx("divide-y divide-hairline", className)}>{children}</dl>;
@@ -127,6 +134,7 @@ export function DataRow({
   note?: string;
   tone?: "ok" | "warn" | "crit";
   hint?: ReactNode;
+  /** Identificador técnico longo — reduz o corpo para caber. */
   mono?: boolean;
 }) {
   return (
@@ -140,7 +148,7 @@ export function DataRow({
           <span
             className={clsx(
               "text-xs",
-              tone === "ok" && "text-ok",
+              tone === "ok" && "text-fg-3",
               tone === "warn" && "text-warn",
               tone === "crit" && "text-crit",
               !tone && "text-fg-3"
@@ -149,7 +157,8 @@ export function DataRow({
             {note}
           </span>
         )}
-        <span className={clsx("tnum text-sm text-fg", mono && "font-mono text-xs")}>{value}</span>
+        {/* Valor medido: sempre na face da máquina. */}
+        <span className={clsx("tnum font-mono text-fg", mono ? "text-micro" : "text-sm")}>{value}</span>
       </dd>
     </div>
   );
