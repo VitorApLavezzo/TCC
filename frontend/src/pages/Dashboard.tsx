@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { anomaliesApi, metricsApi, machinesApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { Machine, Metric, Anomaly, LearningStatus } from "../types";
+import { Machine, Metric, Anomaly, LearningStatus, LearnedBaseline } from "../types";
 import { Verdict } from "../components/Verdict";
 import { AnomalyEvent, AnomalyTimeline } from "../components/AnomalyEvent";
 import { FreshnessTag } from "../components/FreshnessTag";
@@ -13,9 +13,11 @@ import { PageHeader, Section, Panel, PanelLabel, DataList, DataRow } from "../co
 import { VitalStrip, VitalItem, Meter } from "../components/ui/VitalStrip";
 import { Explain } from "../components/ui/Explain";
 import { Button, TextButton } from "../components/ui/Button";
+import { DiagnoseButton } from "../components/DiagnoseButton";
+import { FocusModeControl } from "../components/FocusModeControl";
 import { EmptyState } from "../components/ui/EmptyState";
 import { VitalsSkeleton, Skeleton } from "../components/ui/Skeleton";
-import { health, toneOf, worstLevel, bandFor, THRESHOLDS } from "../lib/health";
+import { health, toneOf, worstLevel, bandFor, THRESHOLDS, Level } from "../lib/health";
 import { bytesPerSec, formatUptime, gigabytes, pluralize, timeAgo } from "../lib/format";
 import { useStatus } from "../context/StatusContext";
 
@@ -30,6 +32,7 @@ export function Dashboard() {
   const [latestMetric, setLatestMetric] = useState<Metric | null>(null);
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [learning, setLearning] = useState<LearningStatus | null>(null);
+  const [baseline, setBaseline] = useState<LearnedBaseline | null>(null);
   const [switching, setSwitching] = useState(false);
   const selectedRef = useRef<number | null>(null);
   selectedRef.current = selectedMachine;
@@ -55,17 +58,20 @@ export function Dashboard() {
     setMetrics([]);
     setLatestMetric(null);
     setLearning(null);
+    setBaseline(null);
 
     Promise.all([
       metricsApi.list(selectedMachine, 3).catch(() => ({ data: [] })),
       metricsApi.latest(selectedMachine).catch(() => ({ data: null })),
       metricsApi.learning(selectedMachine).catch(() => ({ data: null })),
+      metricsApi.baseline(selectedMachine).catch(() => ({ data: null })),
     ])
-      .then(([mRes, lRes, learnRes]) => {
+      .then(([mRes, lRes, learnRes, baseRes]) => {
         if (cancelled) return;
         setMetrics((mRes.data as Metric[]).slice(-MAX_CHART_POINTS));
         setLatestMetric(lRes.data);
         setLearning(learnRes.data);
+        setBaseline(baseRes.data?.ready ? baseRes.data : null);
       })
       .finally(() => !cancelled && setSwitching(false));
 
@@ -115,6 +121,30 @@ export function Dashboard() {
   const machineAnomalies = anomalies.filter((a) => !selectedMachine || a.machine_id === selectedMachine);
   const openAnomalies = machineAnomalies.filter((a) => !a.is_resolved);
 
+  /**
+   * A faixa desenhada atrás do traço: o normal APRENDIDO desta máquina nesta
+   * hora, quando já houver histórico suficiente; senão, o limite fixo de saúde.
+   *
+   * Um servidor que vive em 70% de CPU e um notebook que vive em 5% têm
+   * "normais" diferentes — e o mesmo notebook tem um normal às 3h e outro às
+   * 15h. Sair dessa faixa significa "diferente do seu normal", que não é
+   * "perigoso": por isso o desvio só ganha cor de estado quando a leitura
+   * também passa do limite de saúde (`breachTone`).
+   */
+  const bandOf = (key: string, fallback: keyof typeof THRESHOLDS, reading: { level: string }) => {
+    const learned = baseline?.metrics?.[key]?.now;
+    if (!learned || learned.fallback) {
+      return { band: bandFor(fallback), breachTone: undefined, bandLabel: undefined };
+    }
+    // Uma margem pequena evita que a oscilação normal pinte o traço o tempo todo
+    const top = Math.min(Math.max(learned.p95, learned.p50 + 3, 3), 100);
+    return {
+      band: { from: 0, to: top },
+      breachTone: (reading.level === "ok" || reading.level === "unknown" ? "unknown" : reading.level) as Level,
+      bandLabel: `normal daqui às ${String(baseline!.current_hour).padStart(2, "0")}h: até ${top.toFixed(0)}%`,
+    };
+  };
+
   // Quatro medidas, escolhidas por relevância — não por quantas cabem na tela.
   // A quarta é temperatura quando o sensor existe, senão memória virtual.
   // A cabeça do traço só é "ao vivo" enquanto o WebSocket estiver aberto; a
@@ -132,7 +162,7 @@ export function Dashboard() {
           reading: cpu,
           history: series("cpu_percent"),
           historyMax: 100,
-          band: bandFor("cpu"),
+          ...bandOf("cpu", "cpu", cpu),
           live: liveHead,
           pulseKey,
           detail: lm.cpu_freq_current ? `${(lm.cpu_freq_current / 1000).toFixed(1)} GHz` : undefined,
@@ -145,7 +175,7 @@ export function Dashboard() {
           reading: mem,
           history: series("mem_percent"),
           historyMax: 100,
-          band: bandFor("memory"),
+          ...bandOf("memory", "memory", mem),
           live: liveHead,
           pulseKey,
           detail: lm.mem_total ? `${gigabytes(lm.mem_used)} / ${gigabytes(lm.mem_total, 0)}` : undefined,
@@ -158,7 +188,7 @@ export function Dashboard() {
           reading: disk,
           history: series("disk_percent"),
           historyMax: 100,
-          band: bandFor("disk"),
+          ...bandOf("disk", "disk", disk),
           live: liveHead,
           pulseKey,
           detail: lm.disk_free ? `${gigabytes(lm.disk_free, 0)} livres` : undefined,
@@ -181,7 +211,7 @@ export function Dashboard() {
               reading: swap,
               history: series("swap_percent"),
               historyMax: 100,
-              band: bandFor("swap"),
+              ...bandOf("swap", "swap", swap),
               live: liveHead,
               pulseKey,
               detail: lm.swap_total ? `de ${gigabytes(lm.swap_total, 0)}` : undefined,
@@ -259,13 +289,16 @@ export function Dashboard() {
       />
 
       <div className="space-y-5">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
           <p className="text-sm font-medium text-fg">{machine?.name}</p>
-          <FreshnessTag
-            lastMetricAt={lm?.timestamp ?? machine?.last_seen}
-            wsStatus={wsStatus}
-            paused={machine ? !machine.is_active : false}
-          />
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            {machine && <FocusModeControl machine={machine} onChange={poll.refresh} />}
+            <FreshnessTag
+              lastMetricAt={lm?.timestamp ?? machine?.last_seen}
+              wsStatus={wsStatus}
+              paused={machine ? !machine.is_active : false}
+            />
+          </div>
         </div>
 
         <Verdict
@@ -278,6 +311,13 @@ export function Dashboard() {
         />
 
         {switching ? <VitalsSkeleton /> : lm && <VitalStrip items={vitals} />}
+
+        {machine && lm && (
+          <div className="flex flex-wrap items-center gap-3">
+            <DiagnoseButton machineId={machine.id} online={wsStatus === "open" || (!!lm && Date.now() - new Date(lm.timestamp).getTime() < 150000)} />
+            <TextButton onClick={() => navigate(`/machines/${machine.id}`)}>Ver análises deste computador</TextButton>
+          </div>
+        )}
       </div>
 
       {!switching && !lm && (

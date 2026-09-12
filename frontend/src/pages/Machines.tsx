@@ -12,6 +12,7 @@ import { useConfirm } from "../components/ui/ConfirmDialog";
 import { EnrollPanel, EnrollCode } from "../components/machines/EnrollPanel";
 import { BulkEnrollPanel } from "../components/machines/BulkEnrollPanel";
 import { MachineCard } from "../components/machines/MachineCard";
+import { FleetCompare } from "../components/machines/FleetCompare";
 import { pluralize } from "../lib/format";
 
 export function Machines() {
@@ -153,6 +154,8 @@ export function Machines() {
           ))}
         </ul>
       )}
+
+      {machines.length >= 3 && <FleetCompare />}
 
       <BulkEnrollPanel />
     </div>

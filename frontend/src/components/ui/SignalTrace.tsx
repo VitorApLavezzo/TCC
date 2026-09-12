@@ -18,6 +18,17 @@ interface Props {
   band?: Band | null;
   /** Estado atual — tinge só o trecho que saiu da faixa. */
   level?: Level;
+  /**
+   * Cor do trecho fora da faixa, quando ela não é o limite de saúde.
+   *
+   * Com a faixa aprendida da máquina, sair dela significa "diferente do seu
+   * normal", que não é o mesmo que "perigoso": 60% de CPU pode ser muito para
+   * este computador às 3h e continuar sendo saudável. Nesse caso o desvio é
+   * desenhado em neutro, e só vira cor de estado quando também passa do limite
+   * de saúde — senão o verde de "saudável" apareceria justamente para marcar
+   * uma anormalidade.
+   */
+  breachTone?: Level;
   height?: number;
   /** Cabeça do traço: onde a leitura está agora. */
   live?: boolean;
@@ -62,6 +73,7 @@ export function SignalTrace({
   min = 0,
   band,
   level = "unknown",
+  breachTone,
   height = 34,
   live,
   pulseKey,
@@ -120,7 +132,10 @@ export function SignalTrace({
 
   const last = points[points.length - 1];
   const lastY = y(last);
+  // O ponto "ao vivo" mostra o estado de saúde; o trecho fora da faixa pode ter
+  // outra leitura (ver `breachTone`).
   const tone: Level = level;
+  const breach: Level = breachTone ?? level;
 
   // strokeDasharray fica no style porque é valor de dado; a animação vem da
   // utilitaria, senão o Tailwind não emite o keyframe correspondente.
@@ -208,7 +223,7 @@ export function SignalTrace({
             d={path}
             fill="none"
             clipPath={`url(#breach-${uid})`}
-            className={clsx(STROKE[tone], drawClass)}
+            className={clsx(STROKE[breach], drawClass)}
             strokeWidth="1.75"
             strokeLinejoin="round"
             strokeLinecap="round"

@@ -8,6 +8,18 @@ export type InstallerAuth =
   | { code: string; token?: undefined }
   | { token: string; code?: undefined };
 
+/**
+ * Arquivos do agente.
+ *
+ * `CORE` é o mínimo para o agente rodar — se algum falhar, a instalação para
+ * com erro. `EXTRAS` são os sensores avançados (identidade de executáveis,
+ * arquivos-isca, caixa-preta, ações): o agente importa cada um com `try`, e um
+ * servidor de versão anterior simplesmente não os tem. Por isso a falha neles
+ * é ignorada, em vez de derrubar a instalação inteira.
+ */
+const CORE_FILES = ["agent.py", "collector.py", "privacy.py", "requirements.txt"];
+const EXTRA_FILES = ["sensors.py", "security.py", "inventory.py", "actions.py", "blackbox.py", "updater.py"];
+
 function authEnvBat(auth: InstallerAuth): string {
   return auth.code !== undefined
     ? `set "AGENT_ENROLL_CODE=${auth.code}"`
@@ -89,12 +101,15 @@ rem --- 2. Baixa os arquivos do agente ---
 mkdir "%DIR%" 2>nul
 cd /d "%DIR%"
 echo Baixando o agente do servidor...
-curl -fsS "%SERVER%/api/agent/download/agent.py" -o agent.py
-if errorlevel 1 goto :fail
-curl -fsS "%SERVER%/api/agent/download/collector.py" -o collector.py
-if errorlevel 1 goto :fail
-curl -fsS "%SERVER%/api/agent/download/requirements.txt" -o requirements.txt
-if errorlevel 1 goto :fail
+rem "if errorlevel" (sem %%) le o codigo no momento da execucao, entao funciona dentro do for
+for %%F in (${CORE_FILES.join(" ")}) do (
+    curl -fsS "%SERVER%/api/agent/download/%%F" -o "%%F"
+    if errorlevel 1 goto :fail
+)
+rem Sensores avancados: servidor antigo pode nao te-los, e o agente funciona sem
+for %%F in (${EXTRA_FILES.join(" ")}) do (
+    curl -fsS "%SERVER%/api/agent/download/%%F" -o "%%F" 2>nul
+)
 
 rem --- 3. Instala dependencias ---
 echo Instalando dependencias (pode levar alguns minutos)...
@@ -119,7 +134,11 @@ rem --- Atalho no Menu Iniciar (para reiniciar apos clicar em "Sair") ---
 copy /y "%STARTUP%\\AnomalyDetectAgent.vbs" "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\AnomalyDetect Agent.vbs" >nul
 
 rem --- 6. Encerra instancia antiga (se houver) e inicia agora ---
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*AnomalyDetect*agent.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>nul
+rem O padrao e montado em pedacos de proposito: escrito inteiro, a linha de
+rem comando deste PowerShell casaria com a propria busca e ele se mataria antes
+rem de encerrar o agente, deixando duas instancias rodando.
+powershell -NoProfile -Command "$meu=$PID; $alvo='agent'+'.py'; Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $meu -and $_.Name -match 'python' -and $_.CommandLine -like ('*'+$alvo+'*') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>nul
+ping -n 3 127.0.0.1 >nul
 wscript "%STARTUP%\\AnomalyDetectAgent.vbs"
 
 echo.
@@ -159,9 +178,13 @@ mkdir -p "$DIR"
 cd "$DIR"
 
 echo "Baixando o agente do servidor..."
-curl -fsS "$SERVER/api/agent/download/agent.py" -o agent.py
-curl -fsS "$SERVER/api/agent/download/collector.py" -o collector.py
-curl -fsS "$SERVER/api/agent/download/requirements.txt" -o requirements.txt
+for f in ${CORE_FILES.join(" ")}; do
+    curl -fsS "$SERVER/api/agent/download/$f" -o "$f"
+done
+# Sensores avançados: servidor antigo pode não tê-los, e o agente funciona sem
+for f in ${EXTRA_FILES.join(" ")}; do
+    curl -fsS "$SERVER/api/agent/download/$f" -o "$f" 2>/dev/null || true
+done
 
 echo "Instalando dependências..."
 # --system-site-packages: deixa o venv usar o PyGObject (gi) do sistema,
@@ -251,9 +274,9 @@ if errorlevel 1 (
 
 mkdir "%DIR%" 2>nul
 cd /d "%DIR%"
-curl -fsS "%SERVER%/api/agent/download/agent.py" -o agent.py >> "%LOG%" 2>&1
-curl -fsS "%SERVER%/api/agent/download/collector.py" -o collector.py >> "%LOG%" 2>&1
-curl -fsS "%SERVER%/api/agent/download/requirements.txt" -o requirements.txt >> "%LOG%" 2>&1
+for %%F in (${[...CORE_FILES, ...EXTRA_FILES].join(" ")}) do (
+    curl -fsS "%SERVER%/api/agent/download/%%F" -o "%%F" >> "%LOG%" 2>&1
+)
 python -m pip install --quiet --disable-pip-version-check -r requirements.txt >> "%LOG%" 2>&1
 
 set "AGENT_API_URL=%SERVER%"
@@ -302,9 +325,9 @@ $installScript = {
     $dir = "$env:ProgramData\\AnomalyDetect"
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     Set-Location $dir
-    Invoke-WebRequest "$server/api/agent/download/agent.py" -OutFile agent.py -UseBasicParsing
-    Invoke-WebRequest "$server/api/agent/download/collector.py" -OutFile collector.py -UseBasicParsing
-    Invoke-WebRequest "$server/api/agent/download/requirements.txt" -OutFile requirements.txt -UseBasicParsing
+    foreach ($f in @(${[...CORE_FILES, ...EXTRA_FILES].map((f) => `"${f}"`).join(", ")})) {
+        try { Invoke-WebRequest "$server/api/agent/download/$f" -OutFile $f -UseBasicParsing } catch {}
+    }
     python -m pip install --quiet --disable-pip-version-check -r requirements.txt
 
     $env:AGENT_API_URL = $server
@@ -368,22 +391,55 @@ echo   AnomalyDetect - Removendo o monitoramento
 echo ============================================
 echo.
 
-echo Encerrando o agente...
-powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*AnomalyDetect*agent.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>nul
+echo [1/4] Encerrando o agente...
+rem O filtro do processo NAO pode conter as palavras que ele procura: a linha de
+rem comando do proprio PowerShell conteria o padrao, ele se encontraria na busca
+rem e se mataria antes de encerrar o agente (foi exatamente o que acontecia).
+rem Por isso o padrao e montado em pedacos, e o proprio PID fica de fora.
+powershell -NoProfile -Command "$meu=$PID; $alvo='agent'+'.py'; Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $meu -and $_.Name -match 'python' -and $_.CommandLine -like ('*'+$alvo+'*') } | ForEach-Object { Write-Host ('  encerrando PID '+$_.ProcessId); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+rem Da tempo de o processo soltar os arquivos antes de apagar a pasta
+ping -n 3 127.0.0.1 >nul
 
-echo Removendo este computador do painel...
-curl -fsS -X DELETE "${serverUrl}/api/agent/self" -H "X-Agent-Token: ${token}" >nul 2>nul
-
-echo Apagando os arquivos...
-rmdir /s /q "%LOCALAPPDATA%\\AnomalyDetect" 2>nul
+echo [2/4] Removendo a inicializacao automatica...
 del /f /q "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\AnomalyDetectAgent.vbs" 2>nul
 del /f /q "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\AnomalyDetect Agent.vbs" 2>nul
+schtasks /delete /tn "AnomalyDetect Agent" /f >nul 2>nul
+
+echo [3/4] Removendo este computador do painel...
+curl -fsS -X DELETE "${serverUrl}/api/agent/self" -H "X-Agent-Token: ${token}" >nul 2>nul
+if errorlevel 1 echo   (sem resposta do servidor - remova pela lixeira no painel, se aparecer)
+
+echo [4/4] Apagando os arquivos...
+set "SOBROU="
+rem Arquivos-isca criados nas pastas pessoais
+for %%D in ("%USERPROFILE%\\Documents" "%USERPROFILE%\\Documentos" "%USERPROFILE%\\Pictures" "%USERPROFILE%\\Imagens") do (
+    if exist "%%~D\\_AnomalyDetect_protecao" rmdir /s /q "%%~D\\_AnomalyDetect_protecao"
+)
+rem As duas pastas possiveis: instalacao normal e instalacao em massa (GPO)
+for %%P in ("%LOCALAPPDATA%\\AnomalyDetect" "%ProgramData%\\AnomalyDetect") do (
+    if exist "%%~P" (
+        rmdir /s /q "%%~P"
+        if exist "%%~P" set "SOBROU=%%~P"
+    )
+)
 
 echo.
-echo ============================================
-echo   Pronto! O monitoramento foi removido e o
-echo   computador ja sumiu do painel.
-echo ============================================
+if defined SOBROU (
+    echo ============================================
+    echo   ATENCAO: nao consegui apagar:
+    echo   %SOBROU%
+    echo.
+    echo   Isso costuma ser porque o agente ainda esta
+    echo   rodando ou a pasta exige administrador.
+    echo   Clique com o botao direito neste arquivo e
+    echo   escolha "Executar como administrador".
+    echo ============================================
+) else (
+    echo ============================================
+    echo   Pronto! O monitoramento foi removido e o
+    echo   computador ja sumiu do painel.
+    echo ============================================
+)
 pause
 `;
   return script.replace(/\n/g, "\r\n");
@@ -405,6 +461,10 @@ curl -fsS -X DELETE "${serverUrl}/api/agent/self" -H "X-Agent-Token: ${token}" >
 
 echo "Apagando os arquivos..."
 rm -rf "$HOME/.anomalydetect"
+# Pastas de arquivos-isca criadas nas pastas pessoais
+for d in "$HOME/Documents" "$HOME/Documentos" "$HOME/Pictures" "$HOME/Imagens"; do
+    rm -rf "$d/_AnomalyDetect_protecao"
+done
 rm -f "$HOME/.config/autostart/anomalydetect-agent.desktop"
 rm -f "$HOME/.local/share/applications/anomalydetect-agent.desktop"
 systemctl --user disable --now anomalydetect-agent 2>/dev/null || true

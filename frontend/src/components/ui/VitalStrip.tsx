@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import { Reading } from "../../lib/health";
+import { Level, Reading } from "../../lib/health";
 import { Explain } from "./Explain";
 import { Band, SignalTrace } from "./SignalTrace";
 
@@ -15,6 +15,10 @@ export interface VitalItem {
   historyMax?: number;
   /** Faixa normal desta medida, desenhada atrás do traço. */
   band?: Band | null;
+  /** Cor do trecho fora da faixa, quando a faixa é o normal aprendido. */
+  breachTone?: Level;
+  /** De onde vem a faixa: "normal daqui às 15h: até 42%". */
+  bandLabel?: string;
   term?: string;
   /** Marca a cabeça do traço como leitura corrente. */
   live?: boolean;
@@ -64,16 +68,24 @@ export function VitalStrip({ items }: { items: VitalItem[] }) {
               max={item.historyMax}
               band={item.band}
               level={item.reading.level}
+              breachTone={item.breachTone}
               height={38}
               live={item.live}
               pulseKey={item.pulseKey}
-              label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}`}
+              label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}${
+                item.bandLabel ? `. ${item.bandLabel}` : ""
+              }`}
             />
           </div>
 
-          {item.detail && (
-            <p className="tnum mt-2 truncate font-mono text-micro text-fg-3" title={item.detail}>
-              {item.detail}
+          {(item.detail || item.bandLabel) && (
+            <p className="tnum mt-2 truncate font-mono text-micro text-fg-3" title={item.bandLabel ?? item.detail}>
+              {item.detail ?? item.bandLabel}
+            </p>
+          )}
+          {item.detail && item.bandLabel && (
+            <p className="mt-0.5 truncate text-micro text-fg-3" title={item.bandLabel}>
+              {item.bandLabel}
             </p>
           )}
         </div>

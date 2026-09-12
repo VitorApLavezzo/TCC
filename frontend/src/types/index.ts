@@ -18,6 +18,15 @@ export interface Machine {
   last_seen?: string;
   owner_id: number;
   created_at: string;
+  os_pretty?: string;
+  system_info?: Record<string, any>;
+  agent_version?: string;
+  ai_privacy?: "any" | "local_only" | "no_ai";
+  focus_mode_until?: string;
+  focus_mode_reason?: string;
+  network_isolated?: boolean;
+  collection_interval?: number;
+  is_demo?: boolean;
 }
 
 export interface GPUMetric {
@@ -81,6 +90,30 @@ export interface Metric {
   battery_cycle_count?: number;
 }
 
+export interface EvidenceFact {
+  label: string;
+  value: number;
+  unit: string;
+}
+
+export interface Verification {
+  claims: number;
+  verified: number;
+  unverified: string[];
+  passed: boolean;
+}
+
+export interface Counterfactual {
+  process: string;
+  instances: number;
+  mem_now: number;
+  mem_after: number;
+  cpu_now: number;
+  cpu_after: number;
+  mem_freed_gb: number;
+  sentence: string;
+}
+
 export interface AIExplanation {
   id: number;
   summary: string;
@@ -90,6 +123,39 @@ export interface AIExplanation {
   severity_justification?: string;
   model_used?: string;
   generated_at: string;
+  language_level?: LanguageLevel;
+  variants?: Record<string, ExplanationVariant>;
+  evidence?: Record<string, EvidenceFact>;
+  verification?: Verification | null;
+  counterfactual?: Counterfactual | null;
+  data_destination?: "local" | "cloud" | "none";
+  provider_attempts?: { provider: string; destination: string; ok: boolean; duration_ms: number; error?: string }[];
+  user_rating?: number;
+  judge_scores?: Record<string, number> & { comentario?: string };
+}
+
+export interface ExplanationVariant {
+  summary: string;
+  detailed_explanation?: string;
+  possible_causes?: string[];
+  recommendations?: string[];
+  severity_justification?: string;
+  model_used?: string;
+}
+
+export type LanguageLevel = "leigo" | "intermediario" | "tecnico";
+
+export interface StepProgress {
+  step_index: number;
+  status: "done" | "not_helped" | "skipped" | "pending";
+  extra?: boolean;
+}
+
+export interface ExtraStep {
+  text: string;
+  last_resort?: boolean;
+  model_used?: string;
+  after_step?: number;
 }
 
 export interface Anomaly {
@@ -105,6 +171,70 @@ export interface Anomaly {
   is_resolved: boolean;
   resolved_at?: string;
   explanation?: AIExplanation;
+  source?: string;
+  incident_id?: number;
+  related_signals?: { signals: string[]; others: any[] };
+  feedback?: "normal" | "problem";
+  resolution_cause?: string;
+  verification_status?: "watching" | "confirmed" | "failed" | "unverifiable";
+  verification_note?: string;
+  verified_at?: string;
+  steps_progress?: StepProgress[];
+  extra_steps?: ExtraStep[];
+}
+
+export interface IncidentChainNode {
+  signal: string;
+  label: string;
+  role: string;
+}
+
+export interface Incident {
+  id: number;
+  title?: string;
+  severity: string;
+  is_open: boolean;
+  started_at: string;
+  last_activity_at: string;
+  chain?: { nodes: IncidentChainNode[]; edges: { from: string; to: string; because: string }[]; roots: string[] };
+  narrative?: string;
+}
+
+export interface Notification {
+  id: number;
+  kind: string;
+  severity: string;
+  title: string;
+  body?: string;
+  link?: string;
+  status: string;
+  status_reason?: string;
+  created_at: string;
+  sent_at?: string;
+  read_at?: string;
+  anomaly_id?: number;
+  /** Por onde saiu de fato: {"panel":"ok","telegram":"ok"}. */
+  channels?: Record<string, string>;
+}
+
+export interface ChatMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  status: "pending" | "done" | "failed";
+  tool_trace?: { tool: string; args: any; result_preview: string }[];
+  model_used?: string;
+  created_at: string;
+  conversation_id: string;
+  machine_id?: number;
+}
+
+export interface DiagnosticResult {
+  id: number;
+  status: "collecting" | "analyzing" | "done" | "failed";
+  summary?: any;
+  answer?: { headline: string; culprit?: string | null; explanation: string; actions: string[] };
+  model_used?: string;
 }
 
 export interface AnomalyStats {
@@ -129,7 +259,36 @@ export const ANOMALY_TYPE_LABELS: Record<string, string> = {
   resource_abuse: "Programa Gastando Mais que o Normal",
   behavioral_change: "Mudança Brusca de Comportamento",
   behavioral_anomaly: "Comportamento Fora do Padrão",
+  disk_activity: "Disco Trabalhando Sem Parar",
+  disk_space_change: "Espaço em Disco Mudou de Repente",
+  process_surge: "Muitos Programas Abrindo de Uma Vez",
+  gpu_anomaly: "Placa de Vídeo Fora do Padrão",
+  unusual_time: "Atividade em Horário Incomum",
+  thermal_throttling: "Processador Reduzindo a Velocidade por Calor",
+  cooling_degradation: "Refrigeração Perdendo Eficiência",
+  unexpected_shutdown: "Desligamento Inesperado",
+  disk_health: "Disco com Sinais de Desgaste",
+  hardware_errors: "Erros de Hardware Registrados",
+  process_masquerading: "Programa Disfarçado de Arquivo do Sistema",
+  suspicious_parent: "Documento Abrindo Ferramenta do Sistema",
+  suspicious_command: "Comando Suspeito em Execução",
+  ransomware_canary: "Arquivo-Isca Alterado (Possível Sequestro de Dados)",
+  beaconing: "Programa Contatando a Internet em Intervalos Regulares",
+  disk_forecast: "Disco Vai Encher em Breve",
+  outbreak_suspected: "Mesmo Programa Surgindo em Vários Computadores",
   unknown: "Anomalia Desconhecida",
+};
+
+/** Tipos de segurança — recebem um selo distinto e nunca são silenciados por engano. */
+export const SECURITY_TYPES = new Set([
+  "unknown_process", "suspicious_process", "malware_pattern", "process_masquerading", "suspicious_parent",
+  "suspicious_command", "ransomware_canary", "beaconing", "ddos_indicator", "outbreak_suspected",
+]);
+
+export const LANGUAGE_LEVEL_LABELS: Record<LanguageLevel, string> = {
+  leigo: "Simples",
+  intermediario: "Intermediário",
+  tecnico: "Técnico",
 };
 
 /** Quanto o sistema já aprendeu sobre uma máquina. */
@@ -138,6 +297,26 @@ export interface LearningStatus {
   needed: number;
   ml_ready: boolean;
   retrain_every: number;
+  model?: { threshold: number; samples: number; trained_at: string } | null;
+}
+
+export interface BaselineBand {
+  hour: number;
+  p5: number;
+  p50: number;
+  p95: number;
+  n: number;
+  /** true = não houve leituras bastantes nesta hora; vale a faixa geral. */
+  fallback: boolean;
+}
+
+/** O normal aprendido de uma máquina, por métrica e por hora do dia. */
+export interface LearnedBaseline {
+  ready: boolean;
+  readings: number;
+  days: number;
+  current_hour: number;
+  metrics: Record<string, { overall: BaselineBand; by_hour: BaselineBand[]; now: BaselineBand }>;
 }
 
 export const SEVERITY_LABELS: Record<string, string> = {

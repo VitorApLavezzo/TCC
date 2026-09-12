@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { anomaliesApi, explanationsApi, machinesApi, metricsApi, errorMessage } from "../services/api";
-import { Anomaly, Metric, ANOMALY_TYPE_LABELS } from "../types";
+import { Anomaly, Machine, Metric, Incident, ANOMALY_TYPE_LABELS, SECURITY_TYPES, LanguageLevel } from "../types";
 import { Severity } from "../components/ui/Badge";
 import { Section, Panel, DataList, DataRow, StatusDot } from "../components/ui/Layout";
 import { Button, TextButton } from "../components/ui/Button";
 import { Disclosure } from "../components/ui/Disclosure";
-import { ActionSteps, RankedCauses } from "../components/AnomalyExplanation";
+import { RankedCauses } from "../components/AnomalyExplanation";
 import { Explain } from "../components/ui/Explain";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -14,46 +14,49 @@ import { MetricChart } from "../components/charts/MetricChart";
 import { useToast } from "../components/ui/Toast";
 import { ANOMALY_TYPE_HINTS, SEVERITY_URGENCY } from "../lib/glossary";
 import { health, LEVEL_CLASS, THRESHOLDS } from "../lib/health";
+import { Feedback, VerificationTag } from "../components/anomaly/Feedback";
+import { AdaptiveSteps } from "../components/anomaly/AdaptiveSteps";
+import { AnomalyActions } from "../components/anomaly/Actions";
+import { IncidentChain } from "../components/anomaly/IncidentChain";
+import { ShareButton } from "../components/anomaly/ShareButton";
+import { Replay } from "../components/anomaly/Replay";
+import {
+  CounterfactualCard,
+  VerificationBadge,
+  DestinationTag,
+  LanguageLevelSwitch,
+  RatingButtons,
+} from "../components/anomaly/ExplanationExtras";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ShieldAlert } from "lucide-react";
 
-/** Qual métrica ilustra melhor cada tipo de anomalia. */
 const CPU = { key: "cpu_percent" as keyof Metric, label: "Processador", term: "cpu", threshold: THRESHOLDS.cpu.warn };
 const MEM = { key: "mem_percent" as keyof Metric, label: "Memória", term: "memoria", threshold: THRESHOLDS.memory.warn };
 const NET = { key: "net_connections" as keyof Metric, label: "Conexões de rede", term: "conexoes" };
 
 const CHART_FOR: Record<string, { key: keyof Metric; label: string; term: string; threshold?: number }> = {
-  high_cpu: CPU,
-  cpu_loop: CPU,
-  resource_exhaustion: CPU,
-  high_memory: MEM,
-  memory_leak: MEM,
+  high_cpu: CPU, cpu_loop: CPU, resource_exhaustion: CPU, thermal_throttling: CPU,
+  high_memory: MEM, memory_leak: MEM,
   disk_full: { key: "disk_percent", label: "Disco", term: "disco", threshold: THRESHOLDS.disk.warn },
-  network_spike: NET,
-  ddos_indicator: NET,
+  disk_forecast: { key: "disk_percent", label: "Disco", term: "disco", threshold: THRESHOLDS.disk.warn },
+  network_spike: NET, ddos_indicator: NET,
 };
 
-/**
- * O detalhe de um aviso.
- *
- * A tela responde, nesta ordem: o que houve, se é urgente, o que fazer, a
- * prova, por que aconteceu. O aprofundamento fica fechado.
- *
- * A ordem importa porque a IA escreve cerca de três mil caracteres por aviso.
- * Empilhados com o mesmo peso, ninguém lê nenhum — e o primeiro passo prático
- * ficava depois de dois parágrafos longos e de um gráfico.
- */
 export function AnomalyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const toast = useToast();
   const [anomaly, setAnomaly] = useState<Anomaly | null>(null);
-  const [machineName, setMachineName] = useState("");
+  const [machine, setMachine] = useState<Machine | null>(null);
+  const [incident, setIncident] = useState<Incident | null>(null);
+  const [blackboxId, setBlackboxId] = useState<number | null>(null);
   const [context, setContext] = useState<Metric[]>([]);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [level, setLevel] = useState<LanguageLevel>("leigo");
+  const [variant, setVariant] = useState<any | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = () => {
@@ -64,20 +67,22 @@ export function AnomalyDetail() {
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-
     anomaliesApi
       .get(Number(id))
       .then((res) => {
         if (cancelled) return;
         const a: Anomaly = res.data;
         setAnomaly(a);
-
-        machinesApi
-          .get(a.machine_id)
-          .then((mr) => !cancelled && setMachineName(mr.data.name))
+        setLevel(a.explanation?.language_level ?? "leigo");
+        machinesApi.get(a.machine_id).then((mr) => !cancelled && setMachine(mr.data)).catch(() => {});
+        anomaliesApi
+          .context(a.id)
+          .then((cr) => {
+            if (cancelled) return;
+            setIncident(cr.data.incident);
+            setBlackboxId(cr.data.blackbox?.id ?? null);
+          })
           .catch(() => {});
-
-        // Janela em volta da detecção, para o gráfico mostrar o pico.
         const hoursAgo = Math.ceil((Date.now() - new Date(a.detected_at).getTime()) / 3600000) + 2;
         metricsApi
           .list(a.machine_id, Math.min(Math.max(hoursAgo, 3), 168))
@@ -86,14 +91,12 @@ export function AnomalyDetail() {
       })
       .catch(() => !cancelled && setNotFound(true))
       .finally(() => !cancelled && setLoading(false));
-
     return () => {
       cancelled = true;
       stopPolling();
     };
   }, [id]);
 
-  // Enquanto a IA não devolve as causas, recarrega sozinho.
   useEffect(() => {
     if (!anomaly) return;
     if ((anomaly.explanation?.possible_causes?.length ?? 0) > 0) {
@@ -109,7 +112,7 @@ export function AnomalyDetail() {
           stopPolling();
         }
       } catch {
-        // Falha momentânea: a próxima tentativa continua daqui.
+        /* tenta de novo */
       }
     }, 4000);
     return () => stopPolling();
@@ -121,25 +124,24 @@ export function AnomalyDetail() {
     try {
       const res = await explanationsApi.regenerate(anomaly.id);
       setAnomaly((prev) => (prev ? { ...prev, explanation: res.data } : prev));
+      setVariant(null);
+      setLevel(res.data.language_level ?? "leigo");
       toast.success("Explicação gerada.");
     } catch (err) {
-      toast.error(
-        errorMessage(err, "Não foi possível gerar a explicação."),
-        "O serviço de IA pode estar indisponível. As causas aparecem assim que ele responder."
-      );
+      toast.error(errorMessage(err, "Não foi possível gerar a explicação."));
     } finally {
       setRegenerating(false);
     }
   }, [anomaly, toast]);
 
-  const handleResolve = async () => {
+  const handleResolveToggle = async () => {
     if (!anomaly) return;
     try {
       const res = await anomaliesApi.resolve(anomaly.id, !anomaly.is_resolved);
       setAnomaly(res.data);
       toast.success(anomaly.is_resolved ? "Aviso reaberto." : "Aviso resolvido.");
     } catch (err) {
-      toast.error(errorMessage(err, "Não foi possível mudar o estado deste aviso."));
+      toast.error(errorMessage(err));
     }
   };
 
@@ -160,50 +162,21 @@ export function AnomalyDetail() {
         <EmptyState
           title="Este aviso não existe mais"
           body="Ele pode ter sido removido junto com o computador a que pertencia."
-          action={
-            <Button variant="primary" onClick={() => navigate("/anomalies")}>
-              Voltar para os avisos
-            </Button>
-          }
+          action={<Button variant="primary" onClick={() => navigate("/anomalies")}>Voltar para os avisos</Button>}
         />
       </div>
     );
   }
 
   const exp = anomaly.explanation;
+  const shown = variant ?? exp;
   const typeLabel = ANOMALY_TYPE_LABELS[anomaly.anomaly_type] || anomaly.anomaly_type;
   const chart = CHART_FOR[anomaly.anomaly_type];
-
-  /*
-   * Uma frase de urgência, não três.
-   *
-   * Antes o selo de severidade, a frase fixa por severidade e a justificativa
-   * da IA apareciam juntas e podiam se contradizer na mesma tela: o selo dizia
-   * "Alta" enquanto a IA dizia "severidade baixa na prática". Quando a IA
-   * justificou, é a dela que vale — ela comparou com o histórico desta
-   * máquina. A frase fixa entra só enquanto a análise não chegou.
-   */
-  const verdict = exp?.severity_justification || SEVERITY_URGENCY[anomaly.severity];
-
-  /*
-   * A dica fixa do tipo só aparece enquanto não há resumo da IA. Com as duas
-   * na tela, ela repetia — e às vezes contradizia — o texto que a IA escreveu
-   * olhando os números reais desta máquina.
-   */
-  const lead = exp?.summary || ANOMALY_TYPE_HINTS[anomaly.anomaly_type];
-
+  const isSecurity = SECURITY_TYPES.has(anomaly.anomaly_type);
+  const verdict = shown?.severity_justification || SEVERITY_URGENCY[anomaly.severity];
+  const lead = shown?.summary || ANOMALY_TYPE_HINTS[anomaly.anomaly_type];
   const urgency =
-    anomaly.severity === "critical"
-      ? LEVEL_CLASS.crit
-      : anomaly.severity === "low"
-        ? LEVEL_CLASS.unknown
-        : LEVEL_CLASS.warn;
-
-  const resolveButton = (
-    <Button variant={anomaly.is_resolved ? "secondary" : "primary"} onClick={handleResolve}>
-      {anomaly.is_resolved ? "Reabrir aviso" : "Marcar como resolvido"}
-    </Button>
-  );
+    anomaly.severity === "critical" ? LEVEL_CLASS.crit : anomaly.severity === "low" ? LEVEL_CLASS.unknown : LEVEL_CLASS.warn;
 
   return (
     <div className="max-w-3xl">
@@ -213,10 +186,6 @@ export function AnomalyDetail() {
       </TextButton>
 
       <header className="mt-6">
-        {/*
-          Sobrancelha de detecção: o mesmo losango da fita de eventos, agora em
-          tamanho de título. Diz de saída que isto é um evento com hora marcada.
-        */}
         <p className="flex items-center gap-2">
           <span className="h-[7px] w-[7px] rotate-45 bg-accent" aria-hidden="true" />
           <span className="channel-label">Detectado</span>
@@ -224,9 +193,14 @@ export function AnomalyDetail() {
             {format(new Date(anomaly.detected_at), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}
           </span>
         </p>
-
-        <div className="mt-2.5 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1">
           <h1 className="text-lg font-semibold tracking-tight text-fg">{typeLabel}</h1>
+          {isSecurity && (
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-crit">
+              <ShieldAlert size={12} aria-hidden="true" />
+              Segurança
+            </span>
+          )}
           {anomaly.is_resolved ? (
             <span className="flex items-center gap-1.5 text-xs text-fg-3">
               <StatusDot tone="idle" />
@@ -236,11 +210,13 @@ export function AnomalyDetail() {
             <Severity severity={anomaly.severity} />
           )}
         </div>
-
-        {(machineName || anomaly.responsible_process) && (
+        {(machine?.name || anomaly.responsible_process) && (
           <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-3">
-            {machineName && <span>{machineName}</span>}
+            {machine?.name && <span>{machine.name}</span>}
             {anomaly.responsible_process && <span className="font-mono text-fg-2">{anomaly.responsible_process}</span>}
+            {anomaly.source && anomaly.source !== "behavior" && anomaly.source !== "ml" && (
+              <span className="text-fg-3">via {anomaly.source === "forecast" ? "previsão" : anomaly.source === "fleet" ? "comparação entre computadores" : anomaly.source === "agent_event" ? "evento do computador" : anomaly.source}</span>
+            )}
           </p>
         )}
       </header>
@@ -248,65 +224,72 @@ export function AnomalyDetail() {
       <div className="mt-6 border-t border-hairline pt-5">
         {lead ? (
           <>
-            {/*
-              A resposta. É o único parágrafo em corpo maior da tela: quem ler
-              só isto e a linha de urgência abaixo já sabe o que houve e se
-              precisa agir hoje.
-            */}
             <p className="max-w-prose text-md leading-relaxed text-fg">{lead}</p>
 
-            {/*
-              O veredito precisa de presença: é ele que responde "é grave?".
-              A versão anterior usava uma barra de 30% de opacidade e, em
-              severidade baixa, ficava indistinguível de um parágrafo
-              indentado por acidente. Agora a barra é cheia e o rótulo diz o
-              que a frase é, para ela não se confundir com mais um texto.
-            */}
             <div className={`mt-5 max-w-prose border-l-2 pl-4 ${urgency.borderStrong}`}>
               <p className="channel-label">Urgência</p>
               <p className={`mt-1 text-sm leading-relaxed ${urgency.text}`}>{verdict}</p>
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center gap-2">
-              {resolveButton}
-              {exp && (
-                <Button variant="quiet" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>
-                  Gerar nova explicação
-                </Button>
-              )}
-              {exp?.model_used && <span className="ml-auto text-micro text-fg-3">{exp.model_used}</span>}
+            <VerificationTag anomaly={anomaly} />
+
+            <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2">
+              {exp && <LanguageLevelSwitch anomaly={anomaly} current={level} onVariant={(l, v) => { setLevel(l); setVariant(v); }} />}
+              {exp && <RatingButtons anomaly={anomaly} />}
+              <span className="ml-auto flex items-center gap-3">
+                <VerificationBadge verification={exp?.verification} />
+                <DestinationTag destination={exp?.data_destination} provider={shown?.model_used} />
+              </span>
             </div>
+
+            <Feedback anomaly={anomaly} onChange={setAnomaly} />
           </>
         ) : (
-          <>
-            <EmptyState
-              title="A explicação em linguagem simples ainda não chegou"
-              body="Os números da detecção, mais abaixo, já estão completos. A análise escrita depende do serviço de IA, que pode estar ocupado ou desligado."
-              action={
-                <Button variant="primary" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>
-                  Gerar a explicação agora
-                </Button>
-              }
-            />
-            <div className="mt-4">{resolveButton}</div>
-          </>
+          <EmptyState
+            title="A explicação em linguagem simples ainda não chegou"
+            body="Os números da detecção, mais abaixo, já estão completos. A análise escrita depende do serviço de IA."
+            action={<Button variant="primary" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>Gerar a explicação agora</Button>}
+          />
         )}
       </div>
 
-      {/* O acionável vem antes da prova e antes do aprofundamento. */}
-      {exp?.recommendations && exp.recommendations.length > 0 && (
-        <Section className="mt-9" title="O que fazer agora" description="Na ordem, do mais simples para o mais avançado">
-          <ActionSteps steps={exp.recommendations} />
+      {exp?.counterfactual && !anomaly.is_resolved && (
+        <div className="mt-8">
+          <CounterfactualCard cf={exp.counterfactual} />
+        </div>
+      )}
+
+      {machine && !anomaly.is_resolved && (
+        <Section className="mt-9" title="Agir agora" description="Ações executadas no próprio computador, com um clique">
+          <AnomalyActions anomaly={anomaly} machine={machine} />
         </Section>
       )}
 
-      {/* Uma pausa visual no meio do texto, e a prova do que foi dito. */}
+      {(shown?.recommendations?.length ?? 0) > 0 && (
+        <Section className="mt-9" title="O que fazer, passo a passo" description="Marque o que já tentou — o sistema sugere o próximo">
+          {variant ? (
+            <ol className="space-y-4">
+              {variant.recommendations.map((s: string, i: number) => (
+                <li key={i} className="flex gap-4">
+                  <span className="tnum font-mono text-micro text-fg-3">{i + 1}</span>
+                  <p className="max-w-prose text-sm leading-relaxed text-fg-2">{s}</p>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <AdaptiveSteps anomaly={anomaly} onChange={setAnomaly} />
+          )}
+        </Section>
+      )}
+
+      {incident && incident.chain && incident.chain.nodes.length > 1 && (
+        <Section className="mt-9" title="Como isso se encadeou" description="Sintomas que aconteceram juntos, ligados por causa e efeito">
+          <IncidentChain incident={incident} />
+        </Section>
+      )}
+
       {chart && context.length > 1 && (
-        <Section
-          className="mt-9"
-          title="O momento em que aconteceu"
-          description="A linha vertical marca o instante da detecção"
-        >
+        <Section className="mt-9" title="O momento em que aconteceu" description="A linha vertical marca o instante da detecção">
           <MetricChart
             metrics={context}
             dataKey={chart.key}
@@ -315,41 +298,33 @@ export function AnomalyDetail() {
             threshold={chart.threshold}
             markAt={anomaly.detected_at}
             unit={chart.key === "net_connections" ? "" : "%"}
-            domain={
-              chart.key === "net_connections"
-                ? [0, Math.max(...context.map((m) => m.net_connections ?? 0)) + 10]
-                : undefined
-            }
+            domain={chart.key === "net_connections" ? [0, Math.max(...context.map((m) => m.net_connections ?? 0)) + 10] : undefined}
           />
         </Section>
       )}
 
-      {exp?.possible_causes && exp.possible_causes.length > 0 && (
+      <Section
+        className="mt-9"
+        title="Reveja o que aconteceu"
+        description="Percorra a linha do tempo e veja quem estava consumindo a cada instante"
+      >
+        <Replay anomaly={anomaly} blackboxId={blackboxId} />
+      </Section>
+
+      {(shown?.possible_causes?.length ?? 0) > 0 && (
         <Section className="mt-9" title="Por que isso pode ter acontecido" description="O sistema ordena por probabilidade">
-          <RankedCauses causes={exp.possible_causes} />
+          <RankedCauses causes={shown!.possible_causes!} />
         </Section>
       )}
 
-      {/*
-        Segundo nível: o texto longo da IA e a leitura crua. Nada foi removido
-        — mudou o momento em que aparece. Quem quer o detalhe abre; quem quer
-        resolver o problema não precisa atravessar mil e trezentos caracteres
-        para chegar ao primeiro passo.
-      */}
       <div className="mt-10">
-        {exp?.detailed_explanation && (
+        {shown?.detailed_explanation && (
           <Disclosure title="Entenda em detalhe" note="a análise completa">
-            <p className="max-w-prose whitespace-pre-line text-sm leading-relaxed text-fg-2">
-              {exp.detailed_explanation}
-            </p>
+            <p className="max-w-prose whitespace-pre-line text-sm leading-relaxed text-fg-2">{shown.detailed_explanation}</p>
           </Disclosure>
         )}
 
-        {exp && !exp.possible_causes?.length && (
-          <Disclosure title="Por que isso pode ter acontecido" note="ainda analisando">
-            <p className="text-sm text-fg-3">Analisando as causas. Esta parte atualiza sozinha quando a IA terminar.</p>
-          </Disclosure>
-        )}
+        <MlContributions anomaly={anomaly} />
 
         <Disclosure title="Dados da leitura" note="números da detecção">
           <Panel className="px-4 py-2">
@@ -357,46 +332,66 @@ export function AnomalyDetail() {
               {anomaly.affected_metrics && Object.keys(anomaly.affected_metrics).length > 0 ? (
                 Object.entries(anomaly.affected_metrics)
                   .filter(([key, val]) => key !== "_behavior" && typeof val !== "object")
-                  .map(([key, val]) => {
-                    const reading =
-                      typeof val !== "number"
-                        ? null
-                        : key.includes("cpu")
-                          ? health.cpu(val)
-                          : key.includes("mem")
-                            ? health.memory(val)
-                            : key.includes("disk")
-                              ? health.disk(val)
-                              : null;
-                    return (
-                      <DataRow
-                        key={key}
-                        label={key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}
-                        value={typeof val === "number" ? `${val.toFixed(1)}%` : String(val)}
-                        note={reading?.label}
-                        tone={reading && reading.level !== "unknown" ? reading.level : undefined}
-                      />
-                    );
-                  })
+                  .map(([key, val]) => (
+                    <DataRow
+                      key={key}
+                      label={key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}
+                      value={typeof val === "number" ? (key.includes("percent") || key.includes("cpu") || key.includes("mem") ? `${val.toFixed(1)}%` : val.toFixed(1)) : String(val)}
+                    />
+                  ))
               ) : (
                 <DataRow label="Métricas" value="nenhuma registrada" />
               )}
-
-              {anomaly.responsible_process && (
-                <DataRow label="Programa responsável" value={anomaly.responsible_process} mono />
-              )}
-
-              {anomaly.anomaly_score !== null && anomaly.anomaly_score !== undefined && (
-                <DataRow
-                  label="Desvio do padrão"
-                  value={anomaly.anomaly_score.toFixed(4)}
-                  hint={<Explain term="score" />}
-                />
+              {anomaly.responsible_process && <DataRow label="Programa responsável" value={anomaly.responsible_process} mono />}
+              {anomaly.anomaly_score != null && (
+                <DataRow label="Desvio do padrão" value={anomaly.anomaly_score.toFixed(4)} hint={<Explain term="score" />} />
               )}
             </DataList>
           </Panel>
         </Disclosure>
+
+        <Disclosure title="Precisa de ajuda de alguém?" note="link para o técnico">
+          <div className="space-y-3">
+            <p className="max-w-prose text-sm leading-relaxed text-fg-2">
+              Gere um link temporário e somente leitura com tudo deste aviso — números, explicação, o que já foi
+              tentado — para mandar a quem vai te ajudar. Quem receber não precisa de conta.
+            </p>
+            <ShareButton anomalyId={anomaly.id} />
+          </div>
+        </Disclosure>
+      </div>
+
+      <div className="mt-8 flex flex-wrap gap-2 border-t border-hairline pt-5">
+        <Button variant={anomaly.is_resolved ? "secondary" : "quiet"} onClick={handleResolveToggle}>
+          {anomaly.is_resolved ? "Reabrir aviso" : "Só marcar como resolvido"}
+        </Button>
+        {exp && <Button variant="quiet" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>Gerar nova explicação</Button>}
       </div>
     </div>
+  );
+}
+
+/** Contribuição de cada grupo de medidas para a nota do modelo. */
+function MlContributions({ anomaly }: { anomaly: Anomaly }) {
+  const behavior = (anomaly.affected_metrics as any)?._behavior;
+  const contributions = behavior?.contributions || behavior?.ml_contributions;
+  if (!contributions?.length) return null;
+  return (
+    <Disclosure title="O que o modelo achou estranho" note="peso de cada medida no desvio">
+      <div className="space-y-2.5">
+        {contributions.map((c: any) => (
+          <div key={c.group} className="flex items-center gap-3">
+            <span className="w-40 flex-shrink-0 truncate text-sm text-fg-2" title={c.label}>{c.label}</span>
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-sunken">
+              <div className="h-full bg-fg-3" style={{ width: `${Math.min(c.percent, 100)}%` }} />
+            </div>
+            <span className="tnum w-12 flex-shrink-0 text-right font-mono text-xs text-fg">{c.percent.toFixed(0)}%</span>
+          </div>
+        ))}
+        <p className="pt-1 text-xs text-fg-3">
+          A leitura fugiu do padrão desta máquina; estas medidas foram as que mais pesaram nessa conclusão.
+        </p>
+      </div>
+    </Disclosure>
   );
 }

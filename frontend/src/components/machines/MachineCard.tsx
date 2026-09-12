@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Pause, Play, Trash2, ChevronDown } from "lucide-react";
@@ -41,7 +42,9 @@ export function MachineCard({
     <li className="py-3.5">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-fg">{machine.name}</p>
+          <Link to={`/machines/${machine.id}`} className="truncate text-sm font-medium text-fg hover:text-accent hover:underline">
+            {machine.name}
+          </Link>
           <p className="tnum mt-0.5 truncate font-mono text-xs text-fg-3">
             {machine.hostname}
             {machine.os_type ? ` · ${machine.os_type}` : ""}

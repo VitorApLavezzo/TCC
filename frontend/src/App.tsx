@@ -11,8 +11,13 @@ import { Register } from "./pages/Register";
 import { Welcome } from "./pages/Welcome";
 import { Dashboard } from "./pages/Dashboard";
 import { Machines } from "./pages/Machines";
+import { MachineDetail } from "./pages/MachineDetail";
 import { Anomalies } from "./pages/Anomalies";
 import { AnomalyDetail } from "./pages/AnomalyDetail";
+import { Chat } from "./pages/Chat";
+import { Demo } from "./pages/Demo";
+import { Research } from "./pages/Research";
+import { SharedView } from "./pages/SharedView";
 import { Account } from "./pages/Account";
 import { NotFound } from "./pages/NotFound";
 
@@ -64,6 +69,8 @@ export default function App() {
                         </PublicRoute>
                       }
                     />
+                    {/* Página pública do link para o técnico — sem login. */}
+                    <Route path="/compartilhado/:token" element={<SharedView />} />
                     <Route
                       path="/"
                       element={
@@ -85,6 +92,38 @@ export default function App() {
                       element={
                         <PrivateRoute>
                           <Machines />
+                        </PrivateRoute>
+                      }
+                    />
+                    <Route
+                      path="/machines/:id"
+                      element={
+                        <PrivateRoute>
+                          <MachineDetail />
+                        </PrivateRoute>
+                      }
+                    />
+                    <Route
+                      path="/pergunte"
+                      element={
+                        <PrivateRoute>
+                          <Chat />
+                        </PrivateRoute>
+                      }
+                    />
+                    <Route
+                      path="/demonstracao"
+                      element={
+                        <PrivateRoute>
+                          <Demo />
+                        </PrivateRoute>
+                      }
+                    />
+                    <Route
+                      path="/pesquisa"
+                      element={
+                        <PrivateRoute>
+                          <Research />
                         </PrivateRoute>
                       }
                     />

@@ -9,11 +9,14 @@ import { anomaliesApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
 import { StatusDot } from "./ui/Layout";
 import { SignalMark } from "./ui/SignalMark";
+import { NotificationsBell } from "./NotificationsBell";
 
 const NAV = [
   { to: "/", label: "Painel" },
   { to: "/machines", label: "Computadores" },
   { to: "/anomalies", label: "Avisos" },
+  { to: "/pergunte", label: "Pergunte" },
+  { to: "/pesquisa", label: "Pesquisa" },
 ];
 
 /**
@@ -117,6 +120,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
         </Link>
         <div className="mt-1 flex items-center gap-1">
+          <NotificationsBell />
           <button
             type="button"
             onClick={toggle}

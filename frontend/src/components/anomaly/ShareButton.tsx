@@ -1,0 +1,56 @@
+import { useState } from "react";
+import { shareApi, errorMessage } from "../../services/api";
+import { Button, TextButton } from "../ui/Button";
+import { useToast } from "../ui/Toast";
+
+/**
+ * Pacote para o técnico: um link temporário, somente leitura, com tudo do
+ * incidente — para o leigo mandar a quem vai ajudar, sem que a pessoa precise
+ * de conta.
+ */
+export function ShareButton({ anomalyId }: { anomalyId: number }) {
+  const toast = useToast();
+  const [link, setLink] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const res = await shareApi.create(anomalyId, 72);
+      const url = res.data.url ?? `${window.location.origin}/compartilhado/${res.data.token}`;
+      setLink(url);
+      try {
+        await navigator.clipboard.writeText(url);
+        toast.success("Link copiado. Válido por 72 horas, somente leitura.");
+      } catch {
+        toast.success("Link criado. Válido por 72 horas, somente leitura.");
+      }
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (link) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          readOnly
+          value={link}
+          onFocus={(e) => e.currentTarget.select()}
+          className="min-w-0 flex-1 rounded-control border border-edge bg-sunken px-2.5 py-1.5 font-mono text-micro text-fg-2"
+        />
+        <TextButton onClick={() => navigator.clipboard.writeText(link).then(() => toast.success("Copiado."))}>
+          Copiar
+        </TextButton>
+      </div>
+    );
+  }
+
+  return (
+    <Button size="sm" variant="quiet" loading={busy} onClick={create}>
+      Gerar link para o técnico
+    </Button>
+  );
+}
