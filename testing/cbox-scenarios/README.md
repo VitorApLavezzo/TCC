@@ -57,7 +57,24 @@ detectar e a anomalia encontrada.
 
 | Cenário | Boxfile | O que injeta | Detector alvo | Status |
 |---|---|---|---|---|
-| `cpu_loop` | `cpu_loop.Boxfile.toml` | Loop infinito de CPU (`while True: pass`) | `detect_cpu_loop` | ✅ Validado (3/3, ~25s, sempre `high`) |
+| `cpu_loop` | `cpu_loop.Boxfile.toml` | Loop infinito de CPU (`while True: pass`) | `detect_cpu_loop` | ✅ Validado (3/3, sempre `high`) |
+
+> **Mudança de prazo:** a validação original detectava em ~25 s. Os detectores
+> passaram a exigir uma **janela mínima de tempo**, não apenas um número de
+> coletas — com `COLLECTION_INTERVAL=5`, "3 de 5 coletas" eram 25 s de pico, o
+> que confundia um programa abrindo com um programa travado. `detect_cpu_loop`
+> agora quer ≥ 60 s de CPU dominante sustentada, então a espera do harness subiu
+> de 60 s para 180 s. É uma troca deliberada: menos alarme falso, detecção mais
+> lenta.
+
+### Alternativa sem containers: o modo demonstração do painel
+
+Desde a versão 2 dá para injetar os mesmos tipos de anomalia direto pelo painel
+(**Demonstração**), sem `cbox`, `distrobox` nem Linux: o backend gera leituras
+sintéticas que passam pelo **mesmo** caminho das reais (detectores, modelo, IA,
+incidentes). Serve para apresentar à banca; este harness continua sendo o teste
+mais forte, porque o problema é injetado num sistema operacional de verdade e o
+agente real coleta do sistema real.
 
 Cada Boxfile tem, nos comentários, o raciocínio exato de timing (quantas
 coletas cada detector exige antes de conseguir avaliar algo).

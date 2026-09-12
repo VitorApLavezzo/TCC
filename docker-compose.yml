@@ -56,6 +56,19 @@ services:
       CLAUDE_CLI_ENABLED: ${CLAUDE_CLI_ENABLED:-false}
       CLAUDE_CLI_MODEL: ${CLAUDE_CLI_MODEL:-sonnet}
       CLAUDE_CLI_TIMEOUT: ${CLAUDE_CLI_TIMEOUT:-120}
+      # Endereço público do painel (links em Telegram/e-mail)
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      # Notificações por Telegram (long polling; vazio desativa)
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      # Notificações por e-mail (vazio desativa)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      # Reputação coletiva de executáveis (opcional)
+      VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
+      REPUTATION_HUB_URL: ${REPUTATION_HUB_URL:-}
     volumes:
       - ./backend:/app
       - ./agent:/app/agent_dist:ro

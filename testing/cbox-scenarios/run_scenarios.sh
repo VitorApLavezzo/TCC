@@ -32,12 +32,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # cada detector em behavior_analyzer.py, com folga — ver comentários em cada
 # Boxfile para o raciocínio exato.
 #
+# Os detectores passaram a exigir uma JANELA DE TEMPO mínima, não só um número
+# de coletas: com COLLECTION_INTERVAL=5, "3 de 5 coletas" eram 25 s de pico —
+# pouco para chamar de programa travado. `detect_cpu_loop` agora quer pelo
+# menos 60 s de CPU dominante sustentada, então a espera subiu de 60 s para
+# 180 s (detecção observada por volta de 100–120 s).
+#
 # Só o cenário cpu_loop está incluído aqui — é o único validado de ponta a
 # ponta até agora (3/3 detecções corretas). Os outros 4 (memory_leak,
 # ddos_indicator, suspicious_process, behavioral_change) estão em progresso
 # na branch feat/cbox-more-scenarios, aguardando validação.
 declare -A SCENARIOS=(
-  [cpu_loop]="cpu_loop.Boxfile.toml|cpu_loop|60"
+  [cpu_loop]="cpu_loop.Boxfile.toml|cpu_loop|180"
 )
 
 # >&2: run_once() é chamada dentro de $(...) para capturar SÓ a linha de
