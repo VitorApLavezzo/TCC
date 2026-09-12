@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float, JSON
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, false
 from app.database import Base
 
 
@@ -17,6 +17,31 @@ class Machine(Base):
     last_seen = Column(DateTime(timezone=True))
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Nome legível do sistema ("Windows 11 Pro 23H2", "Ubuntu 24.04 LTS"):
+    # os passos da IA mudam de uma versão para outra
+    os_pretty = Column(String)
+    # Processador, tipo de aparelho, discos (SSD/HDD), fuso, privilégios do agente
+    system_info = Column(JSON)
+    agent_version = Column(String)
+
+    # Privacidade da IA: "any" (qualquer provedor), "local_only" (só Ollama),
+    # "no_ai" (nenhum dado vai para modelo algum)
+    ai_privacy = Column(String, default="any", server_default="any", nullable=False)
+
+    # Modo "estou fazendo algo pesado": suspende avisos de desempenho e tira
+    # as leituras do treino do modelo até esta hora
+    focus_mode_until = Column(DateTime(timezone=True))
+    focus_mode_reason = Column(String)
+
+    # Detecção de desligamento inesperado
+    last_boot_time = Column(Float)
+    last_goodbye_at = Column(DateTime(timezone=True))
+    last_goodbye_reason = Column(String)
+
+    network_isolated = Column(Boolean, default=False, server_default=false())
+    collection_interval = Column(Integer)
+    is_demo = Column(Boolean, default=False, server_default=false())
 
     owner = relationship("User", back_populates="machines")
     metrics = relationship("Metric", back_populates="machine", cascade="all, delete-orphan")

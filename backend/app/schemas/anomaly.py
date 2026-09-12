@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional, List, Any
+from pydantic import BaseModel, Field
+from typing import Optional, List, Any, Literal
 from datetime import datetime
 
 
@@ -12,6 +12,17 @@ class ExplanationOut(BaseModel):
     severity_justification: Optional[str]
     model_used: Optional[str]
     generated_at: datetime
+    language_level: Optional[str] = None
+    variants: Optional[Any] = None
+    evidence: Optional[Any] = None
+    verification: Optional[Any] = None
+    counterfactual: Optional[Any] = None
+    data_destination: Optional[str] = None
+    duration_ms: Optional[int] = None
+    provider_attempts: Optional[Any] = None
+    user_rating: Optional[int] = None
+    judge_scores: Optional[Any] = None
+    judge_model: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -30,6 +41,18 @@ class AnomalyOut(BaseModel):
     is_resolved: bool
     resolved_at: Optional[datetime]
     explanation: Optional[ExplanationOut]
+    source: Optional[str] = None
+    incident_id: Optional[int] = None
+    related_signals: Optional[Any] = None
+    feedback: Optional[str] = None
+    feedback_at: Optional[datetime] = None
+    resolution_cause: Optional[str] = None
+    resolution_category: Optional[str] = None
+    verification_status: Optional[str] = None
+    verification_note: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    steps_progress: Optional[Any] = None
+    extra_steps: Optional[Any] = None
 
     class Config:
         from_attributes = True
@@ -37,3 +60,25 @@ class AnomalyOut(BaseModel):
 
 class AnomalyResolve(BaseModel):
     is_resolved: bool
+    # O que era, nas palavras da pessoa — alimenta a memória de incidentes
+    cause: Optional[str] = Field(default=None, max_length=500)
+    category: Optional[str] = Field(default=None, max_length=60)
+    # Conferir nas próximas leituras se o problema sumiu mesmo
+    verify: bool = True
+
+
+class AnomalyFeedback(BaseModel):
+    kind: Literal["normal", "problem"]
+    # Alcance da regra criada por "é normal": o tipo inteiro, só este programa,
+    # ou só nesta faixa de horário
+    scope: Literal["type", "process", "hours"] = "process"
+    hour_from: Optional[int] = Field(default=None, ge=0, le=23)
+    hour_to: Optional[int] = Field(default=None, ge=0, le=24)
+    note: Optional[str] = Field(default=None, max_length=300)
+
+
+class StepProgress(BaseModel):
+    step_index: int
+    status: Literal["done", "not_helped", "skipped", "pending"]
+    # Passos gerados depois (próximo passo) vivem em extra_steps
+    extra: bool = False

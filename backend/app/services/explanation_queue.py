@@ -1,13 +1,19 @@
 """
-Fila serial para geração de explicações via Ollama.
+Fila serial para geração de explicações.
 Processa uma anomalia por vez para não sobrecarregar o modelo local.
+
+Avisos agora nascem também fora das requisições — no agendador (previsões,
+tendências, surtos) e em tarefas de segundo plano, que rodam em threads sem
+loop de eventos. `request_explanation` aceita os dois contextos.
 """
 import asyncio
 import threading
-from typing import Tuple
+from typing import Optional
+
 from sqlalchemy.orm import Session
 
-_queue: asyncio.Queue = None
+_queue: Optional[asyncio.Queue] = None
+_loop: Optional[asyncio.AbstractEventLoop] = None
 _lock = threading.Lock()
 
 
@@ -19,13 +25,35 @@ def get_queue() -> asyncio.Queue:
     return _queue
 
 
-async def enqueue_explanation(anomaly_id: int, metric_id: int, machine_id: int):
+async def enqueue_explanation(anomaly_id: int, metric_id: Optional[int], machine_id: int):
     """Adiciona anomalia na fila para explicação assíncrona."""
     await get_queue().put((anomaly_id, metric_id, machine_id))
 
 
+def request_explanation(anomaly_id: int, metric_id: Optional[int], machine_id: int) -> bool:
+    """Pede a explicação de qualquer contexto (requisição, thread do agendador, job).
+
+    Sem o worker rodando (testes, script avulso) não faz nada: a explicação
+    fica "analisando" e pode ser gerada depois pelo botão do painel.
+    """
+    loop = _loop
+    if loop is None or loop.is_closed():
+        return False
+    item = (anomaly_id, metric_id, machine_id)
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is loop:
+        get_queue().put_nowait(item)
+    else:
+        loop.call_soon_threadsafe(get_queue().put_nowait, item)
+    return True
+
+
 async def explanation_worker():
     """Worker que processa a fila serial — roda uma vez no startup."""
+    global _loop
     from app.database import SessionLocal
     from app.models.anomaly import Anomaly
     from app.models.metric import Metric
@@ -33,6 +61,7 @@ async def explanation_worker():
     from app.models.explanation import AIExplanation
     from app.services import ai_service
 
+    _loop = asyncio.get_running_loop()
     queue = get_queue()
     print("[ExplanationWorker] Iniciado — aguardando anomalias na fila...")
 
@@ -44,10 +73,10 @@ async def explanation_worker():
             db: Session = SessionLocal()
             try:
                 anomaly = db.query(Anomaly).filter(Anomaly.id == anomaly_id).first()
-                metric = db.query(Metric).filter(Metric.id == metric_id).first()
                 machine = db.query(Machine).filter(Machine.id == machine_id).first()
+                metric = db.query(Metric).filter(Metric.id == metric_id).first() if metric_id else None
 
-                if not anomaly or not metric or not machine:
+                if not anomaly or not machine:
                     continue
 
                 # Já tem explicação? Pula
@@ -55,41 +84,26 @@ async def explanation_worker():
                 if existing and existing.possible_causes:
                     continue
 
-                loop = asyncio.get_event_loop()
-                explanation_data = await loop.run_in_executor(
-                    None,
-                    ai_service.generate_explanation,
-                    anomaly, metric, machine, db
-                )
+                loop = asyncio.get_running_loop()
+                data = await loop.run_in_executor(None, ai_service.generate_explanation, anomaly, metric, machine, db)
 
-                if explanation_data:
-                    if existing:
-                        existing.summary = explanation_data.get("summary", "")
-                        existing.detailed_explanation = explanation_data.get("detailed_explanation")
-                        existing.possible_causes = explanation_data.get("possible_causes", [])
-                        existing.recommendations = explanation_data.get("recommendations", [])
-                        existing.severity_justification = explanation_data.get("severity_justification")
-                        existing.model_used = explanation_data.get("model_used")
-                    else:
-                        explanation = AIExplanation(
-                            anomaly_id=anomaly_id,
-                            summary=explanation_data.get("summary", ""),
-                            detailed_explanation=explanation_data.get("detailed_explanation"),
-                            possible_causes=explanation_data.get("possible_causes", []),
-                            recommendations=explanation_data.get("recommendations", []),
-                            severity_justification=explanation_data.get("severity_justification"),
-                            model_used=explanation_data.get("model_used"),
-                        )
-                        db.add(explanation)
+                if data:
+                    if not existing:
+                        existing = AIExplanation(anomaly_id=anomaly_id, summary="")
+                        db.add(existing)
+                    ai_service.apply_explanation(existing, data)
                     db.commit()
-                    print(f"[ExplanationWorker] Explicação salva para anomalia #{anomaly_id}")
+                    print(f"[ExplanationWorker] Explicação salva para anomalia #{anomaly_id} ({data.get('model_used')})")
 
             except Exception as e:
                 print(f"[ExplanationWorker] Erro na anomalia #{anomaly_id}: {e}")
+                db.rollback()
             finally:
                 db.close()
                 queue.task_done()
 
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             print(f"[ExplanationWorker] Erro no worker: {e}")
             await asyncio.sleep(1)

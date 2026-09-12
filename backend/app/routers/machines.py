@@ -1,8 +1,9 @@
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from app.core.timeutil import aware, utcnow
 from app.database import get_db
 from app.models.machine import Machine
 from app.models.user import User
@@ -32,7 +33,7 @@ def create_enrollment_code(db: Session = Depends(get_db), current_user: User = D
     enrollment = EnrollmentCode(
         code=_generate_enroll_code(),
         user_id=current_user.id,
-        expires_at=datetime.utcnow() + timedelta(minutes=ENROLL_CODE_TTL_MINUTES),
+        expires_at=utcnow() + timedelta(minutes=ENROLL_CODE_TTL_MINUTES),
     )
     db.add(enrollment)
     db.commit()
@@ -52,7 +53,7 @@ def create_bulk_key(body: BulkKeyCreate, db: Session = Depends(get_db), current_
         label=body.label,
         reusable=True,
         max_uses=body.max_uses,
-        expires_at=datetime.utcnow() + timedelta(days=body.expires_days),
+        expires_at=utcnow() + timedelta(days=body.expires_days),
     )
     db.add(key)
     db.commit()
@@ -94,9 +95,10 @@ def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
     code = payload.code.strip().upper().replace(" ", "")
     enrollment = db.query(EnrollmentCode).filter(EnrollmentCode.code == code).first()
 
-    # expires_at vem do banco como timezone-aware (coluna DateTime(timezone=True));
-    # datetime.utcnow() é naive — comparar os dois direto gera TypeError
-    if not enrollment or enrollment.expires_at < datetime.now(timezone.utc) or enrollment.revoked:
+    # `expires_at` volta COM fuso no PostgreSQL e SEM fuso no SQLite — comparar
+    # direto com uma data com fuso quebra em um dos dois (era TypeError no
+    # pareamento inteiro, com SQLite). `aware()` normaliza os dois casos.
+    if not enrollment or aware(enrollment.expires_at) < utcnow() or enrollment.revoked:
         raise HTTPException(status_code=400, detail="Código de pareamento inválido, expirado ou revogado")
 
     if enrollment.reusable:
@@ -112,7 +114,7 @@ def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
         os_version=payload.os_version,
         owner_id=enrollment.user_id,
         agent_token=secrets.token_urlsafe(32),
-        last_seen=datetime.utcnow(),
+        last_seen=utcnow(),
     )
     db.add(machine)
     db.flush()
@@ -181,15 +183,39 @@ def delete_machine_cascade(machine_id: int, db: Session):
     from app.models.explanation import AIExplanation
     from app.models.process_baseline import ProcessBaseline
     from app.models.enrollment import EnrollmentCode
+    from app.models.incident import Incident
+    from app.models.rules import DetectionRule, DetectorCalibration
+    from app.models.command import AgentCommand
+    from app.models.diagnostic import Diagnostic
+    from app.models.chat import ChatMessage
+    from app.models.report import Report
+    from app.models.inventory import ChangeEvent, InventorySnapshot
+    from app.models.identity import ProcessIdentity
+    from app.models.blackbox import BlackboxCapture
+    from app.models.notification import Notification, ShareLink
 
     metric_ids = select(Metric.id).where(Metric.machine_id == machine_id)
     anomaly_ids = select(Anomaly.id).where(Anomaly.machine_id == machine_id)
 
     db.query(ProcessSnapshot).filter(ProcessSnapshot.metric_id.in_(metric_ids)).delete(synchronize_session=False)
     db.query(AIExplanation).filter(AIExplanation.anomaly_id.in_(anomaly_ids)).delete(synchronize_session=False)
+    db.query(ShareLink).filter(ShareLink.anomaly_id.in_(anomaly_ids)).delete(synchronize_session=False)
+    db.query(BlackboxCapture).filter(BlackboxCapture.machine_id == machine_id).delete(synchronize_session=False)
+    # A FK anomalies.incident_id impede apagar os incidentes antes das anomalias
     db.query(Anomaly).filter(Anomaly.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(Incident).filter(Incident.machine_id == machine_id).delete(synchronize_session=False)
     db.query(Metric).filter(Metric.machine_id == machine_id).delete(synchronize_session=False)
     db.query(ProcessBaseline).filter(ProcessBaseline.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(DetectionRule).filter(DetectionRule.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(DetectorCalibration).filter(DetectorCalibration.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(AgentCommand).filter(AgentCommand.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(Diagnostic).filter(Diagnostic.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(ChatMessage).filter(ChatMessage.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(Report).filter(Report.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(ChangeEvent).filter(ChangeEvent.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(InventorySnapshot).filter(InventorySnapshot.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(ProcessIdentity).filter(ProcessIdentity.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(Notification).filter(Notification.machine_id == machine_id).delete(synchronize_session=False)
     db.query(EnrollmentCode).filter(EnrollmentCode.machine_id == machine_id).delete(synchronize_session=False)
     db.query(Machine).filter(Machine.id == machine_id).delete(synchronize_session=False)
     db.commit()
@@ -212,3 +238,22 @@ def regenerate_token(machine_id: int, db: Session = Depends(get_db), current_use
     db.commit()
     db.refresh(machine)
     return machine
+
+
+@router.get("/{machine_id}/incidents")
+def machine_incidents(machine_id: int, limit: int = 20, db: Session = Depends(get_db),
+                      current_user: User = Depends(get_current_user)):
+    """Incidentes (sintomas agrupados com cadeia de causa) desta máquina."""
+    from app.models.incident import Incident
+    machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    rows = (
+        db.query(Incident).filter(Incident.machine_id == machine_id)
+        .order_by(Incident.last_activity_at.desc()).limit(limit).all()
+    )
+    return {"incidents": [
+        {"id": i.id, "title": i.title, "severity": i.severity, "is_open": i.is_open, "started_at": i.started_at,
+         "last_activity_at": i.last_activity_at, "chain": i.chain, "narrative": i.narrative}
+        for i in rows
+    ]}

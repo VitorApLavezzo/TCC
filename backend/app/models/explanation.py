@@ -18,4 +18,29 @@ class AIExplanation(Base):
     recommendations = Column(JSON)
     severity_justification = Column(Text)
 
+    # Nível de linguagem desta versão ("leigo", "intermediario", "tecnico") e as
+    # outras versões já pedidas, por nível
+    language_level = Column(String)
+    variants = Column(JSON)
+
+    # Fatos numerados que a IA pode citar, e o resultado da checagem de que os
+    # números do texto existem de fato nos dados
+    evidence = Column(JSON)
+    verification = Column(JSON)
+    # "Se você fechar X, a memória cai para Y"
+    counterfactual = Column(JSON)
+
+    # Auditoria: texto exatamente como foi enviado, resposta crua, tentativas
+    prompt_text = Column(Text)
+    raw_response = Column(Text)
+    provider_attempts = Column(JSON)
+    data_destination = Column(String)  # local | cloud | none
+    duration_ms = Column(Integer)
+
+    # Avaliação: nota da pessoa e da IA-juíza
+    user_rating = Column(Integer)  # 1 útil, -1 não ajudou
+    user_rating_comment = Column(Text)
+    judge_scores = Column(JSON)
+    judge_model = Column(String)
+
     anomaly = relationship("Anomaly", back_populates="explanation")

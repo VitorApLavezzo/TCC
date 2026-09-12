@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Boolean
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, false
 from app.database import Base
 
 
@@ -21,3 +21,5 @@ class ProcessBaseline(Base):
     max_mem_percent = Column(Float, default=0.0)
 
     is_known = Column(Boolean, default=False)  # True após >= 5 aparições
+    # A pessoa disse "isso é normal para mim" num aviso sobre este programa
+    user_marked_normal = Column(Boolean, default=False, server_default=false())

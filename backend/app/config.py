@@ -27,13 +27,59 @@ class Settings(BaseSettings):
     CLAUDE_CLI_MODEL: str = "sonnet"
     CLAUDE_CLI_TIMEOUT: int = 120
 
-    ANOMALY_SCORE_THRESHOLD: float = -0.15
+    # Que fração do próprio histórico da máquina o modelo consideraria fora do
+    # padrão (em %). O limite é recalculado a cada treino a partir dessa fração,
+    # em vez de um número fixo: o antigo ANOMALY_SCORE_THRESHOLD=-0.15 era
+    # comparado com score_samples, que fica perto de -0.45 em leituras normais —
+    # na prática toda leitura era "anômala".
+    ML_ALERT_PERCENTILE: float = 0.5
     MIN_TRAINING_SAMPLES: int = 100
     # 3% de contaminação: menos alarmes falsos que os 5% originais
     ISOLATION_FOREST_CONTAMINATION: float = 0.03
     # Janela de treino (nº de coletas mais recentes) e frequência de retreino
     TRAINING_WINDOW: int = 5000
     RETRAIN_EVERY: int = 30
+
+    # Fuso usado para "hora do dia" enquanto o agente não informou o da máquina
+    # (-180 = horário de Brasília)
+    DEFAULT_TZ_OFFSET_MINUTES: int = -180
+
+    # Tarefas de IA em segundo plano (conversa, diagnóstico, diário, avaliação)
+    AI_JOB_WORKERS: int = 2
+
+    # Agendador de rotinas (verificação de resolução, previsões, diário...)
+    SCHEDULER_ENABLED: bool = True
+
+    # Endereço do painel usado nos links enviados por Telegram e e-mail
+    PUBLIC_BASE_URL: str = ""
+
+    # Telegram (vazio desativa). O bot usa long polling: funciona atrás de NAT,
+    # sem precisar expor o servidor à internet.
+    TELEGRAM_BOT_TOKEN: str = ""
+
+    # E-mail (vazio desativa)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    SMTP_TLS: bool = True
+
+    # Reputação de executáveis
+    VIRUSTOTAL_API_KEY: str = ""
+    # Outro servidor AnomalyDetect que agrega reputação anônima entre instalações
+    REPUTATION_HUB_URL: str = ""
+    # Este servidor aceita contribuições anônimas de outros (atua como hub)
+    REPUTATION_HUB_ACCEPT: bool = True
+
+    # Energia: valores padrão enquanto o usuário não informa os seus
+    DEFAULT_TARIFF_KWH: float = 0.85
+    # Fator médio de emissão do Sistema Interligado Nacional (kg CO2 por kWh)
+    DEFAULT_CO2_KG_PER_KWH: float = 0.0385
+
+    # Retenção de dados brutos
+    METRIC_RETENTION_DAYS: int = 120
+    PROCESS_SNAPSHOT_RETENTION_DAYS: int = 21
 
     class Config:
         env_file = ".env"

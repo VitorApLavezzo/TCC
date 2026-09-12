@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -15,5 +15,14 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Preferências: nível de linguagem da IA, política de notificações, tarifa
+    # de energia, compartilhamento de reputação. Lidas sempre por
+    # `app.services.preferences.get_preferences`, que completa os padrões.
+    preferences = Column(JSON)
+
+    # Vínculo com o Telegram: o código é gerado no painel e enviado ao bot
+    telegram_chat_id = Column(String, nullable=True)
+    telegram_link_code = Column(String, nullable=True, index=True)
 
     machines = relationship("Machine", back_populates="owner")

@@ -1,17 +1,21 @@
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
-from typing import List
 from datetime import datetime, timedelta
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.core.dependencies import get_current_user, get_machine_by_token
+from app.core.timeutil import aware, utcnow
+from app.core.websocket import manager
 from app.database import get_db
+from app.models.machine import Machine
 from app.models.metric import Metric
 from app.models.process import ProcessSnapshot
-from app.models.machine import Machine
-from app.schemas.metric import MetricCreate, MetricOut, MetricDetailed
-from app.core.dependencies import get_current_user, get_machine_by_token
-from app.core.websocket import manager
-from app.services.anomaly_service import process_metric
 from app.models.user import User
-from app.config import settings
+from app.schemas.metric import MetricCreate, MetricDetailed, MetricOut
+from app.services import baselines, ingestion, ml_service
+from app.services.ingestion import anomaly_ws_payload, metric_payload
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
@@ -22,113 +26,52 @@ async def ingest_metrics(
     db: Session = Depends(get_db),
     machine: Machine = Depends(get_machine_by_token),
 ):
-    if not machine.is_active:
-        # Coleta pausada pelo painel: mantém o "visto por último" mas descarta os dados
-        from datetime import datetime as dt
-        machine.last_seen = dt.utcnow()
-        db.commit()
-        return {"metric_id": None, "anomaly_detected": False, "anomaly_id": None, "paused": True}
+    result = ingestion.ingest(db, machine, payload)
+    if result.metric is not None:
+        await manager.broadcast_metric(machine.id, metric_payload(result.metric))
+    for anomaly in result.anomalies:
+        await manager.broadcast_anomaly(machine.id, machine.owner_id, anomaly_ws_payload(anomaly))
+    return result.response
 
-    processes = payload.processes or []
-    metric_data = payload.model_dump(exclude={"processes"})
-    if "cpu_per_core" in metric_data and metric_data["cpu_per_core"] is not None:
-        metric_data["cpu_per_core"] = list(metric_data["cpu_per_core"])
 
-    metric = Metric(machine_id=machine.id, **metric_data)
-    db.add(metric)
-    db.flush()
+def _owned_machine(db: Session, machine_id: int, user: User) -> Machine:
+    machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == user.id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    return machine
 
-    for p in processes:
-        snap = ProcessSnapshot(metric_id=metric.id, **p.model_dump())
-        db.add(snap)
 
-    db.commit()
-    db.refresh(metric)
-
-    from datetime import datetime as dt
-    machine.last_seen = dt.utcnow()
-    db.commit()
-
-    anomaly = process_metric(metric, machine, db)
-
-    # Broadcast em tempo real via WebSocket — payload completo
-    metric_payload = {
-        "id": metric.id,
-        "machine_id": metric.machine_id,
-        "timestamp": metric.timestamp.isoformat() if metric.timestamp else None,
-        "cpu_percent": metric.cpu_percent,
-        "cpu_per_core": metric.cpu_per_core,
-        "cpu_freq_current": metric.cpu_freq_current,
-        "cpu_freq_max": metric.cpu_freq_max,
-        "cpu_count_logical": metric.cpu_count_logical,
-        "cpu_count_physical": metric.cpu_count_physical,
-        "mem_percent": metric.mem_percent,
-        "mem_used": metric.mem_used,
-        "mem_available": metric.mem_available,
-        "mem_total": metric.mem_total,
-        "swap_percent": metric.swap_percent,
-        "swap_used": metric.swap_used,
-        "swap_total": metric.swap_total,
-        "disk_percent": metric.disk_percent,
-        "disk_used": metric.disk_used,
-        "disk_free": metric.disk_free,
-        "disk_read_bytes": metric.disk_read_bytes,
-        "disk_write_bytes": metric.disk_write_bytes,
-        "disk_partitions": metric.disk_partitions,
-        "net_bytes_sent": metric.net_bytes_sent,
-        "net_bytes_recv": metric.net_bytes_recv,
-        "net_connections": metric.net_connections,
-        "uptime_seconds": metric.uptime_seconds,
-        "load_avg_1": metric.load_avg_1,
-        "load_avg_5": metric.load_avg_5,
-        "load_avg_15": metric.load_avg_15,
-        "gpu_metrics": metric.gpu_metrics,
-        "temperatures": metric.temperatures,
-        "battery_percent": metric.battery_percent,
-        "battery_plugged": metric.battery_plugged,
-        "battery_secs_left": metric.battery_secs_left,
-        "battery_health_percent": metric.battery_health_percent,
-        "battery_cycle_count": metric.battery_cycle_count,
-        "process_count": metric.process_count,
-    }
-    await manager.broadcast_metric(machine.id, metric_payload)
-
-    if anomaly:
-        anomaly_payload = {
-            "id": anomaly.id,
-            "machine_id": anomaly.machine_id,
-            "anomaly_type": anomaly.anomaly_type,
-            "severity": anomaly.severity,
-            "detected_at": anomaly.detected_at.isoformat() if anomaly.detected_at else None,
-            "responsible_process": anomaly.responsible_process,
-        }
-        await manager.broadcast_anomaly(machine.id, machine.owner_id, anomaly_payload)
-
-    return {
-        "metric_id": metric.id,
-        "anomaly_detected": anomaly is not None,
-        "anomaly_id": anomaly.id if anomaly else None,
-    }
+def _stride(rows: list, max_points: int) -> list:
+    """Reduz a série mantendo o formato: uma leitura a cada k, sempre com a última."""
+    if len(rows) <= max_points:
+        return rows
+    step = len(rows) / max_points
+    picked = [rows[int(i * step)] for i in range(max_points)]
+    picked[-1] = rows[-1]
+    return picked
 
 
 @router.get("/{machine_id}", response_model=List[MetricOut])
 def get_metrics(
     machine_id: int,
-    hours: int = Query(default=24, ge=1, le=168),
+    hours: int = Query(default=24, ge=1, le=720),
+    start: Optional[datetime] = Query(default=None),
+    end: Optional[datetime] = Query(default=None),
+    max_points: int = Query(default=500, ge=10, le=3000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
     if not machine:
         return []
-    since = datetime.utcnow() - timedelta(hours=hours)
-    return (
-        db.query(Metric)
-        .filter(Metric.machine_id == machine_id, Metric.timestamp >= since)
-        .order_by(Metric.timestamp.asc())
-        .limit(500)
-        .all()
-    )
+    # A versão anterior devolvia as 500 leituras MAIS ANTIGAS do período: num
+    # gráfico de 7 dias, o momento do aviso nunca aparecia.
+    since = aware(start) if start else utcnow() - timedelta(hours=hours)
+    query = db.query(Metric).filter(Metric.machine_id == machine_id, Metric.timestamp >= since)
+    if end:
+        query = query.filter(Metric.timestamp <= aware(end))
+    rows = query.order_by(Metric.timestamp.asc()).all()
+    return _stride(rows, max_points)
 
 
 @router.get("/{machine_id}/latest", response_model=MetricDetailed)
@@ -137,10 +80,7 @@ def get_latest_metric(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
-    if not machine:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Machine not found")
+    _owned_machine(db, machine_id, current_user)
     metric = (
         db.query(Metric)
         .filter(Metric.machine_id == machine_id)
@@ -148,7 +88,6 @@ def get_latest_metric(
         .first()
     )
     if not metric:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="No metrics yet")
     return metric
 
@@ -164,25 +103,74 @@ def get_learning_status(
     O painel usa isso para dizer ao usuário que a detecção ainda está
     calibrando — sem isso, "nenhuma anomalia" é indistinguível de "quebrado".
     """
-    import os
-    from app.services.ml_service import _model_path
-
-    machine = (
-        db.query(Machine)
-        .filter(Machine.id == machine_id, Machine.owner_id == current_user.id)
-        .first()
-    )
-    if not machine:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Machine not found")
-
+    _owned_machine(db, machine_id, current_user)
     collected = db.query(Metric).filter(Metric.machine_id == machine_id).count()
     needed = settings.MIN_TRAINING_SAMPLES
-    trained = os.path.exists(_model_path(machine_id))
+    info = ml_service.model_info(machine_id)
 
     return {
         "collected": collected,
         "needed": needed,
-        "ml_ready": trained and collected >= needed,
+        "ml_ready": bool(info) and collected >= needed,
         "retrain_every": settings.RETRAIN_EVERY,
+        "model": info,
     }
+
+
+@router.get("/{machine_id}/baseline")
+def get_learned_baseline(
+    machine_id: int,
+    days: int = Query(default=14, ge=1, le=60),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    machine = _owned_machine(db, machine_id, current_user)
+    return baselines.learned_bands(db, machine, days)
+
+
+@router.get("/{machine_id}/window")
+def get_window(
+    machine_id: int,
+    center: datetime,
+    minutes: int = Query(default=10, ge=1, le=120),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Leituras e principais programas em volta de um instante — o replay sem caixa-preta."""
+    _owned_machine(db, machine_id, current_user)
+    c = aware(center)
+    metrics = (
+        db.query(Metric)
+        .filter(Metric.machine_id == machine_id, Metric.timestamp >= c - timedelta(minutes=minutes),
+                Metric.timestamp <= c + timedelta(minutes=minutes))
+        .order_by(Metric.timestamp.asc())
+        .limit(600)
+        .all()
+    )
+    return {"source": "leituras", "frames": window_frames(db, metrics)}
+
+
+def window_frames(db: Session, metrics: List[Metric]) -> list:
+    ids = [m.id for m in metrics]
+    procs = {}
+    if ids:
+        for p in db.query(ProcessSnapshot).filter(ProcessSnapshot.metric_id.in_(ids)).all():
+            procs.setdefault(p.metric_id, []).append(p)
+    frames = []
+    for m in metrics:
+        top = sorted(procs.get(m.id, []), key=lambda p: (p.cpu_percent or 0) + (p.mem_percent or 0), reverse=True)[:6]
+        frames.append({
+            "t": m.timestamp.isoformat() if m.timestamp else None,
+            "cpu": m.cpu_percent,
+            "mem": m.mem_percent,
+            "disk_read": m.disk_read_bytes,
+            "disk_write": m.disk_write_bytes,
+            "net_sent": m.net_bytes_sent,
+            "net_recv": m.net_bytes_recv,
+            "connections": m.net_connections,
+            "processes": [
+                {"name": p.name, "pid": p.pid, "cpu": round(p.cpu_percent or 0, 1), "mem": round(p.mem_percent or 0, 2)}
+                for p in top
+            ],
+        })
+    return frames

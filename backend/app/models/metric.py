@@ -1,11 +1,13 @@
-from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey, JSON, Boolean
+from sqlalchemy import Column, Integer, Float, DateTime, ForeignKey, JSON, Boolean, String, Index
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, false
 from app.database import Base
 
 
 class Metric(Base):
     __tablename__ = "metrics"
+    # Quase toda consulta é "leituras desta máquina, por tempo"
+    __table_args__ = (Index("ix_metrics_machine_timestamp", "machine_id", "timestamp"),)
 
     id = Column(Integer, primary_key=True, index=True)
     machine_id = Column(Integer, ForeignKey("machines.id"), nullable=False)
@@ -48,6 +50,8 @@ class Metric(Base):
     load_avg_1 = Column(Float)
     load_avg_5 = Column(Float)
     load_avg_15 = Column(Float)
+    boot_time = Column(Float)  # epoch do último boot — muda quando o computador reinicia
+    user_idle_seconds = Column(Float)  # tempo sem teclado/mouse, quando o sistema informa
 
     # GPU
     gpu_metrics = Column(JSON)
@@ -62,7 +66,18 @@ class Metric(Base):
     battery_health_percent = Column(Float)  # capacidade máxima atual vs. de fábrica
     battery_cycle_count = Column(Integer)
 
+    # Energia: medida (bateria descarregando, sensor da GPU) ou estimada por modelo
+    power_watts = Column(Float)
+    power_source = Column(String)
+
     process_count = Column(Integer)
+
+    # Espaçamento real até a leitura anterior (a coleta é adaptativa)
+    interval_seconds = Column(Float)
+    # Nota do Isolation Forest para esta leitura (None antes do modelo existir)
+    ml_score = Column(Float)
+    # Leitura feita em "modo atividade pesada": não entra no treino
+    excluded_from_training = Column(Boolean, default=False, server_default=false())
 
     machine = relationship("Machine", back_populates="metrics")
     processes = relationship("ProcessSnapshot", back_populates="metric", cascade="all, delete-orphan")

@@ -27,12 +27,34 @@ def delete_self(machine: Machine = Depends(get_machine_by_token), db: Session = 
     delete_machine_cascade(machine.id, db)
     return {"deleted": True}
 
-ALLOWED_FILES = {"agent.py", "collector.py", "requirements.txt"}
+# Arquivos do agente. Agentes já instalados baixam os que mudaram pelo
+# manifesto abaixo — funcionalidades novas chegam sem reinstalar.
+ALLOWED_FILES = [
+    "agent.py", "collector.py", "requirements.txt", "privacy.py", "sensors.py", "security.py",
+    "blackbox.py", "actions.py", "inventory.py", "updater.py",
+]
 
 _dist_dir = os.getenv("AGENT_DIST_DIR", "/app/agent_dist")
 if not os.path.isdir(_dist_dir):
     # Fallback para desenvolvimento local (backend rodando fora do Docker)
     _dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../agent"))
+
+
+@router.get("/manifest")
+def agent_manifest():
+    """Hash de cada arquivo do agente, para a autoatualização saber o que baixar."""
+    import hashlib
+
+    files = []
+    for name in ALLOWED_FILES:
+        path = os.path.join(_dist_dir, name)
+        if not os.path.isfile(path):
+            continue
+        with open(path, "rb") as f:
+            content = f.read()
+        files.append({"name": name, "sha256": hashlib.sha256(content).hexdigest(), "size": len(content)})
+    version = hashlib.sha256("".join(f["sha256"] for f in files).encode()).hexdigest()[:12]
+    return {"version": version, "files": files}
 
 
 @router.get("/download/{filename}")
@@ -69,9 +91,13 @@ command -v python3 >/dev/null || {{ echo "ERRO: instale o python3 primeiro"; exi
 
 mkdir -p "$DIR"
 cd "$DIR"
-curl -fsS "$SERVER/api/agent/download/agent.py" -o agent.py
-curl -fsS "$SERVER/api/agent/download/collector.py" -o collector.py
-curl -fsS "$SERVER/api/agent/download/requirements.txt" -o requirements.txt
+# Núcleo (obrigatório) e sensores avançados (o agente roda sem eles)
+for f in agent.py collector.py privacy.py requirements.txt; do
+    curl -fsS "$SERVER/api/agent/download/$f" -o "$f"
+done
+for f in sensors.py security.py inventory.py actions.py blackbox.py updater.py; do
+    curl -fsS "$SERVER/api/agent/download/$f" -o "$f" 2>/dev/null || true
+done
 
 if python3 -m venv --system-site-packages venv 2>/dev/null; then
     PY="$DIR/venv/bin/python"

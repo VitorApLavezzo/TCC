@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 from datetime import datetime
 
 
@@ -12,6 +12,54 @@ class ProcessData(BaseModel):
     num_threads: int
     status: str
     username: Optional[str] = None
+    # Estes campos eram enviados pelo agente mas não estavam declarados aqui —
+    # o Pydantic descartava em silêncio, e os indicadores de malware baseados
+    # em linha de comando nunca tinham dado para avaliar.
+    ppid: Optional[int] = None
+    create_time: Optional[float] = None
+    cmdline: Optional[str] = None
+    exe: Optional[str] = None
+    sha256: Optional[str] = None
+    signed: Optional[str] = None
+    publisher: Optional[str] = None
+    parent_name: Optional[str] = None
+
+
+class ProcessStart(BaseModel):
+    """Programa que começou a rodar desde a última coleta, mesmo sem consumir nada."""
+    pid: int
+    name: str
+    ppid: Optional[int] = None
+    parent_name: Optional[str] = None
+    exe: Optional[str] = None
+    cmdline: Optional[str] = None
+    username: Optional[str] = None
+    create_time: Optional[float] = None
+    sha256: Optional[str] = None
+    signed: Optional[str] = None
+    publisher: Optional[str] = None
+
+
+class AgentEvent(BaseModel):
+    """Fato observado no computador que não é uma medida: arquivo-isca alterado,
+    desligamento inesperado, erro de hardware."""
+    type: str
+    at: Optional[float] = None  # epoch
+    details: Optional[Dict[str, Any]] = None
+
+
+class BeaconCandidate(BaseModel):
+    """Conexões repetidas a intervalos regulares para o mesmo destino."""
+    process: str
+    pid: Optional[int] = None
+    exe: Optional[str] = None
+    remote_ip: str
+    remote_port: Optional[int] = None
+    events: int
+    median_interval: float
+    jitter: float  # coeficiente de variação dos intervalos (0 = relógio)
+    first_seen: Optional[float] = None
+    last_seen: Optional[float] = None
 
 
 class GPUData(BaseModel):
@@ -23,6 +71,7 @@ class GPUData(BaseModel):
     mem_percent: Optional[float] = None
     temperature: Optional[float] = None
     driver: Optional[str] = None
+    power_watts: Optional[float] = None
 
 
 class MetricCreate(BaseModel):
@@ -63,6 +112,8 @@ class MetricCreate(BaseModel):
     load_avg_1: Optional[float] = None
     load_avg_5: Optional[float] = None
     load_avg_15: Optional[float] = None
+    boot_time: Optional[float] = None
+    user_idle_seconds: Optional[float] = None
 
     # GPU
     gpu_metrics: Optional[List[GPUData]] = None
@@ -77,8 +128,28 @@ class MetricCreate(BaseModel):
     battery_health_percent: Optional[float] = None
     battery_cycle_count: Optional[int] = None
 
+    # Energia
+    power_watts: Optional[float] = None
+    power_source: Optional[str] = None
+
     process_count: int
     processes: Optional[List[ProcessData]] = []
+
+    interval_seconds: Optional[float] = None
+    agent_version: Optional[str] = None
+
+    # Blocos enviados só quando mudam ou periodicamente
+    system_info: Optional[Dict[str, Any]] = None
+    inventory: Optional[Dict[str, Any]] = None
+    events: Optional[List[AgentEvent]] = None
+    beacons: Optional[List[BeaconCandidate]] = None
+    process_starts: Optional[List[ProcessStart]] = None
+
+
+# Campos que não são colunas de Metric — tratados à parte na ingestão
+INGEST_EXTRA_FIELDS = {
+    "processes", "agent_version", "system_info", "inventory", "events", "beacons", "process_starts",
+}
 
 
 class MetricOut(BaseModel):
@@ -97,6 +168,12 @@ class MetricOut(BaseModel):
     battery_plugged: Optional[bool]
     battery_health_percent: Optional[float]
     swap_percent: Optional[float]
+    disk_read_bytes: Optional[float] = None
+    disk_write_bytes: Optional[float] = None
+    temperatures: Optional[Any] = None
+    power_watts: Optional[float] = None
+    ml_score: Optional[float] = None
+    excluded_from_training: Optional[bool] = None
 
     class Config:
         from_attributes = True
@@ -115,16 +192,17 @@ class MetricDetailed(MetricOut):
     swap_total: Optional[float]
     disk_used: Optional[float]
     disk_free: Optional[float]
-    disk_read_bytes: Optional[float]
-    disk_write_bytes: Optional[float]
     disk_partitions: Optional[Any]
     uptime_seconds: Optional[float]
     load_avg_1: Optional[float]
     load_avg_5: Optional[float]
     load_avg_15: Optional[float]
-    temperatures: Optional[Any]
     battery_secs_left: Optional[float]
     battery_cycle_count: Optional[int]
+    boot_time: Optional[float] = None
+    user_idle_seconds: Optional[float] = None
+    power_source: Optional[str] = None
+    interval_seconds: Optional[float] = None
 
     class Config:
         from_attributes = True
