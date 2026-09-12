@@ -4,9 +4,38 @@ import time
 import psutil
 from typing import Dict, Any, List, Optional
 
+try:
+    from privacy import redact_secrets
+except ImportError:
+    # Instalação parcial (instalador antigo): sem o filtro local, o agente
+    # ainda roda e o servidor aplica a mesma remoção de segredos na chegada.
+    # Melhor degradar do que deixar a máquina sem monitoramento nenhum.
+    import logging as _logging
+
+    _logging.getLogger("anomaly-agent").warning(
+        "privacy.py ausente — a remoção de segredos ficará só no servidor. "
+        "Rode o instalador de novo para atualizar o agente."
+    )
+
+    def redact_secrets(text):
+        return text
+
+# Sensores extras são opcionais: um agente atualizado tem sensors.py, um
+# recém-baixado por um instalador antigo pode não ter. Sem eles, a coleta
+# segue com o conjunto básico.
+try:
+    import sensors
+    _HAS_SENSORS = True
+except Exception:
+    sensors = None
+    _HAS_SENSORS = False
+
 # Inicializa cpu_percent não-bloqueante
 psutil.cpu_percent(percpu=False)
 psutil.cpu_percent(percpu=True)
+
+# Assinatura e hash são caros: calcula uma vez por executável e reusa.
+_IDENTITY_CACHE: Dict[str, Dict[str, Any]] = {}
 
 _last_disk_io = psutil.disk_io_counters()
 _last_net_io = psutil.net_io_counters()
@@ -46,8 +75,10 @@ def collect_metrics() -> Dict[str, Any]:
     except (psutil.AccessDenied, PermissionError):
         net_connections = 0
 
-    uptime = time.time() - psutil.boot_time()
+    boot = psutil.boot_time()
+    uptime = time.time() - boot
     load_avg = list(psutil.getloadavg()) if hasattr(psutil, "getloadavg") else [0.0, 0.0, 0.0]
+    user_idle = sensors.idle_seconds() if _HAS_SENSORS else None
 
     temperatures = collect_temperatures()
     gpu_metrics = collect_gpu()
@@ -93,6 +124,8 @@ def collect_metrics() -> Dict[str, Any]:
         "load_avg_1": load_avg[0],
         "load_avg_5": load_avg[1],
         "load_avg_15": load_avg[2],
+        "boot_time": boot,
+        "user_idle_seconds": user_idle,
 
         # GPU
         "gpu_metrics": gpu_metrics,
@@ -341,6 +374,8 @@ def _battery_health_windows() -> Optional[Dict[str, Any]]:
             subprocess.run(
                 ["powercfg", "/batteryreport", "/xml", "/output", report_path],
                 capture_output=True, timeout=20, check=True,
+                # Sem isto, o powercfg pisca uma janela preta na tela do usuário
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             root = ET.parse(report_path).getroot()
             design = find_text(root, "DesignCapacity")
@@ -377,43 +412,104 @@ def collect_disk_partitions() -> List[Dict[str, Any]]:
     return partitions
 
 
-def collect_top_processes(n: int = 15) -> List[Dict[str, Any]]:
-    procs = []
-    for proc in psutil.process_iter([
-        "pid", "name", "cpu_percent", "memory_percent", "memory_info",
-        "num_threads", "status", "username", "ppid", "create_time", "cmdline",
-    ]):
+# Quantos executáveis novos ter o hash calculado por coleta
+_HASH_BUDGET = 12
+
+
+def _hashes(exes: List[str]) -> Dict[str, Optional[str]]:
+    """Hash dos executáveis, com orçamento por coleta (arquivo grande custa I/O)."""
+    if not _HAS_SENSORS:
+        return {}
+    out: Dict[str, Optional[str]] = {}
+    budget = _HASH_BUDGET
+    for exe in exes:
+        cached = _IDENTITY_CACHE.get(exe)
+        if cached and "sha256" in cached:
+            out[exe] = cached["sha256"]
+        elif budget > 0:
+            budget -= 1
+            out[exe] = sensors.file_sha256(exe)
+    return out
+
+
+def collect_top_processes(n: int = 15, identify: bool = True) -> List[Dict[str, Any]]:
+    """
+    Duas passadas, de propósito.
+
+    A primeira só lê o que é barato (pid, nome, CPU, memória) para ranquear;
+    a segunda busca o que é caro (linha de comando, caminho, dono) apenas nos
+    ~30 escolhidos. Pedir `cmdline` de trezentos processos no Windows custava
+    vários segundos por coleta — tempo em que o agente ficava parado.
+    """
+    ranking = []
+    for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
         try:
             info = proc.info
-            cmdline = ""
-            try:
-                parts = info.get("cmdline") or []
-                cmdline = " ".join(parts)[:200] if parts else ""
-            except (psutil.AccessDenied, Exception):
-                pass
-
-            procs.append({
-                "pid": info["pid"],
-                "name": info["name"] or "unknown",
-                "cpu_percent": info["cpu_percent"] or 0.0,
-                "mem_percent": round(info["memory_percent"] or 0.0, 2),
-                "mem_rss": info["memory_info"].rss if info["memory_info"] else 0,
-                "num_threads": info["num_threads"] or 1,
-                "status": info["status"] or "unknown",
-                "username": info["username"] or "",
-                "ppid": info.get("ppid"),
-                "create_time": info.get("create_time"),
-                "cmdline": cmdline,
-            })
+            ranking.append((proc, info["pid"], info.get("cpu_percent") or 0.0, info.get("memory_percent") or 0.0))
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
 
-    by_cpu = sorted(procs, key=lambda p: p["cpu_percent"], reverse=True)[:n]
-    by_mem = sorted(procs, key=lambda p: p["mem_percent"], reverse=True)[:n]
+    by_cpu = sorted(ranking, key=lambda r: r[2], reverse=True)[:n]
+    by_mem = sorted(ranking, key=lambda r: r[3], reverse=True)[:n]
+    selected = []
     seen = set()
+    for entry in by_cpu + by_mem:
+        if entry[1] not in seen:
+            seen.add(entry[1])
+            selected.append(entry)
+
     result = []
-    for p in by_cpu + by_mem:
-        if p["pid"] not in seen:
-            seen.add(p["pid"])
-            result.append(p)
+    for proc, pid, cpu, mem in selected:
+        try:
+            # oneshot(): o psutil busca vários atributos numa só ida ao sistema
+            with proc.oneshot():
+                try:
+                    parts = proc.cmdline()
+                    # Segredos saem AQUI, antes de qualquer envio
+                    cmdline = redact_secrets(" ".join(parts)[:250]) if parts else ""
+                except (psutil.AccessDenied, OSError):
+                    cmdline = None  # None = sem permissão; "" = realmente vazio
+                try:
+                    exe = proc.exe()
+                except (psutil.AccessDenied, OSError):
+                    exe = None
+                try:
+                    parent = proc.parent()
+                    parent_name = parent.name() if parent else None
+                except (psutil.Error, OSError):
+                    parent_name = None
+                try:
+                    username = proc.username() or ""
+                except (psutil.AccessDenied, OSError):
+                    username = ""
+                memory = proc.memory_info()
+                result.append({
+                    "pid": pid,
+                    "name": proc.name() or "unknown",
+                    "cpu_percent": cpu,
+                    "mem_percent": round(mem, 2),
+                    "mem_rss": memory.rss if memory else 0,
+                    "num_threads": proc.num_threads(),
+                    "status": proc.status() or "unknown",
+                    "username": username,
+                    "ppid": proc.ppid(),
+                    "create_time": proc.create_time(),
+                    "cmdline": cmdline,
+                    "exe": exe,
+                    "parent_name": parent_name,
+                })
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+
+    if identify and _HAS_SENSORS:
+        exes = [p["exe"] for p in result if p.get("exe")]
+        sigs = sensors.signatures(exes)
+        hashes = _hashes(exes)
+        for p in result:
+            exe = p.get("exe")
+            signature = (sigs.get(exe) if exe else None) or {"signed": "unknown", "publisher": None}
+            ident = {"sha256": hashes.get(exe) if exe else None, **signature}
+            p.update(ident)
+            if exe and ident.get("signed") != "unknown" and len(_IDENTITY_CACHE) < 4000:
+                _IDENTITY_CACHE[exe] = ident
     return result

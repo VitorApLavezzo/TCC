@@ -1,0 +1,217 @@
+"""
+Execução dos comandos vindos do painel.
+
+Cada comando é uma ação pontual, deliberadamente conservadora: encerra um
+processo pelo nome/pid, limpa temporários, pausa sincronização de nuvem,
+isola a rede (só com privilégio), coleta um diagnóstico rápido ou uma
+caixa-preta. Toda ação devolve um resultado descritivo que fica registrado no
+servidor. Nada aqui apaga dados do usuário — "limpar temporários" toca só em
+pastas de temporários conhecidas.
+"""
+import os
+import platform
+import shutil
+import subprocess
+import tempfile
+import time
+from typing import Any, Callable, Dict, List, Optional
+
+import psutil
+
+IS_WINDOWS = platform.system() == "Windows"
+
+# No Windows, um subprocesso de console abre uma JANELA PRETA na tela — e o
+# agente roda sem console (pythonw), então cada consulta ao sistema piscava um
+# "cmd" na frente do usuário. CREATE_NO_WINDOW executa sem janela nenhuma.
+NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows" else {}
+
+SYNC_CLIENTS = {"onedrive.exe", "googledrivesync.exe", "googledrive.exe", "dropbox.exe", "megasync.exe",
+                "insync.exe", "nextcloud.exe", "onedrive", "dropbox", "nextcloud"}
+FIREWALL_RULE = "AnomalyDetect-Isolation"
+
+
+def _kill(pid: Optional[int], name: Optional[str]) -> Dict[str, Any]:
+    killed = []
+    targets = []
+    if pid:
+        try:
+            targets.append(psutil.Process(pid))
+        except psutil.NoSuchProcess:
+            pass
+    if name:
+        for p in psutil.process_iter(["pid", "name"]):
+            if (p.info.get("name") or "").lower() == name.lower():
+                targets.append(p)
+    for p in targets:
+        try:
+            p.terminate()
+            killed.append(p.pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    gone, alive = psutil.wait_procs(targets, timeout=5)
+    for p in alive:
+        try:
+            p.kill()
+        except psutil.Error:
+            pass
+    return {"killed_pids": killed, "message": f"{len(killed)} processo(s) encerrado(s)"}
+
+
+def _clean_temp(_params) -> Dict[str, Any]:
+    dirs = [tempfile.gettempdir()]
+    if IS_WINDOWS and os.environ.get("LOCALAPPDATA"):
+        dirs.append(os.path.join(os.environ["LOCALAPPDATA"], "Temp"))
+    else:
+        dirs.append("/var/tmp")
+    freed = 0
+    removed = 0
+    cutoff = time.time() - 24 * 3600  # não apaga o que foi criado hoje (pode estar em uso)
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
+        for entry in os.scandir(d):
+            try:
+                if entry.stat().st_mtime > cutoff:
+                    continue
+                size = entry.stat().st_size if entry.is_file() else 0
+                if entry.is_file() or entry.is_symlink():
+                    os.remove(entry.path)
+                else:
+                    size = _dir_size(entry.path)
+                    shutil.rmtree(entry.path, ignore_errors=True)
+                freed += size
+                removed += 1
+            except (OSError, PermissionError):
+                continue
+    return {"removed": removed, "freed_mb": round(freed / 1024 / 1024, 1),
+            "message": f"{removed} item(ns) apagados, {round(freed / 1024 / 1024, 1)} MB liberados"}
+
+
+def _dir_size(path: str) -> int:
+    total = 0
+    for root, _, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+def _stop_sync(params) -> Dict[str, Any]:
+    name = (params.get("name") or "").lower()
+    stopped = []
+    for p in psutil.process_iter(["pid", "name"]):
+        pname = (p.info.get("name") or "").lower()
+        if pname in SYNC_CLIENTS or (name and pname == name):
+            try:
+                p.terminate()
+                stopped.append(p.info.get("name"))
+            except psutil.Error:
+                pass
+    return {"stopped": stopped, "message": f"{len(stopped)} cliente(s) de sincronização pausado(s)"}
+
+
+def _isolate(server_host: Optional[str], restore: bool) -> Dict[str, Any]:
+    if IS_WINDOWS:
+        return _isolate_windows(restore)
+    return _isolate_linux(restore)
+
+
+def _isolate_windows(restore: bool) -> Dict[str, Any]:
+    if restore:
+        subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FIREWALL_RULE}-out"],
+                       capture_output=True, timeout=15, **NO_WINDOW)
+        subprocess.run(["netsh", "advfirewall", "firewall", "delete", "rule", f"name={FIREWALL_RULE}-in"],
+                       capture_output=True, timeout=15, **NO_WINDOW)
+        subprocess.run(["netsh", "advfirewall", "set", "allprofiles", "firewallpolicy",
+                        "allowinbound,allowoutbound"], capture_output=True, timeout=15, **NO_WINDOW)
+        return {"message": "Rede restaurada"}
+    subprocess.run(["netsh", "advfirewall", "set", "allprofiles", "firewallpolicy",
+                    "blockinbound,blockoutbound"], capture_output=True, timeout=15, **NO_WINDOW)
+    return {"message": "Rede isolada (firewall bloqueando entrada e saída)"}
+
+
+def _isolate_linux(restore: bool) -> Dict[str, Any]:
+    if shutil.which("nmcli"):
+        action = "up" if restore else "down"
+        subprocess.run(["nmcli", "networking", "off" if not restore else "on"], capture_output=True, timeout=15, **NO_WINDOW)
+        return {"message": f"Rede {'restaurada' if restore else 'desligada'} via nmcli", "action": action}
+    return {"message": "Não foi possível alterar a rede (nmcli ausente)", "ok": False}
+
+
+def _burst_diagnostic(params, uploader: Callable) -> Dict[str, Any]:
+    """20 leituras, uma por segundo, com consumo por processo, e envia."""
+    seconds = int(params.get("seconds", 20))
+    interval = float(params.get("interval", 1))
+    diagnostic_id = params.get("diagnostic_id")
+    samples = []
+    proc_cpu: Dict[str, float] = {}
+    proc_mem: Dict[str, float] = {}
+    proc_io: Dict[str, float] = {}
+    for p in psutil.process_iter():
+        try:
+            p.cpu_percent(None)
+        except psutil.Error:
+            pass
+    last_io = psutil.disk_io_counters()
+    last_net = psutil.net_io_counters()
+    for _ in range(seconds):
+        time.sleep(interval)
+        cpu = psutil.cpu_percent(None)
+        vm = psutil.virtual_memory()
+        io = psutil.disk_io_counters()
+        net = psutil.net_io_counters()
+        cpu_times = psutil.cpu_times_percent(None)
+        samples.append({
+            "cpu": cpu, "mem": vm.percent, "swap": psutil.swap_memory().percent,
+            "disk_read": (io.read_bytes - last_io.read_bytes) / interval if io else 0,
+            "disk_write": (io.write_bytes - last_io.write_bytes) / interval if io else 0,
+            "net_sent": (net.bytes_sent - last_net.bytes_sent) / interval,
+            "net_recv": (net.bytes_recv - last_net.bytes_recv) / interval,
+            "iowait": getattr(cpu_times, "iowait", None),
+        })
+        last_io, last_net = io, net
+        for p in psutil.process_iter(["name", "cpu_percent", "memory_percent", "io_counters"]):
+            try:
+                name = p.info.get("name") or "?"
+                proc_cpu[name] = proc_cpu.get(name, 0) + (p.info.get("cpu_percent") or 0)
+                proc_mem[name] = max(proc_mem.get(name, 0), p.info.get("memory_percent") or 0)
+            except psutil.Error:
+                pass
+    n = max(len(samples), 1)
+    processes = [
+        {"name": name, "cpu_avg": proc_cpu.get(name, 0) / n, "mem_percent": proc_mem.get(name, 0),
+         "io_bytes_s": proc_io.get(name, 0)}
+        for name in set(proc_cpu) | set(proc_mem)
+    ]
+    processes.sort(key=lambda x: x["cpu_avg"], reverse=True)
+    if diagnostic_id is not None:
+        uploader(f"diagnostic/{diagnostic_id}", {"samples": samples, "processes": processes[:40]})
+    return {"samples": len(samples), "message": "Diagnóstico coletado"}
+
+
+def execute(command: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+    """Executa um comando e devolve (ok, result). `context` traz o uploader e o host do servidor."""
+    cmd = command.get("command")
+    params = command.get("params") or {}
+    try:
+        if cmd == "kill_process":
+            return _kill(params.get("pid"), params.get("name"))
+        if cmd == "clean_temp":
+            return _clean_temp(params)
+        if cmd == "stop_sync_client":
+            return _stop_sync(params)
+        if cmd == "isolate_network":
+            return _isolate(context.get("server_host"), restore=False)
+        if cmd == "restore_network":
+            return _isolate(context.get("server_host"), restore=True)
+        if cmd == "burst_diagnostic":
+            return _burst_diagnostic(params, context["uploader"])
+        if cmd == "collect_inventory":
+            # O laço principal reenvia o inventário na próxima coleta ao ver este flag
+            context.setdefault("flags", {})["force_inventory"] = True
+            return {"message": "Inventário será atualizado na próxima coleta"}
+        return {"ok": False, "message": f"Comando desconhecido: {cmd}"}
+    except Exception as e:
+        return {"ok": False, "message": f"Falha ao executar {cmd}: {e}"}
