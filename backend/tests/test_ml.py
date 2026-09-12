@@ -21,16 +21,32 @@ def make_mock_metric(cpu=30.0, mem=40.0, disk=50.0, net_s=100000, net_r=200000,
     m.disk_write_bytes = disk_w
     m.load_avg_1 = load
     m.process_count = procs
+    m.swap_percent = 5.0
+    m.gpu_metrics = None
     m.timestamp = datetime.utcnow()
     return m
 
 
 class TestMLService:
     def test_metric_to_vector_shape(self):
-        from app.services.ml_service import _metric_to_vector
+        from app.services.ml_service import _metric_to_vector, FEATURES
         m = make_mock_metric()
         vec = _metric_to_vector(m)
-        assert len(vec) == 10
+        assert len(vec) == len(FEATURES)
+
+    def test_vector_encodes_hour_cyclically(self):
+        """23h e 0h precisam ficar perto; 0h e 12h, longe."""
+        from app.services.ml_service import _metric_to_vector, FEATURE_KEYS
+        from datetime import timezone
+        i_sin, i_cos = FEATURE_KEYS.index("hour_sin"), FEATURE_KEYS.index("hour_cos")
+
+        def at(hour):
+            m = make_mock_metric()
+            m.timestamp = datetime(2026, 9, 7, hour, 0, tzinfo=timezone.utc)
+            v = _metric_to_vector(m, offset_minutes=0)
+            return np.array([v[i_sin], v[i_cos]])
+
+        assert np.linalg.norm(at(23) - at(0)) < np.linalg.norm(at(0) - at(12))
 
     def test_train_insufficient_data(self):
         from app.services.ml_service import train_model
@@ -42,10 +58,10 @@ class TestMLService:
     def test_predict_no_model(self):
         from app.services.ml_service import predict_anomaly
         m = make_mock_metric()
-        with patch("app.services.ml_service._load_model", return_value=(None, None)):
+        with patch("app.services.ml_service._load_bundle", return_value=None):
             is_anomaly, score = predict_anomaly(1, m)
         assert is_anomaly is False
-        assert score == 0.0
+        assert score is None
 
     def test_classify_high_cpu(self):
         from app.services.ml_service import classify_anomaly
@@ -78,3 +94,12 @@ class TestMLService:
         result = classify_anomaly(m, db)
         assert result["anomaly_type"] == "disk_full"
         assert result["severity"] == "critical"
+
+    def test_classify_uses_contributions_when_no_threshold_matches(self):
+        from app.services.ml_service import classify_anomaly
+        m = make_mock_metric(cpu=30.0, mem=40.0, disk=50.0)
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+        contributions = [{"group": "time", "label": "Horário incomum", "percent": 70.0}]
+        result = classify_anomaly(m, db, contributions)
+        assert result["anomaly_type"] == "unusual_time"
