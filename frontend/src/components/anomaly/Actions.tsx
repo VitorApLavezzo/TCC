@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Anomaly, Machine, SECURITY_TYPES } from "../../types";
 import { actionsApi, errorMessage } from "../../services/api";
+import { processName } from "../../lib/format";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
@@ -64,19 +65,22 @@ export function AnomalyActions({ anomaly, machine }: { anomaly: Anomaly; machine
   if (!machine) return null;
   const isSecurity = SECURITY_TYPES.has(anomaly.anomaly_type);
   const isAdmin = (machine.system_info as any)?.is_admin;
-  const proc = anomaly.responsible_process;
+  const proc = processName(anomaly);
+  const pid = anomaly.affected_metrics?._behavior?.pid;
+  const killLabel = proc ? `Encerrar ${proc}` : pid ? `Encerrar processo (PID ${pid})` : null;
+  const killParams = proc ? { name: proc, ...(pid ? { pid } : {}) } : pid ? { pid } : null;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {proc && (
+      {killLabel && killParams && (
         <Button
           size="sm"
           variant="secondary"
           loading={pending === "kill_process"}
           disabled={watching !== null}
-          onClick={() => run("kill_process", `Encerrar ${proc}`, { name: proc }, true)}
+          onClick={() => run("kill_process", killLabel, killParams, true)}
         >
-          Encerrar {proc}
+          {killLabel}
         </Button>
       )}
       {(anomaly.anomaly_type === "disk_full" || anomaly.anomaly_type === "disk_forecast") && (

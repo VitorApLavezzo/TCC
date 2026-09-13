@@ -48,11 +48,21 @@ export function Register() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-canvas p-4">
+    <div className="flex min-h-screen flex-col bg-canvas md:flex-row">
+      <div className="flex flex-col justify-center gap-4 border-b border-hairline bg-raised px-6 py-10 md:w-[42%] md:border-b-0 md:border-r md:px-12 md:py-0 lg:w-[38%]">
+        <Wordmark />
+        <p className="max-w-sm font-display text-xl font-semibold leading-snug text-fg">
+          A saúde dos seus computadores, explicada em português simples.
+        </p>
+        <p className="max-w-sm text-sm leading-relaxed text-fg-2">
+          Depois de criar sua conta, você conecta o primeiro computador em três passos — sem conhecimento técnico.
+        </p>
+      </div>
+
+      <div className="flex flex-1 items-center justify-center p-4 py-10 sm:p-8">
       <div className="w-full max-w-[22rem]">
         <header className="mb-7">
-          <Wordmark />
-          <h1 className="mt-5 text-lg font-semibold tracking-tight text-fg">Criar sua conta</h1>
+          <h1 className="font-display text-xl font-bold tracking-tight text-fg">Criar sua conta</h1>
           <p className="mt-1.5 text-sm text-fg-2">Depois disso você conecta seus computadores em três passos.</p>
         </header>
 
@@ -145,6 +155,7 @@ export function Register() {
             </Link>
           </p>
         </form>
+      </div>
       </div>
     </div>
   );

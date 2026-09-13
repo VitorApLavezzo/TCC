@@ -166,7 +166,7 @@ export interface Anomaly {
   anomaly_type: string;
   severity: "low" | "medium" | "high" | "critical";
   anomaly_score?: number;
-  affected_metrics?: Record<string, number>;
+  affected_metrics?: Record<string, number> & { _behavior?: { pid?: number; [key: string]: any } };
   responsible_process?: string;
   is_resolved: boolean;
   resolved_at?: string;

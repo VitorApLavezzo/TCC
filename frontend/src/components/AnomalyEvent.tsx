@@ -5,6 +5,7 @@ import { ptBR } from "date-fns/locale";
 import { Anomaly, ANOMALY_TYPE_LABELS } from "../types";
 import { Severity } from "./ui/Badge";
 import { StatusDot } from "./ui/Layout";
+import { processName } from "../lib/format";
 
 /**
  * Um aviso apresentado como evento detectado, não como item de lista.
@@ -85,10 +86,10 @@ export function AnomalyEvent({
             </span>
           )}
 
-          {(machineName || anomaly.responsible_process) && (
+          {(machineName || processName(anomaly)) && (
             <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-micro text-fg-3">
               {machineName && <span>{machineName}</span>}
-              {anomaly.responsible_process && <span className="font-mono">{anomaly.responsible_process}</span>}
+              {processName(anomaly) && <span className="font-mono">{processName(anomaly)}</span>}
             </span>
           )}
         </button>

@@ -45,3 +45,15 @@ export function timeAgo(iso?: string | Date | null, now: number = Date.now()) {
 export function pluralize(n: number, singular: string, plural = `${singular}s`) {
   return `${n} ${n === 1 ? singular : plural}`;
 }
+
+/**
+ * Nome do programa responsável, ou null quando não dá pra identificar.
+ * Avisos antigos (e agentes desatualizados) gravaram "?" como nome — isso
+ * nunca deve aparecer na interface como se fosse um nome de verdade.
+ */
+export function processName(anomaly?: { responsible_process?: string | null } | null): string | null {
+  const raw = anomaly?.responsible_process;
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  return trimmed && trimmed !== "?" ? trimmed : null;
+}

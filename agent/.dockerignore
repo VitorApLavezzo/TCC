@@ -1,0 +1,8 @@
+# Artefatos locais do Python: não fazem parte da imagem e, numa pasta do
+# OneDrive, podem quebrar o contexto de build do Docker.
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+venv
+.venv

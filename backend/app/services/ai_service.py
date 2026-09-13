@@ -286,6 +286,26 @@ def strip_citations(text):
     return re.sub(r"\s?\[\[[a-z0-9_]+\]\]", "", text)
 
 
+def sanitize_explanation(data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Tira os marcadores [[chave]] de citação de tudo que vai para o frontend
+    (summary, detailed_explanation, causas, recomendações, justificativa de
+    severidade — inclusive dentro de `variants`), sem tocar o que fica gravado
+    no banco. Ponto único: todo lugar que devolve uma explicação passa por
+    aqui antes de responder."""
+    if not data:
+        return data
+    out = dict(data)
+    for key in ("summary", "detailed_explanation", "severity_justification"):
+        if key in out:
+            out[key] = strip_citations(out[key])
+    for key in ("possible_causes", "recommendations"):
+        if isinstance(out.get(key), list):
+            out[key] = [strip_citations(v) for v in out[key]]
+    if isinstance(out.get("variants"), dict):
+        out["variants"] = {level: sanitize_explanation(v) for level, v in out["variants"].items()}
+    return out
+
+
 def _matches(value: float, target: float) -> bool:
     return abs(value - target) <= max(1.0, abs(target) * 0.06)
 

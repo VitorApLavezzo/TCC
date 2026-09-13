@@ -5,12 +5,13 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        // Prosa, rótulos, títulos. Archivo é um grotesco de construção
-        // industrial — dá voz ao produto sem virar decoração.
-        sans: ['Archivo', "system-ui", "-apple-system", "sans-serif"],
+        // Prosa e rótulos de interface.
+        sans: ['"Red Hat Text"', "system-ui", "-apple-system", "sans-serif"],
+        // Títulos e manchetes.
+        display: ['"Red Hat Display"', "system-ui", "-apple-system", "sans-serif"],
         // Regra do produto: TUDO que a máquina mediu é composto aqui.
         // Valor, unidade, horário, identificador técnico, comando.
-        mono: ['"IBM Plex Mono"', "ui-monospace", "SFMono-Regular", "monospace"],
+        mono: ['"Red Hat Mono"', "ui-monospace", "SFMono-Regular", "monospace"],
       },
       fontSize: {
         micro: ["0.75rem", { lineHeight: "1.0625rem", letterSpacing: "0.005em" }],
@@ -61,9 +62,9 @@ export default {
       borderRadius: {
         // Raios diferentes por classe de objeto, de propósito: controle é
         // crispo, painel é suave, janela de leitura é reta.
-        DEFAULT: "3px",
-        control: "3px",
-        panel: "5px",
+        DEFAULT: "10px",
+        control: "10px",
+        panel: "16px",
       },
       boxShadow: {
         float: "0 10px 30px -8px rgb(0 0 0 / 0.45), 0 3px 8px -3px rgb(0 0 0 / 0.28)",

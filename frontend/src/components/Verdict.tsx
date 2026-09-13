@@ -1,9 +1,11 @@
+import { ReactNode } from "react";
 import { clsx } from "clsx";
 import { Level } from "../lib/health";
 import { Anomaly, ANOMALY_TYPE_LABELS } from "../types";
 import { pluralize } from "../lib/format";
 import { TextButton } from "./ui/Button";
 import { Explain } from "./ui/Explain";
+import { StatusDot } from "./ui/Layout";
 
 /** As três zonas do estado, na ordem em que a máquina caminha entre elas. */
 const ZONES: { level: Exclude<Level, "unknown">; label: string }[] = [
@@ -24,17 +26,32 @@ const ZONE_TEXT: Record<string, string> = {
   crit: "text-crit",
 };
 
+const CHIP_TONE: Record<Level, string> = {
+  ok: "text-ok bg-ok/[.14]",
+  warn: "text-warn bg-warn/[.14]",
+  crit: "text-crit bg-crit/[.14]",
+  unknown: "text-fg-2 bg-sunken",
+};
+
+const CHIP_LABEL: Record<Level, string> = {
+  ok: "Normal",
+  warn: "Atenção",
+  crit: "Crítico",
+  unknown: "Sem dados",
+};
+
 /**
  * A conclusão sobre a máquina, antes de qualquer número.
  *
- * Duas leituras em uma: a frase responde "o que está acontecendo", e a escala
- * de três zonas responde "quão longe do normal isso está" sem exigir que a
- * pessoa interprete uma porcentagem. As zonas são as mesmas três que o sistema
- * usa para classificar toda medida, então não há precisão inventada: a máquina
- * está inteiramente numa delas.
+ * É o único bloco elevado da tela: um chip de estado, a manchete grande e a
+ * frase do motivo respondem "o que está acontecendo"; a escala de três zonas
+ * e o progresso do aprendizado, à direita, respondem "quão longe do normal
+ * isso está" e "quanto o sistema já conhece desta máquina". As zonas são as
+ * mesmas três que classificam toda medida do painel — nenhuma precisão
+ * inventada.
  *
- * Quando está tudo normal a tela não tem cor forte nenhuma — é o que faz um
- * problema saltar sozinho quando aparece.
+ * Quando está tudo normal o chip e a manchete não têm cor forte nenhuma — é o
+ * que faz um problema saltar sozinho quando aparece.
  */
 export function Verdict({
   level,
@@ -43,6 +60,7 @@ export function Verdict({
   driver,
   onOpenAnomaly,
   onSeeAll,
+  actions,
 }: {
   /** Pior faixa entre os sinais vitais no momento. */
   level: Level;
@@ -53,6 +71,8 @@ export function Verdict({
   driver?: { label: string; value: string } | null;
   onOpenAnomaly: (id: number) => void;
   onSeeAll: () => void;
+  /** Ações da máquina: diagnóstico e ver análises. */
+  actions?: ReactNode;
 }) {
   const top = openAnomalies[0];
   const critical = openAnomalies.some((a) => a.severity === "critical");
@@ -89,93 +109,101 @@ export function Verdict({
   const activeZone = ZONES.findIndex((z) => z.level === tone);
 
   return (
-    <div className="grid gap-x-10 gap-y-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
-      <div className="min-w-0">
-        <h2
-          className={clsx(
-            "text-xl font-semibold",
-            tone === "crit" ? "text-crit" : tone === "warn" ? "text-warn" : "text-fg"
-          )}
-        >
-          {headline}
-        </h2>
-        <p className="mt-1.5 max-w-prose text-sm leading-relaxed text-fg-2">{support}</p>
-
-        {(top || driver) && (
-          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5">
-            {driver && !openAnomalies.length && (
-              <p className="text-xs text-fg-3">
-                Puxado por <span className="text-fg-2">{driver.label}</span>{" "}
-                <span className="tnum font-mono text-fg-2">{driver.value}</span>
-              </p>
+    <div className="rounded-panel border border-edge bg-raised p-6 sm:p-7">
+      <div className="grid gap-x-10 gap-y-6 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+        <div className="min-w-0">
+          <span
+            className={clsx(
+              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-micro font-semibold uppercase tracking-wide",
+              CHIP_TONE[tone]
             )}
-            {top && (
+          >
+            <StatusDot tone={tone === "unknown" ? "idle" : tone} />
+            {CHIP_LABEL[tone]}
+          </span>
+
+          <h2 className="mt-3 font-display text-[1.9rem] font-bold leading-[1.1] tracking-tight text-fg sm:text-[2.1rem]">
+            {headline}
+          </h2>
+          <p className="mt-1.5 max-w-[60ch] text-sm leading-relaxed text-fg-2">
+            {support}
+            {driver && !openAnomalies.length && (
               <>
-                <TextButton onClick={() => onOpenAnomaly(top.id)}>Ver o que aconteceu</TextButton>
-                {openAnomalies.length > 1 && <TextButton onClick={onSeeAll}>Ver todos</TextButton>}
+                {" "}
+                <span className="text-fg-2">
+                  Puxado por <span className="text-fg">{driver.label}</span>{" "}
+                  <span className="tnum font-mono text-fg">{driver.value}</span>.
+                </span>
               </>
             )}
-          </div>
-        )}
-      </div>
-
-      {/*
-        Escala de estado: as três zonas sempre visíveis, só a atual acesa.
-        Mostrar as outras é o que dá escala à informação — "sob pressão"
-        significa pouco sem "problema" desenhado logo adiante.
-      */}
-      <div
-        className="w-full sm:w-56"
-        role="img"
-        aria-label={`Estado: ${tone === "unknown" ? "sem leituras" : ZONES[activeZone]?.label}`}
-      >
-        <div className="flex gap-1">
-          {ZONES.map((z, i) => (
-            <div key={z.level} className="flex-1">
-              <div
-                className={clsx(
-                  "h-1 rounded-full transition-colors duration-500 ease-signal",
-                  i === activeZone ? ZONE_FILL[z.level] : "bg-hairline"
-                )}
-              />
-              <p
-                className={clsx(
-                  "mt-1.5 text-micro transition-colors duration-500",
-                  i === activeZone ? clsx("font-medium", ZONE_TEXT[z.level]) : "text-fg-3"
-                )}
-              >
-                {z.label}
-              </p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {learning && !learning.ml_ready && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 sm:col-span-2">
-          <div
-            className="h-0.5 w-32 overflow-hidden rounded-full bg-sunken"
-            role="progressbar"
-            aria-label="Progresso do aprendizado"
-            aria-valuenow={Math.min(learning.collected, learning.needed)}
-            aria-valuemin={0}
-            aria-valuemax={learning.needed}
-          >
-            <div
-              className="h-full bg-accent transition-[width] duration-700 ease-signal"
-              style={{ width: `${Math.min((learning.collected / learning.needed) * 100, 100)}%` }}
-            />
-          </div>
-          <p className="flex items-center gap-1.5 text-xs text-fg-3">
-            Aprendendo o normal deste computador —{" "}
-            <span className="tnum font-mono">
-              {learning.collected} de {learning.needed}
-            </span>{" "}
-            leituras
-            <Explain term="aprendizado" />
           </p>
+
+          {top && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5">
+              <TextButton onClick={() => onOpenAnomaly(top.id)}>Ver o que aconteceu</TextButton>
+              {openAnomalies.length > 1 && <TextButton onClick={onSeeAll}>Ver todos</TextButton>}
+            </div>
+          )}
+
+          {actions && <div className="mt-[18px] flex flex-wrap gap-2.5">{actions}</div>}
         </div>
-      )}
+
+        {/*
+          Escala de estado (as três zonas sempre visíveis, só a atual acesa) e,
+          logo abaixo, o progresso do aprendizado — as duas respostas de
+          "quão longe" ficam juntas, à direita da manchete.
+        */}
+        <div className="flex w-full flex-col gap-3.5 sm:w-60">
+          <div role="img" aria-label={`Estado: ${tone === "unknown" ? "sem leituras" : ZONES[activeZone]?.label}`}>
+            <div className="grid grid-cols-3 gap-1">
+              {ZONES.map((z, i) => (
+                <div key={z.level} className="flex flex-col gap-1.5">
+                  <div
+                    className={clsx(
+                      "h-1.5 rounded-full transition-colors duration-500 ease-signal",
+                      i === activeZone ? ZONE_FILL[z.level] : "bg-sunken"
+                    )}
+                  />
+                  <p
+                    className={clsx(
+                      "text-micro transition-colors duration-500",
+                      i === activeZone ? clsx("font-semibold", ZONE_TEXT[z.level]) : "text-fg-3"
+                    )}
+                  >
+                    {z.label}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {learning && !learning.ml_ready && (
+            <div className="text-xs text-fg-2">
+              <p className="flex flex-wrap items-center gap-1.5">
+                Aprendendo o normal deste computador:{" "}
+                <span className="tnum font-mono text-fg">
+                  {learning.collected} de {learning.needed}
+                </span>{" "}
+                leituras
+                <Explain term="aprendizado" />
+              </p>
+              <div
+                className="mt-1.5 h-1 overflow-hidden rounded-full bg-sunken"
+                role="progressbar"
+                aria-label="Progresso do aprendizado"
+                aria-valuenow={Math.min(learning.collected, learning.needed)}
+                aria-valuemin={0}
+                aria-valuemax={learning.needed}
+              >
+                <div
+                  className="h-full min-w-[6px] rounded-full bg-accent transition-[width] duration-700 ease-signal"
+                  style={{ width: `${Math.min((learning.collected / learning.needed) * 100, 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

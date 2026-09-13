@@ -13,15 +13,12 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 /**
- * A ação primária é neutra de alto contraste, não colorida.
- *
- * Num produto de monitoramento, verde precisa significar "saudável" e vermelho
- * "problema". Se o botão principal for verde, a cor perde esse significado —
- * era o erro da versão anterior, que usava o mesmo teal para botão e para
- * estado normal.
+ * A ação primária usa a cor de marca (accent), reservada a interação e
+ * detecção — nunca usada para comunicar "saudável". O estado de saúde
+ * continua exclusivamente em ok/warn/crit, nunca no botão.
  */
 const VARIANT: Record<Variant, string> = {
-  primary: "bg-inverse text-inverse-fg font-medium hover:opacity-90 active:opacity-80",
+  primary: "bg-accent text-canvas font-semibold hover:opacity-90 active:opacity-80",
   secondary: "border border-edge text-fg hover:bg-raised hover:border-fg-3 active:bg-sunken",
   quiet: "text-fg-2 hover:bg-raised hover:text-fg active:bg-sunken",
   danger: "border border-edge text-crit hover:bg-crit/10 hover:border-crit/50 active:bg-crit/15",

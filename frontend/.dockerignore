@@ -1,0 +1,9 @@
+# Gerados localmente: o Dockerfile instala as dependências e faz o build
+# dentro do container. Enviar estes arquivos no contexto é lento e, numa
+# pasta do OneDrive, falha com "invalid file request" quando algum arquivo
+# está como espaço reservado (ReparsePoint).
+node_modules
+dist
+.shots
+npm-debug.log*
+.vite

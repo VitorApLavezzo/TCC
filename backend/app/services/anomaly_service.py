@@ -77,6 +77,15 @@ def filter_reason(db: Session, machine: Machine, c: Candidate, now, local_hour: 
     return None
 
 
+def _normalize_process_name(name: Optional[str]) -> Optional[str]:
+    """'?', vazio ou só espaços não é um nome de processo válido — vira None
+    para não ficar gravado (agentes velhos ainda mandam '?' às vezes)."""
+    if name is None:
+        return None
+    name = name.strip()
+    return name if name and name != "?" else None
+
+
 def persist_candidate(
     db: Session,
     machine: Machine,
@@ -88,6 +97,7 @@ def persist_candidate(
     now=None,
 ) -> Optional[Anomaly]:
     now = now or utcnow()
+    c.responsible = _normalize_process_name(c.responsible)
     if not skip_filters:
         hour = local_time(now, tz_offset_minutes(machine)).hour
         reason = filter_reason(db, machine, c, now, hour)

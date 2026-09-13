@@ -14,42 +14,42 @@
    */
   :root,
   [data-theme="dark"] {
-    --canvas: 17 17 19;
-    --surface: 24 24 27;
-    --raised: 31 31 35;
-    --sunken: 39 39 44;
-    --hairline: 37 37 42;
-    --edge: 58 58 65;
-    --fg: 237 237 240;
-    --fg-2: 161 161 170;
-    --fg-3: 136 136 145;
-    --inverse: 237 237 240;
-    --inverse-fg: 17 17 19;
-    --accent: 124 122 232;
-    --ok: 82 176 130;
-    --warn: 216 158 62;
-    --crit: 226 100 104;
+    --canvas: 11 17 23;
+    --surface: 17 26 34;
+    --raised: 22 33 43;
+    --sunken: 28 40 53;
+    --hairline: 26 38 50;
+    --edge: 36 50 65;
+    --fg: 230 237 243;
+    --fg-2: 143 161 179;
+    --fg-3: 122 140 158;
+    --inverse: 230 237 243;
+    --inverse-fg: 11 17 23;
+    --accent: 79 157 255;
+    --ok: 61 214 140;
+    --warn: 242 181 68;
+    --crit: 242 85 90;
     /* Opacidades da faixa do normal, calibradas por tema. */
     --band-fill: 0.05;
     --band-line: 0.16;
   }
 
   [data-theme="light"] {
-    --canvas: 246 246 248;
+    --canvas: 242 245 248;
     --surface: 255 255 255;
-    --raised: 255 255 255;
-    --sunken: 240 240 243;
-    --hairline: 228 228 233;
-    --edge: 201 201 209;
-    --fg: 24 24 27;
-    --fg-2: 88 88 97;
-    --fg-3: 113 113 122;
-    --inverse: 24 24 27;
-    --inverse-fg: 255 255 255;
-    --accent: 79 74 200;
-    --ok: 25 122 79;
-    --warn: 148 99 8;
-    --crit: 181 40 46;
+    --raised: 247 249 251;
+    --sunken: 226 232 238;
+    --hairline: 231 236 241;
+    --edge: 216 224 232;
+    --fg: 15 27 38;
+    --fg-2: 83 100 116;
+    --fg-3: 102 119 138;
+    --inverse: 15 27 38;
+    --inverse-fg: 242 245 248;
+    --accent: 28 102 214;
+    --ok: 22 135 90;
+    --warn: 162 102 10;
+    --crit: 196 46 54;
     --band-fill: 0.07;
     --band-line: 0.22;
   }
@@ -63,6 +63,10 @@
 
   body {
     @apply bg-canvas text-fg font-sans text-base antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display;
   }
 
   /* Todo dado numérico alinha em coluna. */

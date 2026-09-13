@@ -34,7 +34,7 @@ def _owned_anomaly(db: Session, anomaly_id: int, user: User) -> Anomaly:
 
 
 def _serialize(expl: AIExplanation) -> dict:
-    return {
+    return ai_service.sanitize_explanation({
         "id": expl.id,
         "summary": expl.summary,
         "detailed_explanation": expl.detailed_explanation,
@@ -52,7 +52,7 @@ def _serialize(expl: AIExplanation) -> dict:
         "user_rating": expl.user_rating,
         "judge_scores": expl.judge_scores,
         "generated_at": expl.generated_at,
-    }
+    })
 
 
 @router.post("/{anomaly_id}/regenerate")
@@ -82,9 +82,9 @@ def make_variant(anomaly_id: int, body: VariantBody, db: Session = Depends(get_d
     anomaly = _owned_anomaly(db, anomaly_id, current_user)
     expl = db.query(AIExplanation).filter(AIExplanation.anomaly_id == anomaly_id).first()
     if expl and (expl.variants or {}).get(body.level):
-        return {"level": body.level, "variant": expl.variants[body.level], "cached": True}
+        return {"level": body.level, "variant": ai_service.sanitize_explanation(expl.variants[body.level]), "cached": True}
     variant = ai_service.generate_variant(db, anomaly, body.level)
-    return {"level": body.level, "variant": variant, "cached": False}
+    return {"level": body.level, "variant": ai_service.sanitize_explanation(variant), "cached": False}
 
 
 @router.post("/{anomaly_id}/rate")

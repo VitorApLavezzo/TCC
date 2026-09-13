@@ -3,6 +3,7 @@ import { Anomaly, SECURITY_TYPES } from "../../types";
 import { anomaliesApi, errorMessage } from "../../services/api";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
+import { processName } from "../../lib/format";
 
 /**
  * O ciclo de aprendizado do aviso.
@@ -24,9 +25,10 @@ export function Feedback({ anomaly, onChange }: { anomaly: Anomaly; onChange: (a
     try {
       const res = await anomaliesApi.feedback(anomaly.id, "normal", { scope });
       onChange(res.data);
+      const proc = processName(anomaly);
       toast.success(
-        scope === "process" && anomaly.responsible_process
-          ? `Entendido. ${anomaly.responsible_process} não vai mais gerar este aviso.`
+        scope === "process" && proc
+          ? `Entendido. ${proc} não vai mais gerar este aviso.`
           : "Entendido. Esse tipo de aviso foi silenciado para este computador."
       );
     } catch (err) {
@@ -65,9 +67,9 @@ export function Feedback({ anomaly, onChange }: { anomaly: Anomaly; onChange: (a
             Era um problema — resolvi
           </Button>
           <Button variant="secondary" loading={busy === "normal"} onClick={() => markNormal("process")}>
-            {anomaly.responsible_process ? `“${anomaly.responsible_process}” é normal aqui` : "Isso é normal para mim"}
+            {processName(anomaly) ? `“${processName(anomaly)}” é normal aqui` : "Isso é normal para mim"}
           </Button>
-          {!isSecurity && anomaly.responsible_process && (
+          {!isSecurity && processName(anomaly) && (
             <Button variant="quiet" loading={busy === "normal"} onClick={() => markNormal("type")}>
               Todo aviso deste tipo é normal
             </Button>

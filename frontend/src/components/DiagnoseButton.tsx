@@ -12,7 +12,15 @@ import { Gauge, X } from "lucide-react";
  * a IA responde na hora, apontando o gargalo e o programa culpado. Fecha o
  * ciclo do leigo que "sente" a lentidão mas não sabe olhar um gráfico.
  */
-export function DiagnoseButton({ machineId, online }: { machineId: number; online: boolean }) {
+export function DiagnoseButton({
+  machineId,
+  online,
+  variant = "secondary",
+}: {
+  machineId: number;
+  online: boolean;
+  variant?: "primary" | "secondary";
+}) {
   const toast = useToast();
   const [result, setResult] = useState<DiagnosticResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -53,7 +61,7 @@ export function DiagnoseButton({ machineId, online }: { machineId: number; onlin
   return (
     <div>
       <Button
-        variant="secondary"
+        variant={variant}
         loading={running}
         loadingLabel="Medindo 20 segundos…"
         disabled={!online}
