@@ -13,6 +13,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { MetricChart } from "../components/charts/MetricChart";
 import { useToast } from "../components/ui/Toast";
 import { ANOMALY_TYPE_HINTS, SEVERITY_URGENCY } from "../lib/glossary";
+import { processName } from "../lib/format";
 import { health, LEVEL_CLASS, THRESHOLDS } from "../lib/health";
 import { Feedback, VerificationTag } from "../components/anomaly/Feedback";
 import { AdaptiveSteps } from "../components/anomaly/AdaptiveSteps";
@@ -210,10 +211,10 @@ export function AnomalyDetail() {
             <Severity severity={anomaly.severity} />
           )}
         </div>
-        {(machine?.name || anomaly.responsible_process) && (
+        {(machine?.name || processName(anomaly)) && (
           <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-3">
             {machine?.name && <span>{machine.name}</span>}
-            {anomaly.responsible_process && <span className="font-mono text-fg-2">{anomaly.responsible_process}</span>}
+            {processName(anomaly) && <span className="font-mono text-fg-2">{processName(anomaly)}</span>}
             {anomaly.source && anomaly.source !== "behavior" && anomaly.source !== "ml" && (
               <span className="text-fg-3">via {anomaly.source === "forecast" ? "previsão" : anomaly.source === "fleet" ? "comparação entre computadores" : anomaly.source === "agent_event" ? "evento do computador" : anomaly.source}</span>
             )}
@@ -342,7 +343,7 @@ export function AnomalyDetail() {
               ) : (
                 <DataRow label="Métricas" value="nenhuma registrada" />
               )}
-              {anomaly.responsible_process && <DataRow label="Programa responsável" value={anomaly.responsible_process} mono />}
+              {processName(anomaly) && <DataRow label="Programa responsável" value={processName(anomaly)!} mono />}
               {anomaly.anomaly_score != null && (
                 <DataRow label="Desvio do padrão" value={anomaly.anomaly_score.toFixed(4)} hint={<Explain term="score" />} />
               )}

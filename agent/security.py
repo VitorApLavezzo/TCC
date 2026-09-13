@@ -132,6 +132,22 @@ class BeaconTracker:
         self.keep = keep_seconds
         self.events: Dict[tuple, deque] = defaultdict(lambda: deque(maxlen=60))
         self.meta: Dict[tuple, Dict[str, Any]] = {}
+        self._resolved: Dict[int, Dict[str, Optional[str]]] = {}
+
+    def _resolve(self, pid: int) -> Dict[str, Optional[str]]:
+        """Consulta psutil para um PID fora do mapa recebido, com cache para não
+        repetir a chamada a cada ciclo. Nunca devolve '?': None quando não souber."""
+        if pid in self._resolved:
+            return self._resolved[pid]
+        info: Dict[str, Optional[str]] = {"name": None, "exe": None}
+        try:
+            proc = psutil.Process(pid)
+            info["name"] = proc.name() or None
+            info["exe"] = proc.exe() or None
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+        self._resolved[pid] = info
+        return info
 
     def observe(self, pid_to_name: Dict[int, str], pid_to_exe: Dict[int, str]):
         now = time.time()
@@ -153,7 +169,13 @@ class BeaconTracker:
             hist = self.events[key]
             if not hist or now - hist[-1] > 5:
                 hist.append(now)
-            self.meta[key] = {"name": pid_to_name.get(c.pid, "?"), "exe": pid_to_exe.get(c.pid)}
+            name = pid_to_name.get(c.pid)
+            exe = pid_to_exe.get(c.pid)
+            if name is None:
+                resolved = self._resolve(c.pid)
+                name = resolved["name"]
+                exe = exe or resolved["exe"]
+            self.meta[key] = {"name": name, "exe": exe}
         self._prune(now)
 
     def _prune(self, now):
@@ -164,6 +186,10 @@ class BeaconTracker:
             if not hist:
                 self.events.pop(key, None)
                 self.meta.pop(key, None)
+        active_pids = {k[0] for k in self.events}
+        for pid in list(self._resolved):
+            if pid not in active_pids:
+                self._resolved.pop(pid, None)
 
     def candidates(self) -> List[Dict[str, Any]]:
         out = []

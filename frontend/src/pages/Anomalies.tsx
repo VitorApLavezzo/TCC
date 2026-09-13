@@ -10,7 +10,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { ListSkeleton } from "../components/ui/Skeleton";
 import { StaleBanner } from "../components/StaleBanner";
 import { useToast } from "../components/ui/Toast";
-import { pluralize } from "../lib/format";
+import { pluralize, processName } from "../lib/format";
 import { X } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -77,7 +77,7 @@ export function Anomalies() {
       const label = (ANOMALY_TYPE_LABELS[a.anomaly_type] || a.anomaly_type).toLowerCase();
       return (
         label.includes(q) ||
-        a.responsible_process?.toLowerCase().includes(q) ||
+        processName(a)?.toLowerCase().includes(q) ||
         a.explanation?.summary?.toLowerCase().includes(q) ||
         machineName(a.machine_id).toLowerCase().includes(q)
       );

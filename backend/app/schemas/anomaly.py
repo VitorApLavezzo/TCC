@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List, Any, Literal
 from datetime import datetime
+
+from app.services.ai_service import sanitize_explanation, strip_citations
 
 
 class ExplanationOut(BaseModel):
@@ -26,6 +28,22 @@ class ExplanationOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @model_validator(mode="after")
+    def _strip_citation_markers(self):
+        """As explicações são gravadas com [[chave]] de propósito (conferência de
+        números); nunca deve chegar assim ao frontend. Ponto único para tudo que
+        sai por AnomalyOut/ExplanationOut."""
+        self.summary = strip_citations(self.summary)
+        self.detailed_explanation = strip_citations(self.detailed_explanation)
+        self.severity_justification = strip_citations(self.severity_justification)
+        if isinstance(self.possible_causes, list):
+            self.possible_causes = [strip_citations(c) for c in self.possible_causes]
+        if isinstance(self.recommendations, list):
+            self.recommendations = [strip_citations(r) for r in self.recommendations]
+        if isinstance(self.variants, dict):
+            self.variants = {level: sanitize_explanation(v) for level, v in self.variants.items()}
+        return self
 
 
 class AnomalyOut(BaseModel):

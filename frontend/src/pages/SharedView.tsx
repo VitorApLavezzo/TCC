@@ -7,6 +7,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { SignalMark } from "../components/ui/SignalMark";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { processName } from "../lib/format";
 
 /**
  * Página pública do pacote para o técnico. Sem login: quem recebeu o link vê
@@ -52,7 +53,7 @@ function SharedContent({ pkg }: { pkg: any }) {
         <h1 className="mt-1.5 text-lg font-semibold text-fg">{a.type_label}</h1>
         <p className="mt-1 text-sm text-fg-3">
           {pkg.machine.name} · {pkg.machine.os} · severidade {a.severity_label}
-          {a.responsible_process && <> · <span className="font-mono text-fg-2">{a.responsible_process}</span></>}
+          {processName(a) && <> · <span className="font-mono text-fg-2">{processName(a)}</span></>}
         </p>
       </header>
 
