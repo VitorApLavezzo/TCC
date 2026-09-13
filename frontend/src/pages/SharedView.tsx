@@ -25,7 +25,7 @@ export function SharedView() {
   return (
     <div className="min-h-screen bg-canvas">
       <header className="flex h-14 items-center gap-2.5 border-b border-hairline px-4">
-        <SignalMark className="text-accent" />
+        <SignalMark />
         <span className="text-sm font-semibold tracking-tight text-fg">AnomalyDetect</span>
         <span className="ml-auto text-xs text-fg-3">Diagnóstico compartilhado · somente leitura</span>
       </header>
