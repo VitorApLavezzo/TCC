@@ -31,7 +31,7 @@ export function PageHeader({
     <header className="border-b border-hairline pb-4">
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-fg">{title}</h1>
+          <h1 className="font-display text-xl font-bold text-fg">{title}</h1>
           {description && <p className="mt-1 max-w-prose text-sm leading-relaxed text-fg-2">{description}</p>}
         </div>
         {(actions || aside) && (
@@ -74,7 +74,7 @@ export function Section({
           )}
         >
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-fg">{title}</h2>
+            <h2 className="font-display text-md font-semibold text-fg">{title}</h2>
             {description && <p className="mt-0.5 text-xs text-fg-3">{description}</p>}
           </div>
           {actions && <div className="flex flex-shrink-0 items-center gap-2">{actions}</div>}

@@ -9,27 +9,30 @@ const TONE: Record<string, "ok" | "warn" | "crit" | "idle"> = {
   critical: "crit",
 };
 
+const CHIP_TONE: Record<"ok" | "warn" | "crit" | "idle", string> = {
+  ok: "text-ok bg-ok/[.14]",
+  warn: "text-warn bg-warn/[.14]",
+  crit: "text-crit bg-crit/[.14]",
+  idle: "text-fg-2 bg-sunken",
+};
+
 /**
- * Severidade como ponto + palavra, não como pílula colorida.
- *
- * Numa lista de vinte avisos, vinte pílulas com fundo competem entre si e com
- * o próprio título. O ponto carrega a cor; o texto carrega o significado.
+ * Severidade como chip: ponto + palavra dentro de uma pílula com fundo tênue
+ * na cor do estado. O ponto e o fundo carregam a cor; o texto carrega o
+ * significado — nunca só a cor sozinha.
  */
 export function Severity({ severity, className }: { severity: string; className?: string }) {
   const tone = TONE[severity] ?? "idle";
   return (
-    <span className={clsx("inline-flex items-center gap-1.5", className)}>
+    <span
+      className={clsx(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-micro font-semibold uppercase tracking-wide",
+        CHIP_TONE[tone],
+        className
+      )}
+    >
       <StatusDot tone={tone} />
-      <span
-        className={clsx(
-          "text-xs",
-          tone === "crit" && "font-medium text-crit",
-          tone === "warn" && "text-warn",
-          tone === "idle" && "text-fg-3"
-        )}
-      >
-        {SEVERITY_LABELS[severity] || severity}
-      </span>
+      {SEVERITY_LABELS[severity] || severity}
     </span>
   );
 }
