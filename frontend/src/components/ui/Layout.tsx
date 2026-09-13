@@ -8,9 +8,9 @@ import { ReactNode } from "react";
  * com borda fica reservado a conteúdo que é mesmo um objeto — uma linha de
  * lista clicável, um estado da tela.
  *
- * A outra regra, tipográfica, atravessa todos estes componentes: prosa em
- * Archivo, e tudo que a máquina mediu em IBM Plex Mono. Um valor sempre
- * parece um valor, mesmo fora de contexto.
+ * A outra regra, tipográfica, atravessa todos estes componentes: título em
+ * Red Hat Display, prosa em Red Hat Text, e tudo que a máquina mediu em Red
+ * Hat Mono. Um valor sempre parece um valor, mesmo fora de contexto.
  */
 
 /** Cabeçalho da página: título, apoio e ação principal, fechado por filete. */
