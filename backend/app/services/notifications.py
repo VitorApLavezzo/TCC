@@ -187,20 +187,24 @@ def _send(db: Session, user: User, prefs: Dict, text: str, notifications: List[N
     address = prefs.get("email") or user.email
     if channels.get("email") and settings.SMTP_HOST and address:
         try:
-            send_email(address, primary.title if len(notifications) == 1 else "Avisos do AnomalyDetect", text,
-                       _link(primary))
+            from app.services.email_template import render_notification_email
+            subject, plain, html = render_notification_email(db, notifications, settings.PUBLIC_BASE_URL)
+            send_email(address, subject, plain, html=html)
             sent["email"] = "ok"
         except Exception as e:
             sent["email"] = f"erro: {str(e)[:120]}"
     return sent
 
 
-def send_email(to: str, subject: str, text: str, link: Optional[str] = None):
+def send_email(to: str, subject: str, text: str, link: Optional[str] = None, html: Optional[str] = None):
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = settings.SMTP_FROM or settings.SMTP_USER
     msg["To"] = to
     msg.set_content(text + (f"\n\nVer no painel: {link}" if link else ""))
+    if html:
+        # Versão em HTML com a identidade do painel; o texto acima fica de reserva
+        msg.add_alternative(html, subtype="html")
     with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as smtp:
         if settings.SMTP_TLS:
             smtp.starttls()
