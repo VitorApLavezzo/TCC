@@ -160,6 +160,46 @@ export function Account() {
                   )}
                 </div>
               )}
+
+              {/* O canal de e-mail vem desligado nas preferências e não tinha
+                  controle nesta tela: com o SMTP certo, nenhum e-mail saía. */}
+              <div className="space-y-3 border-t border-hairline pt-4">
+                {channels.email ? (
+                  <>
+                    <Toggle
+                      label="E-mail"
+                      hint={`Envia os avisos para ${prefs.notifications.email || user?.email || "o e-mail da conta"}`}
+                      checked={!!prefs.notifications.channels?.email}
+                      onChange={(v) => update({ notifications: { channels: { email: v } } })}
+                    />
+                    {prefs.notifications.channels?.email && (
+                      <label className="flex flex-wrap items-center justify-between gap-3">
+                        <span className="text-xs text-fg-3">Enviar para outro endereço (vazio = e-mail da conta)</span>
+                        <input
+                          id="notif-email"
+                          type="email"
+                          defaultValue={prefs.notifications.email ?? ""}
+                          placeholder={user?.email ?? "nome@exemplo.com"}
+                          onBlur={(e) => {
+                            const value = e.target.value.trim();
+                            if (value !== (prefs.notifications.email ?? "")) {
+                              update({ notifications: { email: value || null } });
+                            }
+                          }}
+                          className="field h-8 w-64 max-w-full text-sm"
+                        />
+                      </label>
+                    )}
+                  </>
+                ) : (
+                  <div>
+                    <p className="text-sm text-fg-2">E-mail · <span className="text-fg-3">não configurado</span></p>
+                    <p className="text-xs text-fg-3">
+                      Preencha SMTP_HOST, SMTP_USER, SMTP_PASSWORD e SMTP_FROM no .env e rode docker compose up -d backend.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           </Section>
 
