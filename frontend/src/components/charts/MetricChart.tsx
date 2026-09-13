@@ -26,6 +26,8 @@ interface MetricChartProps {
   threshold?: number;
   /** Instante a destacar — usado no detalhe do aviso. */
   markAt?: string | null;
+  /** Sem moldura, título nem legenda de limite própria — para uso dentro de um painel com abas. */
+  bare?: boolean;
 }
 
 /** Lê um token de cor do CSS para o Recharts, que não aceita classe utilitária. */
@@ -52,7 +54,17 @@ function useToken(name: string) {
  * linha bonita. Nenhuma série ganha cor própria — dar uma cor a cada métrica
  * faria o conjunto parecer um mostruário e roubaria significado do vermelho.
  */
-export function MetricChart({ metrics, dataKey, label, unit = "%", domain, term, threshold, markAt }: MetricChartProps) {
+export function MetricChart({
+  metrics,
+  dataKey,
+  label,
+  unit = "%",
+  domain,
+  term,
+  threshold,
+  markAt,
+  bare,
+}: MetricChartProps) {
   const line = useToken("fg-2");
   const grid = useToken("hairline");
   const axis = useToken("fg-3");
@@ -83,21 +95,9 @@ export function MetricChart({ metrics, dataKey, label, unit = "%", domain, term,
     );
   };
 
-  return (
-    <div className="rounded-panel border border-hairline bg-surface px-4 pb-3 pt-3">
-      <div className="mb-2.5 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
-          <h3 className="channel-label">{label}</h3>
-          {term && <Explain term={term} />}
-        </div>
-        {threshold !== undefined && (
-          <span className="tnum font-mono text-micro text-fg-3">
-            normal até {threshold}
-            {unit}
-          </span>
-        )}
-      </div>
-      <ResponsiveContainer width="100%" height={132}>
+  const chart = (
+    <>
+      <ResponsiveContainer width="100%" height={bare ? 220 : 132}>
         <AreaChart data={data} margin={{ top: 4, right: 4, left: -26, bottom: 0 }}>
           <defs>
             <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
@@ -123,14 +123,14 @@ export function MetricChart({ metrics, dataKey, label, unit = "%", domain, term,
           <CartesianGrid strokeDasharray="2 4" stroke={grid} vertical={false} />
           <XAxis
             dataKey="time"
-            tick={{ fill: axis, fontSize: 10, fontFamily: "IBM Plex Mono, monospace" }}
+            tick={{ fill: axis, fontSize: 10, fontFamily: "Red Hat Mono, monospace" }}
             tickLine={false}
             axisLine={false}
             interval="preserveStartEnd"
             minTickGap={32}
           />
           <YAxis
-            tick={{ fill: axis, fontSize: 10, fontFamily: "IBM Plex Mono, monospace" }}
+            tick={{ fill: axis, fontSize: 10, fontFamily: "Red Hat Mono, monospace" }}
             tickLine={false}
             axisLine={false}
             domain={yDomain}
@@ -143,6 +143,26 @@ export function MetricChart({ metrics, dataKey, label, unit = "%", domain, term,
           <Area type="monotone" dataKey="value" stroke={line} strokeWidth={1.4} fill={`url(#${gradId})`} />
         </AreaChart>
       </ResponsiveContainer>
+    </>
+  );
+
+  if (bare) return chart;
+
+  return (
+    <div className="rounded-panel border border-hairline bg-surface px-4 pb-3 pt-3">
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <h3 className="channel-label">{label}</h3>
+          {term && <Explain term={term} />}
+        </div>
+        {threshold !== undefined && (
+          <span className="tnum font-mono text-micro text-fg-3">
+            normal até {threshold}
+            {unit}
+          </span>
+        )}
+      </div>
+      {chart}
     </div>
   );
 }

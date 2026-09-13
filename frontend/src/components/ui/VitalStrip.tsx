@@ -24,6 +24,10 @@ export interface VitalItem {
   live?: boolean;
   /** Troque a chave a cada leitura nova para disparar o pulso. */
   pulseKey?: number | string;
+  /** Limite de atenção fixo (THRESHOLDS), na escala de `historyMax`. */
+  limit?: number;
+  /** Limite crítico fixo, na mesma escala. */
+  critAt?: number;
 }
 
 const TONE: Record<string, string> = {
@@ -33,63 +37,119 @@ const TONE: Record<string, string> = {
   unknown: "text-fg-3",
 };
 
+const SEGS = 20;
+
 /**
- * Os sinais vitais como canais de um instrumento, não como cartões.
+ * Medidor segmentado: 20 barras acendem até o valor atual, com uma marca no
+ * limite de atenção. Os segmentos abaixo do limite acendem em accent — cor de
+ * interação e detecção, não de "saudável" — e só passam a warn/crit quando
+ * ultrapassam os limites de THRESHOLDS.
+ */
+function Segments({ value, max, limit, crit }: { value: number; max: number; limit?: number; crit?: number }) {
+  const lit = Math.round((Math.min(Math.max(value, 0), max) / max) * SEGS);
+  const limitPct = limit != null ? (limit / max) * 100 : null;
+  return (
+    <div className="relative pt-1.5" aria-hidden="true">
+      <div className="grid h-5 grid-cols-[repeat(20,minmax(0,1fr))] gap-[3px]">
+        {Array.from({ length: SEGS }).map((_, i) => {
+          const segTopValue = ((i + 1) / SEGS) * max;
+          const on = i < lit;
+          let cls = "bg-sunken";
+          if (on) {
+            cls = "bg-accent";
+            if (crit != null && segTopValue > crit) cls = "bg-crit";
+            else if (limit != null && segTopValue > limit) cls = "bg-warn";
+          }
+          return <span key={i} className={clsx("rounded-[2px]", cls)} />;
+        })}
+      </div>
+      {limitPct !== null && (
+        <span
+          className="absolute -top-0.5 h-[26px] w-[2px] -translate-x-1/2 rounded-sm bg-fg-2"
+          style={{ left: `${limitPct}%` }}
+          title={`limite de atenção: ${limit}`}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Os sinais vitais como instrumentos de painel, não como cartões de estatística.
  *
  * Cada canal responde três perguntas na ordem em que elas surgem: quanto está
- * agora (o número), se isso é bom (a palavra de estado) e como chegou até aí
- * (o traço sobre a faixa normal). O número sozinho não diz nada a quem não
- * sabe que 91% de memória é ruim — a faixa desenhada atrás diz.
- *
- * O número fica neutro mesmo em atenção: a cor mora no traço que saiu da faixa
- * e na palavra de estado. Assim uma máquina saudável não tem cor nenhuma.
+ * agora (o número grande), se isso é bom (a palavra de estado) e como chegou
+ * até aí (os segmentos acesos até o limite, e o traço sobre a faixa normal
+ * aprendida). Os segmentos acima do limite de atenção acendem em warn/crit —
+ * a única cor que comunica "isto é ruim" no instrumento.
  */
 export function VitalStrip({ items }: { items: VitalItem[] }) {
   return (
-    <div className="grid grid-cols-1 gap-px overflow-hidden rounded-panel border border-hairline bg-hairline sm:grid-cols-2 lg:grid-cols-4">
-      {items.map((item) => (
-        <div key={item.label} className="min-w-0 bg-surface px-4 pb-3.5 pt-3">
-          <div className="flex items-center gap-1.5">
-            <span className="channel-label truncate">{item.label}</span>
-            {item.term && <Explain term={item.term} />}
-          </div>
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" aria-label="Sinais vitais">
+      {items.map((item) => {
+        const max = item.historyMax ?? 100;
+        const raw = parseFloat(item.value.replace(",", "."));
+        const value = Number.isFinite(raw) ? raw : 0;
+        return (
+          <article
+            key={item.label}
+            role="meter"
+            aria-valuemin={0}
+            aria-valuemax={max}
+            aria-valuenow={Number.isFinite(raw) ? raw : undefined}
+            aria-label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}${
+              item.bandLabel ? `. ${item.bandLabel}` : ""
+            }`}
+            className="flex min-w-0 flex-col gap-2.5 rounded-panel border border-hairline bg-surface px-4 pb-3.5 pt-3.5"
+          >
+            <header className="flex items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-fg">
+                {item.label}
+                {item.term && <Explain term={item.term} />}
+              </span>
+              <span className={clsx("flex-shrink-0 text-xs font-semibold", TONE[item.reading.level])}>
+                {item.reading.label}
+              </span>
+            </header>
 
-          <div className="mt-2.5 flex items-baseline justify-between gap-2">
-            <p className="tnum font-mono text-readout-sm font-medium text-fg">
-              {item.value}
-              {item.unit && <span className="ml-0.5 text-md font-normal text-fg-3">{item.unit}</span>}
+            <p className="tnum flex items-baseline gap-1 font-mono text-fg">
+              <b className="text-[2rem] font-medium leading-none tracking-tight min-[1500px]:text-[2.6rem]">
+                {item.value}
+              </b>
+              {item.unit && <span className="text-base text-fg-3">{item.unit}</span>}
             </p>
-            <span className={clsx("text-xs font-medium", TONE[item.reading.level])}>{item.reading.label}</span>
-          </div>
 
-          <div className="mt-3">
+            <Segments value={value} max={max} limit={item.limit} crit={item.critAt} />
+
+            <div className="flex items-center justify-between gap-2 text-xs text-fg-2">
+              <span className="tnum truncate font-mono" title={item.detail}>
+                {item.detail ?? " "}
+              </span>
+              {item.limit != null && <span className="flex-shrink-0">limite {item.limit}%</span>}
+            </div>
+
             <SignalTrace
               values={item.history ?? []}
               max={item.historyMax}
               band={item.band}
               level={item.reading.level}
               breachTone={item.breachTone}
-              height={38}
+              height={34}
               live={item.live}
               pulseKey={item.pulseKey}
               label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}${
                 item.bandLabel ? `. ${item.bandLabel}` : ""
               }`}
             />
-          </div>
 
-          {(item.detail || item.bandLabel) && (
-            <p className="tnum mt-2 truncate font-mono text-micro text-fg-3" title={item.bandLabel ?? item.detail}>
-              {item.detail ?? item.bandLabel}
-            </p>
-          )}
-          {item.detail && item.bandLabel && (
-            <p className="mt-0.5 truncate text-micro text-fg-3" title={item.bandLabel}>
-              {item.bandLabel}
-            </p>
-          )}
-        </div>
-      ))}
+            {item.bandLabel && (
+              <p className="tnum -mt-1 truncate text-micro text-fg-3" title={item.bandLabel}>
+                {item.bandLabel}
+              </p>
+            )}
+          </article>
+        );
+      })}
     </div>
   );
 }

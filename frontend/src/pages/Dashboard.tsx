@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { clsx } from "clsx";
+import { ChevronDown } from "lucide-react";
 import { anomaliesApi, metricsApi, machinesApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -9,7 +11,7 @@ import { AnomalyEvent, AnomalyTimeline } from "../components/AnomalyEvent";
 import { FreshnessTag } from "../components/FreshnessTag";
 import { StaleBanner } from "../components/StaleBanner";
 import { MetricChart } from "../components/charts/MetricChart";
-import { PageHeader, Section, Panel, PanelLabel, DataList, DataRow } from "../components/ui/Layout";
+import { PageHeader, Panel, PanelLabel, DataList, DataRow } from "../components/ui/Layout";
 import { VitalStrip, VitalItem, Meter } from "../components/ui/VitalStrip";
 import { Explain } from "../components/ui/Explain";
 import { Button, TextButton } from "../components/ui/Button";
@@ -34,6 +36,7 @@ export function Dashboard() {
   const [learning, setLearning] = useState<LearningStatus | null>(null);
   const [baseline, setBaseline] = useState<LearnedBaseline | null>(null);
   const [switching, setSwitching] = useState(false);
+  const [chartTab, setChartTab] = useState(0);
   const selectedRef = useRef<number | null>(null);
   selectedRef.current = selectedMachine;
 
@@ -162,6 +165,8 @@ export function Dashboard() {
           reading: cpu,
           history: series("cpu_percent"),
           historyMax: 100,
+          limit: THRESHOLDS.cpu.warn,
+          critAt: THRESHOLDS.cpu.crit,
           ...bandOf("cpu", "cpu", cpu),
           live: liveHead,
           pulseKey,
@@ -175,6 +180,8 @@ export function Dashboard() {
           reading: mem,
           history: series("mem_percent"),
           historyMax: 100,
+          limit: THRESHOLDS.memory.warn,
+          critAt: THRESHOLDS.memory.crit,
           ...bandOf("memory", "memory", mem),
           live: liveHead,
           pulseKey,
@@ -188,6 +195,8 @@ export function Dashboard() {
           reading: disk,
           history: series("disk_percent"),
           historyMax: 100,
+          limit: THRESHOLDS.disk.warn,
+          critAt: THRESHOLDS.disk.crit,
           ...bandOf("disk", "disk", disk),
           live: liveHead,
           pulseKey,
@@ -202,6 +211,8 @@ export function Dashboard() {
               reading: temp,
               band: bandFor("cpuTemp"),
               historyMax: 100,
+              limit: THRESHOLDS.cpuTemp.warn,
+              critAt: THRESHOLDS.cpuTemp.crit,
             }
           : {
               label: "Memória virtual",
@@ -211,6 +222,8 @@ export function Dashboard() {
               reading: swap,
               history: series("swap_percent"),
               historyMax: 100,
+              limit: THRESHOLDS.swap.warn,
+              critAt: THRESHOLDS.swap.crit,
               ...bandOf("swap", "swap", swap),
               live: liveHead,
               pulseKey,
@@ -230,6 +243,67 @@ export function Dashboard() {
     if (!worst) return null;
     return { label: worst.label.toLowerCase(), value: `${worst.value}${worst.unit ?? ""}` };
   })();
+
+  // Um único gráfico com abas, no lugar de quatro cartões fixos — a pessoa
+  // olha uma medida de cada vez, na resolução em que ela merece atenção.
+  const CHART_TABS: {
+    key: keyof Metric;
+    label: string;
+    term?: string;
+    unit: string;
+    threshold?: number;
+    domain?: [number, number];
+  }[] = [
+    { key: "cpu_percent", label: "Processador", term: "cpu", unit: "%", threshold: THRESHOLDS.cpu.warn },
+    { key: "mem_percent", label: "Memória", term: "memoria", unit: "%", threshold: THRESHOLDS.memory.warn },
+    { key: "disk_percent", label: "Disco", term: "disco", unit: "%", threshold: THRESHOLDS.disk.warn },
+    {
+      key: "net_connections",
+      label: "Conexões",
+      term: "conexoes",
+      unit: "",
+      domain: [0, Math.max(...metrics.map((m) => m.net_connections ?? 0), 0) + 10],
+    },
+  ];
+  const activeTab = CHART_TABS[Math.min(chartTab, CHART_TABS.length - 1)];
+  const tabSeries = metrics
+    .map((m) => (typeof m[activeTab.key] === "number" ? (m[activeTab.key] as number) : null))
+    .filter((v): v is number => v !== null);
+  const tabNow = tabSeries.length ? Math.round(tabSeries[tabSeries.length - 1]) : null;
+  const tabMin = tabSeries.length ? Math.round(Math.min(...tabSeries)) : null;
+  const tabMax = tabSeries.length ? Math.round(Math.max(...tabSeries)) : null;
+
+  const avisosPanel = (
+    <Panel className="flex flex-col gap-3 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="font-display text-md font-semibold text-fg">Avisos recentes</h3>
+          <p className="mt-0.5 text-xs text-fg-3">
+            {openAnomalies.length > 0
+              ? pluralize(openAnomalies.length, "aviso em aberto", "avisos em aberto")
+              : "Últimas 24 horas"}
+          </p>
+        </div>
+        {machineAnomalies.length > 0 && <TextButton onClick={() => navigate("/anomalies")}>Ver todos</TextButton>}
+      </div>
+      {machineAnomalies.length === 0 ? (
+        <p className="text-sm text-fg-2">
+          Nenhum aviso nas últimas 24 horas.{" "}
+          <span className="text-fg-3">
+            {learning && !learning.ml_ready
+              ? "A detecção ainda está aprendendo o normal deste computador."
+              : "O sistema verifica a cada 30 segundos."}
+          </span>
+        </p>
+      ) : (
+        <AnomalyTimeline>
+          {machineAnomalies.slice(0, 6).map((a) => (
+            <AnomalyEvent key={a.id} anomaly={a} onOpen={() => navigate(`/anomalies/${a.id}`)} />
+          ))}
+        </AnomalyTimeline>
+      )}
+    </Panel>
+  );
 
   if (poll.initialLoading) {
     return (
@@ -308,16 +382,23 @@ export function Dashboard() {
           driver={driver}
           onOpenAnomaly={(id) => navigate(`/anomalies/${id}`)}
           onSeeAll={() => navigate("/anomalies")}
+          actions={
+            machine && lm ? (
+              <>
+                <DiagnoseButton
+                  machineId={machine.id}
+                  online={wsStatus === "open" || (!!lm && Date.now() - new Date(lm.timestamp).getTime() < 150000)}
+                  variant="primary"
+                />
+                <Button variant="secondary" onClick={() => navigate(`/machines/${machine.id}`)}>
+                  Ver análises deste computador
+                </Button>
+              </>
+            ) : undefined
+          }
         />
 
         {switching ? <VitalsSkeleton /> : lm && <VitalStrip items={vitals} />}
-
-        {machine && lm && (
-          <div className="flex flex-wrap items-center gap-3">
-            <DiagnoseButton machineId={machine.id} online={wsStatus === "open" || (!!lm && Date.now() - new Date(lm.timestamp).getTime() < 150000)} />
-            <TextButton onClick={() => navigate(`/machines/${machine.id}`)}>Ver análises deste computador</TextButton>
-          </div>
-        )}
       </div>
 
       {!switching && !lm && (
@@ -332,10 +413,90 @@ export function Dashboard() {
         />
       )}
 
+      {lm && !switching && metrics.length > 1 ? (
+        <div className="grid grid-cols-1 gap-4 min-[1081px]:grid-cols-3">
+          <Panel className="p-5 min-[1081px]:col-span-2">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="font-display text-md font-semibold text-fg">Últimas horas</h3>
+                <p className="mt-0.5 text-xs text-fg-3">
+                  {metrics.length} leituras · a mais recente {timeAgo(lm.timestamp, now)}
+                </p>
+              </div>
+              <div
+                role="tablist"
+                aria-label="Medida do gráfico"
+                className="inline-flex flex-wrap gap-0.5 rounded-control border border-hairline bg-canvas p-1"
+              >
+                {CHART_TABS.map((t, i) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={i === chartTab}
+                    tabIndex={i === chartTab ? 0 : -1}
+                    onClick={() => setChartTab(i)}
+                    className={clsx(
+                      "rounded-[7px] px-3 py-1.5 text-xs font-medium transition-colors",
+                      i === chartTab ? "bg-surface text-fg shadow-raise" : "text-fg-2 hover:text-fg"
+                    )}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <MetricChart
+              bare
+              metrics={metrics}
+              dataKey={activeTab.key}
+              label={activeTab.label}
+              unit={activeTab.unit}
+              term={activeTab.term}
+              threshold={activeTab.threshold}
+              domain={activeTab.domain}
+            />
+
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-fg-2">
+              <span>
+                Agora <b className="tnum font-mono font-medium text-fg">{tabNow ?? "--"}{activeTab.unit}</b>
+              </span>
+              <span>
+                Mínimo <b className="tnum font-mono font-medium text-fg">{tabMin ?? "--"}{activeTab.unit}</b>
+              </span>
+              <span>
+                Máximo <b className="tnum font-mono font-medium text-fg">{tabMax ?? "--"}{activeTab.unit}</b>
+              </span>
+              {activeTab.threshold !== undefined && (
+                <span>
+                  Limite de atenção{" "}
+                  <b className="tnum font-mono font-medium text-fg">
+                    {activeTab.threshold}
+                    {activeTab.unit}
+                  </b>
+                </span>
+              )}
+            </div>
+          </Panel>
+
+          {avisosPanel}
+        </div>
+      ) : (
+        avisosPanel
+      )}
+
       {lm && !switching && (
-        <>
-          <Section title="Detalhes">
-            <Panel className="grid grid-cols-1 divide-y divide-hairline md:grid-cols-3 md:divide-x md:divide-y-0">
+        <details open className="group rounded-panel border border-hairline bg-surface">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
+            <h2 className="font-display text-md font-semibold text-fg">Detalhes do sistema</h2>
+            <ChevronDown
+              size={18}
+              aria-hidden="true"
+              className="flex-shrink-0 text-fg-3 transition-transform duration-200 ease-signal group-open:rotate-180"
+            />
+          </summary>
+          <div className="grid grid-cols-1 divide-y divide-hairline border-t border-hairline md:grid-cols-3 md:divide-x md:divide-y-0">
               <div className="px-5 py-4">
                 <PanelLabel className="mb-2">Sistema</PanelLabel>
                 <DataList>
@@ -432,112 +593,49 @@ export function Dashboard() {
                   )}
                 </DataList>
               </div>
+          </div>
+
+          {/* GPU e bateria coexistem em notebook com placa dedicada: a terceira
+              coluna mostra a bateria e a placa vem numa linha própria. */}
+          {hasBattery && gpu && (
+            <Panel tone="sunken" className="m-3 px-5 py-4">
+              <PanelLabel className="mb-2">Placa de vídeo — {gpu.name}</PanelLabel>
+              <DataList className="md:grid md:grid-cols-3 md:gap-x-8 md:divide-y-0">
+                <DataRow
+                  label="Uso"
+                  value={`${gpu.load_percent?.toFixed(0) ?? "--"}%`}
+                  note={health.gpuLoad(gpu.load_percent).label}
+                  tone={toneOf(health.gpuLoad(gpu.load_percent))}
+                />
+                <DataRow
+                  label="Memória de vídeo"
+                  value={`${gpu.mem_percent?.toFixed(0) ?? "--"}%`}
+                  hint={<Explain term="vram" />}
+                />
+                <DataRow label="Temperatura" value={`${gpu.temperature?.toFixed(0) ?? "--"} °C`} />
+              </DataList>
             </Panel>
-
-            {/* GPU e bateria coexistem em notebook com placa dedicada: a terceira
-                coluna mostra a bateria e a placa vem numa linha própria. */}
-            {hasBattery && gpu && (
-              <Panel className="mt-3 px-5 py-4">
-                <PanelLabel className="mb-2">Placa de vídeo — {gpu.name}</PanelLabel>
-                <DataList className="md:grid md:grid-cols-3 md:gap-x-8 md:divide-y-0">
-                  <DataRow
-                    label="Uso"
-                    value={`${gpu.load_percent?.toFixed(0) ?? "--"}%`}
-                    note={health.gpuLoad(gpu.load_percent).label}
-                    tone={toneOf(health.gpuLoad(gpu.load_percent))}
-                  />
-                  <DataRow
-                    label="Memória de vídeo"
-                    value={`${gpu.mem_percent?.toFixed(0) ?? "--"}%`}
-                    hint={<Explain term="vram" />}
-                  />
-                  <DataRow label="Temperatura" value={`${gpu.temperature?.toFixed(0) ?? "--"} °C`} />
-                </DataList>
-              </Panel>
-            )}
-
-            {lm.disk_partitions && lm.disk_partitions.length > 1 && (
-              <Panel className="mt-3 px-5 py-4">
-                <PanelLabel className="mb-2.5 flex items-center gap-1.5">
-                  Divisões do disco
-                  <Explain term="particoes" />
-                </PanelLabel>
-                {lm.disk_partitions.map((p) => (
-                  <Meter
-                    key={p.mountpoint}
-                    label={p.mountpoint}
-                    percent={p.percent}
-                    reading={health.disk(p.percent)}
-                    detail={`${p.free_gb.toFixed(0)} GB livres`}
-                  />
-                ))}
-              </Panel>
-            )}
-          </Section>
-
-          {metrics.length > 1 && (
-            <Section
-              title="Últimas horas"
-              description={`${metrics.length} leituras · a mais recente ${timeAgo(lm.timestamp, now)}`}
-            >
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <MetricChart
-                  metrics={metrics}
-                  dataKey="cpu_percent"
-                  label="Processador"
-                  term="cpu"
-                  threshold={THRESHOLDS.cpu.warn}
-                />
-                <MetricChart
-                  metrics={metrics}
-                  dataKey="mem_percent"
-                  label="Memória"
-                  term="memoria"
-                  threshold={THRESHOLDS.memory.warn}
-                />
-                <MetricChart
-                  metrics={metrics}
-                  dataKey="disk_percent"
-                  label="Disco"
-                  term="disco"
-                  threshold={THRESHOLDS.disk.warn}
-                />
-                <MetricChart
-                  metrics={metrics}
-                  dataKey="net_connections"
-                  label="Conexões de rede"
-                  unit=""
-                  term="conexoes"
-                  domain={[0, Math.max(...metrics.map((m) => m.net_connections ?? 0)) + 10]}
-                />
-              </div>
-            </Section>
           )}
-        </>
-      )}
 
-      <Section
-        title="Avisos recentes"
-        description="Últimas 24 horas"
-        actions={machineAnomalies.length > 0 ? <TextButton onClick={() => navigate("/anomalies")}>Ver todos</TextButton> : undefined}
-      >
-        {machineAnomalies.length === 0 ? (
-          <p className="py-2 text-sm text-fg-2">
-            Nenhum aviso nas últimas 24 horas.{" "}
-            <span className="text-fg-3">
-              {learning && !learning.ml_ready
-                ? "A detecção ainda está aprendendo o normal deste computador."
-                : "O sistema verifica a cada 30 segundos."}
-            </span>
-          </p>
-        ) : (
-          <AnomalyTimeline>
-            {machineAnomalies.slice(0, 6).map((a) => (
-              <AnomalyEvent key={a.id} anomaly={a} onOpen={() => navigate(`/anomalies/${a.id}`)} />
-            ))}
-          </AnomalyTimeline>
-        )}
-      </Section>
+          {lm.disk_partitions && lm.disk_partitions.length > 1 && (
+            <Panel tone="sunken" className="m-3 px-5 py-4">
+              <PanelLabel className="mb-2.5 flex items-center gap-1.5">
+                Divisões do disco
+                <Explain term="particoes" />
+              </PanelLabel>
+              {lm.disk_partitions.map((p) => (
+                <Meter
+                  key={p.mountpoint}
+                  label={p.mountpoint}
+                  percent={p.percent}
+                  reading={health.disk(p.percent)}
+                  detail={`${p.free_gb.toFixed(0)} GB livres`}
+                />
+              ))}
+            </Panel>
+          )}
+        </details>
+      )}
 
       {machines.length > 1 && (
         <p className="text-xs text-fg-3">
