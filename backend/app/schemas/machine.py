@@ -31,6 +31,8 @@ class MachineOut(BaseModel):
     collection_interval: Optional[int] = None
     is_demo: Optional[bool] = False
     last_boot_time: Optional[float] = None
+    preferred_interval: Optional[int] = None
+    realtime_until: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -40,12 +42,19 @@ class MachineUpdate(BaseModel):
     name: Optional[str] = None
     is_active: Optional[bool] = None
     ai_privacy: Optional[Literal["any", "local_only", "no_ai"]] = None
+    # Nulo = Automática (o servidor decide entre 10s e 60s conforme o que acontece)
+    preferred_interval: Optional[Literal[10, 30, 60]] = None
 
 
 class FocusModeRequest(BaseModel):
     # 0 encerra o modo agora
     minutes: int = Field(default=60, ge=0, le=720)
     reason: Optional[str] = Field(default=None, max_length=80)
+
+
+class RealtimeRequest(BaseModel):
+    # 0 encerra o tempo real agora
+    minutes: int = Field(default=30, ge=0, le=30)
 
 
 class EnrollmentCodeOut(BaseModel):

@@ -43,6 +43,10 @@ export const GLOSSARY: Record<string, string> = {
     "Uma chave reutilizável para instalar em muitos computadores de uma vez, sem digitar código em cada um.",
   codigo_pareamento:
     "Um código de uso único, válido por pouco tempo, que autoriza um computador novo a se registrar na sua conta.",
+  frequencia_leitura:
+    "De quanto em quanto tempo o agente manda uma nova leitura. Automática deixa o servidor decidir (mais rápido quando algo foge do normal, mais devagar quando está tudo calmo).",
+  tempo_real:
+    "Força leituras a cada 5 segundos por um tempo limitado, para acompanhar de perto um problema acontecendo agora. Volta sozinho à frequência escolhida quando o tempo acaba.",
 };
 
 /** Como cada anomalia se explica em uma frase, antes da IA responder. */

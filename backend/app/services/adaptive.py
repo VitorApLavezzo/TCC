@@ -20,6 +20,7 @@ from app.services import ml_service
 BASE = 30
 FAST = 10
 SLOW = 60
+REALTIME = 5
 
 
 def next_interval(db: Session, machine: Machine, metric: Metric, new_anomaly: Optional[Anomaly]) -> int:
@@ -53,3 +54,21 @@ def next_interval(db: Session, machine: Machine, metric: Metric, new_anomaly: Op
     if calm and (metric.user_idle_seconds or 0) > 30 * 60:
         return SLOW
     return BASE
+
+
+def resolve_interval(machine: Machine, adaptive_value: int, now) -> int:
+    """Decide o intervalo que vale para esta coleta.
+
+    Prioridade: tempo real ativo (5s) > frequência escolhida na tela > sugestão
+    adaptativa do servidor. `now` e `machine.realtime_until` podem vir com ou
+    sem fuso (Postgres é aware, SQLite é naive) — normaliza os dois com
+    `aware()` antes de comparar.
+    """
+    from app.core.timeutil import aware
+
+    realtime_until = aware(machine.realtime_until) if machine.realtime_until else None
+    if realtime_until and realtime_until > aware(now):
+        return REALTIME
+    if machine.preferred_interval:
+        return machine.preferred_interval
+    return adaptive_value

@@ -9,7 +9,7 @@ from app.models.machine import Machine
 from app.models.user import User
 from app.models.enrollment import EnrollmentCode
 from app.schemas.machine import (
-    MachineCreate, MachineOut, MachineUpdate,
+    MachineCreate, MachineOut, MachineUpdate, RealtimeRequest,
     EnrollmentCodeOut, AgentEnrollRequest, AgentEnrollResponse,
     BulkKeyCreate, BulkKeyOut,
 )
@@ -165,6 +165,18 @@ def update_machine(machine_id: int, update: MachineUpdate, db: Session = Depends
         raise HTTPException(status_code=404, detail="Machine not found")
     for field, value in update.model_dump(exclude_unset=True).items():
         setattr(machine, field, value)
+    db.commit()
+    db.refresh(machine)
+    return machine
+
+
+@router.post("/{machine_id}/realtime", response_model=MachineOut)
+def set_realtime(machine_id: int, body: RealtimeRequest, db: Session = Depends(get_db),
+                  current_user: User = Depends(get_current_user)):
+    machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    machine.realtime_until = None if body.minutes == 0 else utcnow() + timedelta(minutes=body.minutes)
     db.commit()
     db.refresh(machine)
     return machine

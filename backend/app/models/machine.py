@@ -43,6 +43,11 @@ class Machine(Base):
     collection_interval = Column(Integer)
     is_demo = Column(Boolean, default=False, server_default=false())
 
+    # Frequência de leitura escolhida na tela (10/30/60s); nulo = Automática
+    preferred_interval = Column(Integer)
+    # Enquanto no futuro, força coleta a cada 5s ("tempo real")
+    realtime_until = Column(DateTime(timezone=True))
+
     owner = relationship("User", back_populates="machines")
     metrics = relationship("Metric", back_populates="machine", cascade="all, delete-orphan")
     anomalies = relationship("Anomaly", back_populates="machine", cascade="all, delete-orphan")

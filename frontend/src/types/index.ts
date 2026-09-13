@@ -27,6 +27,8 @@ export interface Machine {
   network_isolated?: boolean;
   collection_interval?: number;
   is_demo?: boolean;
+  preferred_interval?: 10 | 30 | 60 | null;
+  realtime_until?: string | null;
 }
 
 export interface GPUMetric {

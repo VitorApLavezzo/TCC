@@ -130,7 +130,9 @@ def ingest(db: Session, machine: Machine, payload: MetricCreate, now=None) -> In
         "metric_id": metric.id,
         "anomaly_detected": bool(anomalies),
         "anomaly_id": anomalies[0].id if anomalies else None,
-        "next_interval": adaptive.next_interval(db, machine, metric, anomalies[0] if anomalies else None),
+        "next_interval": adaptive.resolve_interval(
+            machine, adaptive.next_interval(db, machine, metric, anomalies[0] if anomalies else None), now
+        ),
         # Aviso grave: o agente manda os minutos anteriores em alta resolução
         "capture_blackbox": {"anomaly_id": serious.id} if serious else None,
         "commands": commands.claim_pending(db, machine),

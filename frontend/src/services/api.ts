@@ -75,6 +75,7 @@ export const machinesApi = {
   update: (id: number, data: object) => api.patch(`/machines/${id}`, data),
   delete: (id: number) => api.delete(`/machines/${id}`),
   regenerateToken: (id: number) => api.post(`/machines/${id}/regenerate-token`),
+  setRealtime: (id: number, minutes: number) => api.post(`/machines/${id}/realtime`, { minutes }),
 };
 
 export const bulkKeysApi = {

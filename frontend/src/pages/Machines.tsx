@@ -103,6 +103,34 @@ export function Machines() {
     }
   };
 
+  const changeInterval = async (m: Machine, value: 10 | 30 | 60 | null) => {
+    setBusyId(m.id);
+    try {
+      await machinesApi.update(m.id, { preferred_interval: value });
+      await fetchMachines();
+      toast.success(
+        value ? `Frequência de leitura de ${m.name} ajustada.` : `Frequência de leitura de ${m.name} voltou a ser automática.`
+      );
+    } catch (err) {
+      toast.error(errorMessage(err, "Não foi possível alterar a frequência de leitura."));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const setRealtime = async (m: Machine, minutes: number) => {
+    setBusyId(m.id);
+    try {
+      await machinesApi.setRealtime(m.id, minutes);
+      await fetchMachines();
+      toast.success(minutes > 0 ? `Tempo real ativado em ${m.name} por ${minutes} min.` : `Tempo real encerrado em ${m.name}.`);
+    } catch (err) {
+      toast.error(errorMessage(err, "Não foi possível alterar o tempo real."));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const paused = machines.filter((m) => !m.is_active).length;
 
   return (
@@ -150,6 +178,8 @@ export function Machines() {
               busy={busyId === m.id}
               onTogglePause={togglePause}
               onDelete={remove}
+              onSetInterval={changeInterval}
+              onSetRealtime={setRealtime}
             />
           ))}
         </ul>

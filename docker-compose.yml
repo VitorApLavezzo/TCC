@@ -69,6 +69,13 @@ services:
       # Reputação coletiva de executáveis (opcional)
       VIRUSTOTAL_API_KEY: ${VIRUSTOTAL_API_KEY:-}
       REPUTATION_HUB_URL: ${REPUTATION_HUB_URL:-}
+      REPUTATION_HUB_ACCEPT: ${REPUTATION_HUB_ACCEPT:-true}
+      # Detecção de anomalias
+      ML_ALERT_PERCENTILE: ${ML_ALERT_PERCENTILE:-0.5}
+      DEFAULT_TZ_OFFSET_MINUTES: ${DEFAULT_TZ_OFFSET_MINUTES:--180}
+      # Energia
+      DEFAULT_TARIFF_KWH: ${DEFAULT_TARIFF_KWH:-0.85}
+      DEFAULT_CO2_KG_PER_KWH: ${DEFAULT_CO2_KG_PER_KWH:-0.0385}
     volumes:
       - ./backend:/app
       - ./agent:/app/agent_dist:ro
@@ -100,6 +107,7 @@ services:
       AGENT_CONFIG_DIR: /app/data
       AGENT_NO_TRAY: "1"
       COLLECTION_INTERVAL: ${COLLECTION_INTERVAL:-30}
+      AGENT_ADAPTIVE: ${AGENT_ADAPTIVE:-1}
     volumes:
       - agent_data:/app/data
     privileged: true

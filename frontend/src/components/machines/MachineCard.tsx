@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -8,6 +8,20 @@ import { Button, IconButton } from "../ui/Button";
 import { Explain } from "../ui/Explain";
 import { FreshnessTag } from "../FreshnessTag";
 import { downloadInstaller, downloadUninstaller, serverOneLiner } from "../../utils/installers";
+
+const INTERVAL_OPTIONS: { value: "auto" | "10" | "30" | "60"; label: string }[] = [
+  { value: "auto", label: "Automática" },
+  { value: "10", label: "Rápida (10 s)" },
+  { value: "30", label: "Padrão (30 s)" },
+  { value: "60", label: "Econômica (60 s)" },
+];
+
+function intervalLabel(value?: number | null): string {
+  if (value === 10) return "Rápida (10 s)";
+  if (value === 30) return "Padrão (30 s)";
+  if (value === 60) return "Econômica (60 s)";
+  return "Automática";
+}
 
 /**
  * Uma máquina na lista.
@@ -20,15 +34,33 @@ export function MachineCard({
   machine,
   onTogglePause,
   onDelete,
+  onSetInterval,
+  onSetRealtime,
   busy,
 }: {
   machine: Machine;
   onTogglePause: (m: Machine) => void;
   onDelete: (m: Machine) => void;
+  onSetInterval: (m: Machine, value: 10 | 30 | 60 | null) => void;
+  onSetRealtime: (m: Machine, minutes: number) => void;
   busy?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState<"token" | "cmd" | null>(null);
+  // Só para forçar o recálculo da contagem regressiva do tempo real a cada segundo
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!machine.realtime_until) return;
+    const id = window.setInterval(() => setTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [machine.realtime_until]);
+
+  const remainingMs = machine.realtime_until ? new Date(machine.realtime_until).getTime() - Date.now() : 0;
+  const realtimeActive = remainingMs > 0;
+  const remainingLabel = realtimeActive
+    ? `${Math.floor(remainingMs / 60000)}:${String(Math.floor((remainingMs % 60000) / 1000)).padStart(2, "0")}`
+    : null;
 
   const copy = async (what: "token" | "cmd") => {
     await navigator.clipboard.writeText(
@@ -99,6 +131,50 @@ export function MachineCard({
           instalado e mantendo contato.
         </p>
       )}
+
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="tnum text-xs text-fg-3">
+          Lendo a cada {machine.collection_interval ?? "?"} s
+        </span>
+
+        <span className="inline-flex items-center gap-1.5">
+          <label htmlFor={`interval-${machine.id}`} className="text-xs text-fg-3">
+            Frequência de leitura
+          </label>
+          <select
+            id={`interval-${machine.id}`}
+            value={machine.preferred_interval ? String(machine.preferred_interval) : "auto"}
+            disabled={busy}
+            onChange={(e) =>
+              onSetInterval(machine, e.target.value === "auto" ? null : (Number(e.target.value) as 10 | 30 | 60))
+            }
+            className="h-8 rounded-control border border-edge bg-surface px-2 text-xs text-fg focus:border-accent disabled:opacity-45"
+          >
+            {INTERVAL_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <Explain term="frequencia_leitura" />
+        </span>
+
+        {realtimeActive ? (
+          <span className="tnum inline-flex items-center gap-1.5 text-xs text-fg-3">
+            Tempo real ativo — restam {remainingLabel}, depois volta para {intervalLabel(machine.preferred_interval)}.
+            <Button size="sm" variant="quiet" disabled={busy} onClick={() => onSetRealtime(machine, 0)}>
+              Encerrar tempo real
+            </Button>
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5">
+            <Button size="sm" variant="quiet" disabled={busy} onClick={() => onSetRealtime(machine, 30)}>
+              Tempo real por 30 min
+            </Button>
+            <Explain term="tempo_real" />
+          </span>
+        )}
+      </div>
 
       {open && (
         <div className="mt-3 space-y-4 border-t border-hairline pt-3">
