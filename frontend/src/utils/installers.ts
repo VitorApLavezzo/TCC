@@ -406,8 +406,10 @@ del /f /q "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\AnomalyDetect Ag
 schtasks /delete /tn "AnomalyDetect Agent" /f >nul 2>nul
 
 echo [3/4] Removendo este computador do painel...
+set "REMOVIDO=1"
 curl -fsS -X DELETE "${serverUrl}/api/agent/self" -H "X-Agent-Token: ${token}" >nul 2>nul
-if errorlevel 1 echo   (sem resposta do servidor - remova pela lixeira no painel, se aparecer)
+if errorlevel 1 set "REMOVIDO="
+if not defined REMOVIDO echo   Nao foi possivel remover pelo servidor.
 
 echo [4/4] Apagando os arquivos...
 set "SOBROU="
@@ -436,8 +438,14 @@ if defined SOBROU (
     echo ============================================
 ) else (
     echo ============================================
-    echo   Pronto! O monitoramento foi removido e o
-    echo   computador ja sumiu do painel.
+    if defined REMOVIDO (
+        echo   Pronto! O monitoramento foi removido e o
+        echo   computador ja sumiu do painel.
+    ) else (
+        echo   O monitoramento foi removido deste computador,
+        echo   mas ele continua no painel: remova pela
+        echo   lixeira em Computadores.
+    )
     echo ============================================
 )
 pause
@@ -457,7 +465,12 @@ pkill -f ".anomalydetect/agent.py" 2>/dev/null || true
 pkill -f ".anomalydetect/venv" 2>/dev/null || true
 
 echo "Removendo este computador do painel..."
-curl -fsS -X DELETE "${serverUrl}/api/agent/self" -H "X-Agent-Token: ${token}" >/dev/null 2>&1 || true
+if curl -fsS -X DELETE "${serverUrl}/api/agent/self" -H "X-Agent-Token: ${token}" >/dev/null 2>&1; then
+    REMOVIDO=1
+else
+    REMOVIDO=
+    echo "  Nao foi possivel remover pelo servidor."
+fi
 
 echo "Apagando os arquivos..."
 rm -rf "$HOME/.anomalydetect"
@@ -473,8 +486,14 @@ rm -f "$HOME/.config/systemd/user/anomalydetect-agent.service"
 
 echo ""
 echo "============================================"
-echo "  Pronto! O monitoramento foi removido e o"
-echo "  computador já sumiu do painel."
+if [ -n "$REMOVIDO" ]; then
+    echo "  Pronto! O monitoramento foi removido e o"
+    echo "  computador já sumiu do painel."
+else
+    echo "  O monitoramento foi removido deste computador,"
+    echo "  mas ele continua no painel: remova pela"
+    echo "  lixeira em Computadores."
+fi
 echo "============================================"
 `;
 }

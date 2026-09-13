@@ -201,6 +201,16 @@ def delete_machine_cascade(machine_id: int, db: Session):
     db.query(AIExplanation).filter(AIExplanation.anomaly_id.in_(anomaly_ids)).delete(synchronize_session=False)
     db.query(ShareLink).filter(ShareLink.anomaly_id.in_(anomaly_ids)).delete(synchronize_session=False)
     db.query(BlackboxCapture).filter(BlackboxCapture.machine_id == machine_id).delete(synchronize_session=False)
+    # Estas tabelas apontam para as anomalias com FK NO ACTION: sem soltar a
+    # referência antes, o Postgres recusa apagar as anomalias e a remoção inteira
+    # falha com 500 (o SQLite dos testes não impõe FK, por isso passava). As
+    # linhas desta máquina são apagadas logo abaixo; as de outros donos ficam.
+    db.query(Notification).filter(Notification.anomaly_id.in_(anomaly_ids)).update(
+        {Notification.anomaly_id: None}, synchronize_session=False)
+    db.query(AgentCommand).filter(AgentCommand.anomaly_id.in_(anomaly_ids)).update(
+        {AgentCommand.anomaly_id: None}, synchronize_session=False)
+    db.query(DetectionRule).filter(DetectionRule.created_from_anomaly_id.in_(anomaly_ids)).update(
+        {DetectionRule.created_from_anomaly_id: None}, synchronize_session=False)
     # A FK anomalies.incident_id impede apagar os incidentes antes das anomalias
     db.query(Anomaly).filter(Anomaly.machine_id == machine_id).delete(synchronize_session=False)
     db.query(Incident).filter(Incident.machine_id == machine_id).delete(synchronize_session=False)
