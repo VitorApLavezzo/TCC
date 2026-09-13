@@ -218,8 +218,14 @@ def delete_machine_cascade(machine_id: int, db: Session):
     db.query(ProcessBaseline).filter(ProcessBaseline.machine_id == machine_id).delete(synchronize_session=False)
     db.query(DetectionRule).filter(DetectionRule.machine_id == machine_id).delete(synchronize_session=False)
     db.query(DetectorCalibration).filter(DetectorCalibration.machine_id == machine_id).delete(synchronize_session=False)
-    db.query(AgentCommand).filter(AgentCommand.machine_id == machine_id).delete(synchronize_session=False)
+    # diagnostics.command_id aponta para agent_commands com FK NO ACTION: solta a
+    # referência e apaga os diagnósticos antes dos comandos, senão a remoção
+    # inteira falha com 500 para qualquer computador que já rodou um diagnóstico.
+    command_ids = select(AgentCommand.id).where(AgentCommand.machine_id == machine_id)
+    db.query(Diagnostic).filter(Diagnostic.command_id.in_(command_ids)).update(
+        {Diagnostic.command_id: None}, synchronize_session=False)
     db.query(Diagnostic).filter(Diagnostic.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(AgentCommand).filter(AgentCommand.machine_id == machine_id).delete(synchronize_session=False)
     db.query(ChatMessage).filter(ChatMessage.machine_id == machine_id).delete(synchronize_session=False)
     db.query(Report).filter(Report.machine_id == machine_id).delete(synchronize_session=False)
     db.query(ChangeEvent).filter(ChangeEvent.machine_id == machine_id).delete(synchronize_session=False)
