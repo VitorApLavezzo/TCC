@@ -68,3 +68,46 @@ class TestQuandoOCartaoAjuda:
     def test_processador_reduzindo_por_calor_tambem_alivia_fechando(self):
         from app.services.ai_service import counterfactual
         assert counterfactual(_anomalia("thermal_throttling", "opera"), _metric(), _grupos()) is not None
+
+
+class TestPeloCaminhoReal:
+    """A função pura estar certa não garante nada: o que chega na tela é o que
+    `build_context` monta. É aqui que um erro de fiação apareceria."""
+
+    def _cenario(self, db, tipo, responsavel=None):
+        from app.core.security import get_password_hash
+        from app.models.anomaly import Anomaly
+        from app.models.machine import Machine
+        from app.models.metric import Metric
+        from app.models.process import ProcessSnapshot
+        from app.models.user import User
+
+        u = User(email=f"cf{tipo}@t.com", username=f"cf{tipo}", hashed_password=get_password_hash("x"))
+        db.add(u)
+        db.flush()
+        m = Machine(name="PC", hostname="H", agent_token=f"tok-cf-{tipo}", owner_id=u.id, os_type="Windows")
+        db.add(m)
+        db.flush()
+        met = Metric(machine_id=m.id, cpu_percent=40, mem_percent=16, cpu_count_logical=8)
+        db.add(met)
+        db.flush()
+        # Opera é o maior consumidor de memória — o isco do bug original
+        for i in range(6):
+            db.add(ProcessSnapshot(metric_id=met.id, pid=100 + i, name="opera", cpu_percent=5.0,
+                                   mem_percent=1.0, mem_rss=3.3e8, num_threads=10, status="running"))
+        a = Anomaly(machine_id=m.id, metric_id=met.id, anomaly_type=tipo, severity="high",
+                    responsible_process=responsavel)
+        db.add(a)
+        db.commit()
+        return a, met, m
+
+    def test_aviso_de_rede_sem_responsavel_nao_recebe_cartao(self, db):
+        from app.services.ai_service import build_context
+        a, met, m = self._cenario(db, "ddos_indicator")
+        assert build_context(db, a, met, m)["counterfactual"] is None
+
+    def test_aviso_de_memoria_recebe_cartao_do_programa_certo(self, db):
+        from app.services.ai_service import build_context
+        a, met, m = self._cenario(db, "high_memory", responsavel="opera")
+        cf = build_context(db, a, met, m)["counterfactual"]
+        assert cf is not None and cf["process"] == "opera"
