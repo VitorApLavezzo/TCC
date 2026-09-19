@@ -290,7 +290,7 @@ export function Dashboard() {
         <p className="text-sm text-fg-2">
           Nenhum aviso nas últimas 24 horas.{" "}
           <span className="text-fg-3">
-            {learning && !learning.ml_ready
+            {learning && (learning.learning ?? !learning.ml_ready)
               ? "A detecção ainda está aprendendo o normal deste computador."
               : "O sistema verifica a cada 30 segundos."}
           </span>

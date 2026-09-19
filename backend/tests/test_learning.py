@@ -164,3 +164,79 @@ class TestDetectoresDuranteOAprendizado:
                                cmdline="xmrig.exe", pid=7, ppid=4, parent_name="explorer.exe")
         r = detect_new_suspicious_process(met, [proc], [], db, DetectionContext(learning=True))
         assert r is not None and r.anomaly_type == "suspicious_process"
+
+
+class TestComoOProgressoEDito:
+    """Uma barra de progresso que passa de 100% não informa, assusta."""
+
+    def test_nao_anuncia_mais_leituras_do_que_a_meta(self, db):
+        from app.services import learning
+        m = _machine(db)
+        _leituras(db, m.id, 186, span_horas=0.28)  # coleta a cada 5s
+        frase = learning.status(db, m).phrase
+        assert "186 de 100" not in frase
+        assert "100" not in frase
+
+    def test_diz_quanto_tempo_falta_quando_as_leituras_ja_bastam(self, db):
+        from app.services import learning
+        m = _machine(db)
+        _leituras(db, m.id, 186, span_horas=0.28)
+        frase = learning.status(db, m).phrase
+        assert "6h" in frase and "falta" in frase
+
+    def test_diz_quantas_leituras_faltam_quando_o_tempo_ja_basta(self, db):
+        from app.services import learning
+        m = _machine(db)
+        _leituras(db, m.id, 30, span_horas=8)
+        frase = learning.status(db, m).phrase
+        assert "70 leituras" in frase
+        assert "h" not in frase.replace("leituras", "")
+
+    def test_menciona_os_dois_quando_os_dois_faltam(self, db):
+        from app.services import learning
+        m = _machine(db)
+        _leituras(db, m.id, 40, span_horas=2)
+        frase = learning.status(db, m).phrase
+        assert "60 leituras" in frase and "4h" in frase
+
+    def test_menos_de_uma_hora_aparece_em_minutos(self, db):
+        from app.services import learning
+        m = _machine(db)
+        _leituras(db, m.id, 200, span_horas=5.5)
+        frase = learning.status(db, m).phrase
+        assert "min" in frase and "0h" not in frase
+
+    def test_maquina_formada_nao_tem_frase(self, db):
+        from app.services import learning
+        m = _machine(db)
+        _leituras(db, m.id, 150, span_horas=7)
+        assert learning.status(db, m).phrase == ""
+
+
+class TestCriteriosSeparados:
+    """A tela mostra os dois critérios como itens que se completam, então
+    cada um precisa saber sozinho se já bateu e quanto ainda falta."""
+
+    def test_leituras_completas_e_tempo_pendente(self, db):
+        from app.services import learning
+        m = _machine(db)
+        _leituras(db, m.id, 209, span_horas=0.3)
+        d = learning.status(db, m).as_dict()
+        assert d["samples_done"] is True
+        assert d["hours_done"] is False
+        assert d["remaining_hours_label"] == "6h"
+
+    def test_tempo_completo_e_leituras_pendentes(self, db):
+        from app.services import learning
+        m = _machine(db)
+        _leituras(db, m.id, 30, span_horas=8)
+        d = learning.status(db, m).as_dict()
+        assert d["samples_done"] is False
+        assert d["hours_done"] is True
+        assert d["remaining_samples"] == 70
+
+    def test_rotulo_de_tempo_em_minutos_perto_do_fim(self, db):
+        from app.services import learning
+        m = _machine(db)
+        _leituras(db, m.id, 200, span_horas=5.6)
+        assert "min" in learning.status(db, m).as_dict()["remaining_hours_label"]

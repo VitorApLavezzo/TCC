@@ -69,6 +69,16 @@ LEARNING_EXEMPT = {
     "suspicious_parent", "suspicious_process",
 }
 
+# Onde o cartão "e se eu fechar?" faz sentido. Ele fala de memória e
+# processador liberados, então só cabe onde o problema É memória ou
+# processador. Num aviso de rede ou de disco a conta está certa e a
+# recomendação é irrelevante; num aviso de segurança é pior que irrelevante,
+# porque enquadra uma ameaça como incômodo de desempenho.
+COUNTERFACTUAL_TYPES = {
+    "high_cpu", "high_memory", "resource_exhaustion", "memory_leak",
+    "cpu_loop", "resource_abuse", "thermal_throttling",
+}
+
 # Qual detector produziu cada tipo — é a unidade de calibração
 DETECTOR_OF_TYPE = {
     "memory_leak": "memory_leak",

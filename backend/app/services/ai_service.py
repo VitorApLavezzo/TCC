@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.core.labels import ANOMALY_TYPE_LABELS, SEVERITY_LABELS
+from app.core.labels import ANOMALY_TYPE_LABELS, COUNTERFACTUAL_TYPES, SEVERITY_LABELS
 from app.core.metric_utils import cpu_temperature
 from app.core.timeutil import aware, utcnow
 from app.models.anomaly import Anomaly
@@ -147,14 +147,23 @@ def _grouped_processes(db: Session, metric: Optional[Metric]) -> List[Dict[str, 
 
 
 def counterfactual(anomaly: Anomaly, metric: Optional[Metric], groups: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Quanto a máquina aliviaria se o programa principal fosse fechado."""
+    """Quanto a máquina aliviaria se o programa responsável fosse fechado.
+
+    Só aparece quando o aviso é sobre memória ou processador e quando existe
+    um programa responsável de verdade. Antes, qualquer aviso sem responsável
+    caía no maior consumidor de memória da máquina: um aviso de possível
+    ataque pela rede sugeria fechar o navegador para liberar 2 GB, o que não
+    tem relação nenhuma com tráfego e ensina a pessoa a ignorar o cartão.
+    """
     if metric is None or not groups:
         return None
-    target = None
-    if anomaly.responsible_process:
-        target = next((g for g in groups if g["name"] == anomaly.responsible_process), None)
+    if anomaly.anomaly_type not in COUNTERFACTUAL_TYPES:
+        return None
+    if not anomaly.responsible_process:
+        return None
+    target = next((g for g in groups if g["name"] == anomaly.responsible_process), None)
     if target is None:
-        target = max(groups, key=lambda g: g["mem"])
+        return None
 
     cores = metric.cpu_count_logical or 1
     # cpu_percent de processo soma núcleos (100% = um núcleo cheio);

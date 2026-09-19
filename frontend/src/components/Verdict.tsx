@@ -1,11 +1,55 @@
 import { ReactNode } from "react";
 import { clsx } from "clsx";
+import { Check } from "lucide-react";
 import { Level } from "../lib/health";
 import { Anomaly, ANOMALY_TYPE_LABELS, LearningStatus } from "../types";
 import { pluralize } from "../lib/format";
 import { TextButton } from "./ui/Button";
 import { Explain } from "./ui/Explain";
 import { StatusDot } from "./ui/Layout";
+
+/**
+ * Um dos dois critérios do aprendizado, cumprido ou pendente.
+ *
+ * Mesmo vocabulário do passo a passo das anomalias — marcador redondo com
+ * borda, contorno em `ok` quando cumprido — para a pessoa reconhecer "isto
+ * está feito" no mesmo gesto visual em qualquer tela do painel. Sem risco
+ * sobre o texto: estes não são itens que a pessoa faz e risca, são condições
+ * que o sistema alcança.
+ */
+function LearningCriterion({
+  done,
+  label,
+  remaining,
+}: {
+  done: boolean;
+  label: string;
+  /** Quanto falta, quando ainda falta. */
+  remaining?: string | null;
+}) {
+  return (
+    <li className="flex items-start gap-2">
+      <span
+        className={clsx(
+          "mt-px flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border",
+          done ? "border-ok bg-ok/10" : "border-edge bg-surface"
+        )}
+        aria-hidden="true"
+      >
+        {done && <Check className="h-2.5 w-2.5 text-ok" strokeWidth={3} />}
+      </span>
+      <span className="min-w-0 leading-snug">
+        <span className={done ? "text-fg-3" : "text-fg-2"}>{label}</span>
+        <span className="sr-only">{done ? " (cumprido)" : ""}</span>
+        {/* Em linha própria: lado a lado, "faltam cerca de 6h" quebrava no
+            meio e disputava atenção com o nome do critério. */}
+        {!done && remaining && (
+          <span className="mt-0.5 block text-micro text-fg-3">{remaining}</span>
+        )}
+      </span>
+    </li>
+  );
+}
 
 /** As três zonas do estado, na ordem em que a máquina caminha entre elas. */
 const ZONES: { level: Exclude<Level, "unknown">; label: string }[] = [
@@ -75,12 +119,6 @@ export function Verdict({
   actions?: ReactNode;
 }) {
   const top = openAnomalies[0];
-  // Vale a régua mais lenta: leituras suficientes E tempo de relógio suficiente
-  const learningProgress = Math.min(
-    (learning?.collected ?? 0) / (learning?.needed || 1),
-    learning?.hours_needed ? (learning.hours ?? 0) / learning.hours_needed : 1,
-    1,
-  );
   const critical = openAnomalies.some((a) => a.severity === "critical");
   const high = openAnomalies.some((a) => a.severity === "high");
 
@@ -184,42 +222,47 @@ export function Verdict({
           </div>
 
           {learning && (learning.learning ?? !learning.ml_ready) && (
-            <div className="text-xs text-fg-2">
-              <p className="flex flex-wrap items-center gap-1.5">
-                Aprendendo o normal deste computador:{" "}
-                <span className="tnum font-mono text-fg">
-                  {learning.collected} de {learning.needed}
-                </span>{" "}
-                leituras
-                {learning.hours_needed != null && (
-                  <>
-                    ·{" "}
-                    <span className="tnum font-mono text-fg">
-                      {Math.floor(learning.hours ?? 0)}h de {learning.hours_needed}h
-                    </span>
-                  </>
-                )}
-                <Explain term="aprendizado" />
+            <div className="border-t border-hairline pt-3.5 text-xs">
+              {/*
+                Parágrafo comum, não flex: com `flex flex-wrap` o texto inteiro
+                vira um item só e o "?" era empurrado sozinho para a linha de
+                baixo. Inline, ele fecha a frase onde deve.
+              */}
+              <p className="text-fg-2">
+                Aprendendo o normal deste computador <Explain term="aprendizado" />
               </p>
-              {/* As duas contas correm juntas e vale a mais lenta: 100 leituras
-                  a cada 10 s seriam 17 min, que não são o normal de ninguém. */}
-              <div
-                className="mt-1.5 h-1 overflow-hidden rounded-full bg-sunken"
-                role="progressbar"
-                aria-label="Progresso do aprendizado"
-                aria-valuenow={Math.round(learningProgress * 100)}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              >
-                <div
-                  className="h-full min-w-[6px] rounded-full bg-accent transition-[width] duration-700 ease-signal"
-                  style={{ width: `${learningProgress * 100}%` }}
+
+              {/*
+                Dois critérios que se completam, não um número que sobe. Antes
+                dizia "186 de 100 leituras": um contador passando da própria
+                meta parece defeito e não respondia a única pergunta que
+                importa — o que ainda falta. Sem barra de progresso junto: a
+                lista já é o progresso, e a barra ficava um toco de 5% parado
+                por horas.
+                As duas contas correm juntas e vale a mais lenta: a 5 s por
+                leitura, as 100 fecham em 8 minutos.
+              */}
+              <ul className="mt-2.5 space-y-2">
+                <LearningCriterion
+                  done={!!learning.samples_done}
+                  label={`${learning.needed} leituras`}
+                  remaining={
+                    learning.remaining_samples ? `faltam ${learning.remaining_samples}` : null
+                  }
                 />
-              </div>
-              <p className="mt-1.5 text-fg-3">
-                Até lá, tudo que for encontrado fica registrado aqui sem virar aviso — só
-                sinais que não dependem de histórico, como um programa disfarçado ou um
-                arquivo-isca mexido, interrompem você.
+                <LearningCriterion
+                  done={!!learning.hours_done}
+                  label={`${learning.hours_needed} horas acompanhando`}
+                  remaining={
+                    learning.remaining_hours_label
+                      ? `faltam cerca de ${learning.remaining_hours_label}`
+                      : null
+                  }
+                />
+              </ul>
+
+              <p className="mt-3 leading-relaxed text-fg-3">
+                Até lá, o que for encontrado fica registrado aqui sem virar aviso.
               </p>
             </div>
           )}

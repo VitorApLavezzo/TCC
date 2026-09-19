@@ -22,6 +22,7 @@ A contagem começa na primeira leitura recebida, não no cadastro da máquina:
 quem cadastra na sexta e liga o computador na segunda não pode "se formar"
 com zero dado só porque o relógio andou.
 """
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -37,6 +38,14 @@ NEEDED_SAMPLES = settings.MIN_TRAINING_SAMPLES
 NEEDED_HOURS = 6
 
 
+def _tempo_humano(horas: float) -> str:
+    """Tempo do jeito que uma pessoa fala: "40 min", "6h" — nunca "0h"."""
+    minutos = max(math.ceil(horas * 60), 1)
+    if minutos < 60:
+        return f"{5 * math.ceil(minutos / 5)} min"
+    return f"{math.ceil(minutos / 60)}h"
+
+
 @dataclass
 class LearningStatus:
     learning: bool
@@ -46,10 +55,44 @@ class LearningStatus:
     hours_needed: int
 
     @property
+    def remaining_samples(self) -> int:
+        return max(self.needed - self.collected, 0)
+
+    @property
+    def samples_done(self) -> bool:
+        return self.remaining_samples == 0
+
+    @property
+    def hours_done(self) -> bool:
+        return self.remaining_hours <= 0
+
+    @property
+    def remaining_hours_label(self) -> str:
+        """"6h", "40 min" — um só lugar formata tempo, para a frase da
+        notificação e a da tela nunca divergirem."""
+        return _tempo_humano(self.remaining_hours) if self.remaining_hours else ""
+
+    @property
+    def remaining_hours(self) -> float:
+        return max(self.hours_needed - self.hours, 0.0)
+
+    @property
     def phrase(self) -> str:
-        """Como isto aparece para a pessoa, sem jargão."""
-        return (f"{self.collected} de {self.needed} leituras, "
-                f"{self.hours:.0f}h de {self.hours_needed}h")
+        """O que ainda falta — não o que já foi feito.
+
+        A primeira versão dizia "186 de 100 leituras, 0h de 6h": um contador
+        que passa da própria meta não informa nada e parece defeito, e as
+        horas arredondadas para baixo ficavam paradas em zero a manhã toda.
+        A pessoa só quer saber uma coisa: quando isto acaba.
+        """
+        if not self.learning:
+            return ""
+        partes = []
+        if self.remaining_samples:
+            partes.append(f"{self.remaining_samples} leituras")
+        if self.remaining_hours:
+            partes.append(f"cerca de {self.remaining_hours_label}")
+        return "faltam " + " e ".join(partes) if partes else ""
 
     def as_dict(self) -> dict:
         return {
@@ -58,6 +101,11 @@ class LearningStatus:
             "needed": self.needed,
             "hours": round(self.hours, 1),
             "hours_needed": self.hours_needed,
+            "remaining_samples": self.remaining_samples,
+            "remaining_hours": round(self.remaining_hours, 2),
+            "samples_done": self.samples_done,
+            "hours_done": self.hours_done,
+            "remaining_hours_label": self.remaining_hours_label,
             "phrase": self.phrase,
         }
 

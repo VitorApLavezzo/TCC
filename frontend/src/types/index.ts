@@ -309,6 +309,12 @@ export interface LearningStatus {
   hours?: number;
   hours_needed?: number;
   phrase?: string;
+  samples_done?: boolean;
+  hours_done?: boolean;
+  remaining_samples?: number;
+  /** "6h", "40 min" — formatado no servidor, para a tela e a notificação
+   *  nunca divergirem no jeito de dizer o tempo. */
+  remaining_hours_label?: string;
 }
 
 export interface BaselineBand {
