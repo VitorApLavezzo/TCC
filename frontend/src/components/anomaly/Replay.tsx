@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { anomaliesApi, metricsApi } from "../../services/api";
 import { Anomaly } from "../../types";
 import { Skeleton } from "../ui/Skeleton";
+import { bytesPerSec } from "../../lib/format";
 import { Play, Pause, RotateCcw } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -23,8 +24,50 @@ interface Frame {
   label: string;
   cpu: number;
   mem: number;
+  /** Rede e disco: o backend sempre mandou, a tela é que descartava. */
+  connections?: number | null;
+  netRecv?: number | null;
+  netSent?: number | null;
+  diskRead?: number | null;
+  diskWrite?: number | null;
   processes: { name: string; cpu: number; mem: number }[];
 }
+
+type GaugeSpec = {
+  key: keyof Frame;
+  label: string;
+  kind: "percent" | "bytes" | "count";
+};
+
+const CPU_MEM: GaugeSpec[] = [
+  { key: "cpu", label: "Processador", kind: "percent" },
+  { key: "mem", label: "Memória", kind: "percent" },
+];
+const REDE: GaugeSpec[] = [
+  { key: "connections", label: "Conexões de rede", kind: "count" },
+  { key: "netRecv", label: "Recebido", kind: "bytes" },
+];
+const DISCO: GaugeSpec[] = [
+  { key: "diskRead", label: "Leitura de disco", kind: "bytes" },
+  { key: "diskWrite", label: "Escrita de disco", kind: "bytes" },
+];
+
+/**
+ * Quais medidores respondem à pergunta de cada aviso.
+ *
+ * Mostrar processador e memória num aviso de rede é a tela afirmando algo
+ * sobre o que não foi medido — a mesma falha do cartão "e se eu fechar".
+ * Os tipos ausentes daqui caem em processador e memória, que é o caso comum.
+ */
+const GAUGES_FOR: Record<string, GaugeSpec[]> = {
+  network_spike: REDE,
+  ddos_indicator: REDE,
+  beaconing: REDE,
+  disk_activity: DISCO,
+  disk_full: DISCO,
+  disk_forecast: DISCO,
+  disk_space_change: DISCO,
+};
 
 export function Replay({ anomaly, blackboxId }: { anomaly: Anomaly; blackboxId?: number | null }) {
   const [frames, setFrames] = useState<Frame[] | null>(null);
@@ -35,8 +78,14 @@ export function Replay({ anomaly, blackboxId }: { anomaly: Anomaly; blackboxId?:
 
   useEffect(() => {
     let cancelled = false;
+    // A caixa-preta do agente só amostra processador e memória. Num aviso de
+    // rede ou de disco ela é de alta resolução e não tem o dado que importa,
+    // então as leituras normais valem mais: 30 s em vez de 2 s, mas medindo a
+    // coisa certa. O rótulo da fonte continua dizendo qual está em uso.
+    const needsWideMetrics = (GAUGES_FOR[anomaly.anomaly_type] ?? CPU_MEM) !== CPU_MEM;
+
     const load = async () => {
-      if (blackboxId) {
+      if (blackboxId && !needsWideMetrics) {
         try {
           const res = await anomaliesApi.blackbox(blackboxId);
           const samples = res.data.samples ?? [];
@@ -67,6 +116,11 @@ export function Replay({ anomaly, blackboxId }: { anomaly: Anomaly; blackboxId?:
             label: format(new Date(x.t), "HH:mm:ss", { locale: ptBR }),
             cpu: x.cpu ?? 0,
             mem: x.mem ?? 0,
+            connections: x.connections,
+            netRecv: x.net_recv,
+            netSent: x.net_sent,
+            diskRead: x.disk_read,
+            diskWrite: x.disk_write,
             processes: (x.processes ?? []).map((p: any) => ({ name: p.name, cpu: p.cpu ?? 0, mem: p.mem ?? 0 })),
           }));
         setFrames(f);
@@ -124,6 +178,11 @@ export function Replay({ anomaly, blackboxId }: { anomaly: Anomaly; blackboxId?:
 
   const frame = frames[Math.min(index, frames.length - 1)];
   const maxProc = Math.max(10, ...frame.processes.map((p) => p.cpu));
+  const gauges = GAUGES_FOR[anomaly.anomaly_type] ?? CPU_MEM;
+  // Rede e disco não têm teto natural como a porcentagem: a barra é relativa
+  // ao maior valor da própria janela, senão ficaria sempre colada no zero.
+  const maxOf = (key: keyof Frame) =>
+    Math.max(1, ...frames.map((f) => Number(f[key] ?? 0)));
 
   return (
     <div className="rounded-panel border border-hairline bg-surface px-4 py-3.5">
@@ -181,12 +240,13 @@ export function Replay({ anomaly, blackboxId }: { anomaly: Anomaly; blackboxId?:
       </div>
 
       <div className="mt-3 flex gap-6">
-        <Gauge label="Processador" value={frame.cpu} />
-        <Gauge label="Memória" value={frame.mem} />
+        {gauges.map((g) => (
+          <Gauge key={String(g.key)} spec={g} value={Number(frame[g.key] ?? 0)} max={maxOf(g.key)} />
+        ))}
       </div>
 
       <div className="mt-4 space-y-1.5">
-        <p className="channel-label">Quem estava consumindo</p>
+        <p className="channel-label">Quem estava consumindo processador</p>
         {frame.processes.length === 0 ? (
           <p className="text-xs text-fg-3">Sem detalhe de programas neste quadro.</p>
         ) : (
@@ -210,18 +270,25 @@ export function Replay({ anomaly, blackboxId }: { anomaly: Anomaly; blackboxId?:
   );
 }
 
-function Gauge({ label, value }: { label: string; value: number }) {
+function Gauge({ spec, value, max }: { spec: GaugeSpec; value: number; max: number }) {
+  // Rede e disco chegam do agente como TAXA (bytes por segundo, calculada
+  // sobre o intervalo), não como total acumulado — o "/s" faz parte do
+  // número e tirá-lo transformaria uma taxa em algo que ela não é.
+  const texto = spec.kind === "bytes" ? bytesPerSec(value) : value.toFixed(0);
+  const unidade = spec.kind === "percent" ? "%" : "";
+  // Porcentagem tem teto de 100; contagem e bytes se medem contra a janela
+  const preenchimento = spec.kind === "percent" ? Math.min(value, 100) : Math.min((value / max) * 100, 100);
   return (
     <div className="min-w-0 flex-1">
-      <p className="channel-label">{label}</p>
+      <p className="channel-label">{spec.label}</p>
       <p className="tnum mt-0.5 font-mono text-readout-sm font-medium text-fg">
-        {value.toFixed(0)}
-        <span className="ml-0.5 text-md font-normal text-fg-3">%</span>
+        {texto}
+        {unidade && <span className="ml-0.5 text-md font-normal text-fg-3">{unidade}</span>}
       </p>
       <div className="mt-1 h-1 overflow-hidden rounded-full bg-sunken">
         <div
           className="h-full bg-fg-2 transition-[width] duration-300 ease-signal"
-          style={{ width: `${Math.min(value, 100)}%` }}
+          style={{ width: `${preenchimento}%` }}
         />
       </div>
     </div>
