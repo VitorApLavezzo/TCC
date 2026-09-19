@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Boolean, Text, JSON
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, false
 from app.database import Base
 
 
@@ -45,6 +45,9 @@ class Anomaly(Base):
     extra_steps = Column(JSON)
 
     notified_at = Column(DateTime(timezone=True))
+    # Detectada enquanto o sistema ainda conhecia o normal da máquina: fica
+    # registrada e visível no painel, mas não incomoda ninguém
+    during_learning = Column(Boolean, default=False, server_default=false())
 
     machine = relationship("Machine", back_populates="anomalies")
     explanation = relationship("AIExplanation", back_populates="anomaly", uselist=False, cascade="all, delete-orphan")

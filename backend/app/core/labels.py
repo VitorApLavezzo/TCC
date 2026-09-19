@@ -61,6 +61,14 @@ SECURITY_TYPES = {
     "outbreak_suspected",
 }
 
+# Avisos cuja evidência não depende de histórico: uma isca de ransomware
+# tocada é uma isca tocada também no primeiro minuto de vida da máquina.
+# Estes atravessam o período de aprendizado e notificam normalmente.
+LEARNING_EXEMPT = {
+    "ransomware_canary", "process_masquerading", "suspicious_command",
+    "suspicious_parent", "suspicious_process",
+}
+
 # Qual detector produziu cada tipo — é a unidade de calibração
 DETECTOR_OF_TYPE = {
     "memory_leak": "memory_leak",

@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { clsx } from "clsx";
 import { Level } from "../lib/health";
-import { Anomaly, ANOMALY_TYPE_LABELS } from "../types";
+import { Anomaly, ANOMALY_TYPE_LABELS, LearningStatus } from "../types";
 import { pluralize } from "../lib/format";
 import { TextButton } from "./ui/Button";
 import { Explain } from "./ui/Explain";
@@ -66,7 +66,7 @@ export function Verdict({
   level: Level;
   /** Anomalias não resolvidas desta máquina, mais recente primeiro. */
   openAnomalies: Anomaly[];
-  learning?: { collected: number; needed: number; ml_ready: boolean } | null;
+  learning?: LearningStatus | null;
   /** Qual medida está puxando o estado — o "por quê" da frase. */
   driver?: { label: string; value: string } | null;
   onOpenAnomaly: (id: number) => void;
@@ -75,6 +75,12 @@ export function Verdict({
   actions?: ReactNode;
 }) {
   const top = openAnomalies[0];
+  // Vale a régua mais lenta: leituras suficientes E tempo de relógio suficiente
+  const learningProgress = Math.min(
+    (learning?.collected ?? 0) / (learning?.needed || 1),
+    learning?.hours_needed ? (learning.hours ?? 0) / learning.hours_needed : 1,
+    1,
+  );
   const critical = openAnomalies.some((a) => a.severity === "critical");
   const high = openAnomalies.some((a) => a.severity === "high");
 
@@ -177,7 +183,7 @@ export function Verdict({
             </div>
           </div>
 
-          {learning && !learning.ml_ready && (
+          {learning && (learning.learning ?? !learning.ml_ready) && (
             <div className="text-xs text-fg-2">
               <p className="flex flex-wrap items-center gap-1.5">
                 Aprendendo o normal deste computador:{" "}
@@ -185,21 +191,36 @@ export function Verdict({
                   {learning.collected} de {learning.needed}
                 </span>{" "}
                 leituras
+                {learning.hours_needed != null && (
+                  <>
+                    ·{" "}
+                    <span className="tnum font-mono text-fg">
+                      {Math.floor(learning.hours ?? 0)}h de {learning.hours_needed}h
+                    </span>
+                  </>
+                )}
                 <Explain term="aprendizado" />
               </p>
+              {/* As duas contas correm juntas e vale a mais lenta: 100 leituras
+                  a cada 10 s seriam 17 min, que não são o normal de ninguém. */}
               <div
                 className="mt-1.5 h-1 overflow-hidden rounded-full bg-sunken"
                 role="progressbar"
                 aria-label="Progresso do aprendizado"
-                aria-valuenow={Math.min(learning.collected, learning.needed)}
+                aria-valuenow={Math.round(learningProgress * 100)}
                 aria-valuemin={0}
-                aria-valuemax={learning.needed}
+                aria-valuemax={100}
               >
                 <div
                   className="h-full min-w-[6px] rounded-full bg-accent transition-[width] duration-700 ease-signal"
-                  style={{ width: `${Math.min((learning.collected / learning.needed) * 100, 100)}%` }}
+                  style={{ width: `${learningProgress * 100}%` }}
                 />
               </div>
+              <p className="mt-1.5 text-fg-3">
+                Até lá, tudo que for encontrado fica registrado aqui sem virar aviso — só
+                sinais que não dependem de histórico, como um programa disfarçado ou um
+                arquivo-isca mexido, interrompem você.
+              </p>
             </div>
           )}
         </div>

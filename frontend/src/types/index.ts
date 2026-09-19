@@ -183,6 +183,9 @@ export interface Anomaly {
   verified_at?: string;
   steps_progress?: StepProgress[];
   extra_steps?: ExtraStep[];
+  /** Detectada enquanto o sistema ainda aprendia o normal da máquina: fica no
+   *  painel, mas não gerou notificação. */
+  during_learning?: boolean;
 }
 
 export interface IncidentChainNode {
@@ -300,6 +303,12 @@ export interface LearningStatus {
   ml_ready: boolean;
   retrain_every: number;
   model?: { threshold: number; samples: number; trained_at: string } | null;
+  /** Período de aprendizado: enquanto verdadeiro, os detectores que dependem
+   *  de histórico ficam quietos e o que é detectado não notifica. */
+  learning?: boolean;
+  hours?: number;
+  hours_needed?: number;
+  phrase?: string;
 }
 
 export interface BaselineBand {

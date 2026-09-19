@@ -16,7 +16,7 @@ Revisões desta versão:
 import ntpath
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -26,6 +26,7 @@ from app.core.timeutil import aware
 from app.models.metric import Metric
 from app.models.process import ProcessSnapshot
 from app.models.process_baseline import ProcessBaseline
+from app.services import trust
 
 
 # Processos do sistema operacional considerados seguros (whitelist básica)
@@ -69,6 +70,11 @@ PROTECTED_WINDOWS_BINARIES = {
     "audiodg.exe": ("\\windows\\system32\\",),
     "explorer.exe": ("\\windows\\",),
 }
+
+# Quantas aparições um processo precisa ter para a média dele valer como
+# referência. `is_known` (5) diz "já vi isso aqui"; uma média de 5 leituras
+# não descreve um programa que fica ocioso e acorda para trabalhar.
+MIN_BASELINE_SAMPLES = 20
 
 # Nomes parecidos com binários do sistema que são programas legítimos
 KNOWN_LOOKALIKES = {"iexplore", "dashost", "taskhost", "sihclient", "svchost32", "smartscreen"}
@@ -160,9 +166,18 @@ class DetectionContext:
     sensitivity: Dict[str, float] = field(default_factory=dict)
     # Programas que nasceram desde a última coleta, com pai e caminho
     process_starts: List[Dict[str, Any]] = field(default_factory=list)
+    # Confiança de cada processo desta coleta, calculada uma vez por coleta:
+    # a consulta de reputação é uma ida ao banco, e são dez detectores
+    trust_levels: Dict[Tuple[str, str], trust.Trust] = field(default_factory=dict)
+    # Máquina ainda conhecendo o próprio normal — quem compara com histórico
+    # não tem com o que comparar
+    learning: bool = False
 
     def s(self, detector: str) -> float:
         return max(0.5, min(float(self.sensitivity.get(detector, 1.0)), 2.0))
+
+    def trust(self, proc) -> trust.Trust:
+        return self.trust_levels.get(trust.key_of(proc)) or trust.Trust()
 
 
 class BehaviorAnalysis:
@@ -228,6 +243,10 @@ def analyze_behavior(metric: Metric, db: Session, ctx: Optional[DetectionContext
         .limit(60)
         .all()
     )
+
+    # Uma vez por coleta, não uma por detector: a reputação vem do banco
+    if not ctx.trust_levels:
+        ctx.trust_levels = trust.evaluate_all(db, metric.machine_id, processes)
 
     detectors = [
         detect_memory_leak,
@@ -464,6 +483,16 @@ def detect_new_suspicious_process(metric: Metric, processes: List[ProcessSnapsho
         is_resource_heavy = (proc.cpu_percent or 0) > 15 * s or (proc.mem_percent or 0) > 10 * s
         is_malware_name = any(n in name_lower for n in MALWARE_NAMES)
 
+        if not is_malware_name:
+            # Enquanto a máquina aprende, TODO programa é desconhecido: a
+            # afirmação não informa nada. Nome de minerador continua valendo.
+            if ctx.learning:
+                continue
+            # Programa assinado e instalado na pasta de programas que apareceu
+            # hoje significa "instalaram um programa", não "processo estranho"
+            if ctx.trust(proc).is_trusted:
+                continue
+
         if is_unknown and (is_resource_heavy or is_malware_name):
             analysis = BehaviorAnalysis()
             analysis.anomaly_type = "suspicious_process" if is_malware_name else "unknown_process"
@@ -489,6 +518,8 @@ def detect_new_suspicious_process(metric: Metric, processes: List[ProcessSnapsho
                 "parent": proc.parent_name,
                 "suspicious_name_match": is_malware_name,
                 "first_time_seen": True,
+                "confianca": ctx.trust(proc).level,
+                "confianca_motivos": ctx.trust(proc).reasons,
             }
             return analysis
 
@@ -533,17 +564,36 @@ def detect_malware_pattern(metric: Metric, processes: List[ProcessSnapshot],
             proc.signed == "unsigned" and cpu_high and ("\\users\\" in exe_lower or exe_lower.startswith("/home/"))
         )
 
-        indicators = sum([
-            int(cpu_high and net_spike),
-            int(is_malware_name),
-            int(has_no_cmdline),
-            int(runs_from_temp),
-            int(is_privileged and cpu_high),
-            int(is_lolbin and net_spike),
-            int(unsigned_user_dir),
-        ])
+        t = ctx.trust(proc)
 
-        if indicators >= 2:
+        # Indícios CIRCUNSTANCIAIS descrevem uma situação que muito programa
+        # honesto vive: um antivírus varrendo é privilegiado, come processador
+        # e baixa assinaturas — os três de uma vez, todo dia. Sozinhos eles não
+        # acusam ninguém.
+        circumstantial = {
+            "cpu_com_spike_rede": cpu_high and net_spike,
+            "privilegiado_com_cpu_alta": is_privileged and cpu_high,
+            "ferramenta_do_sistema_com_rede": is_lolbin and net_spike,
+        }
+        # Indícios CONCRETOS são fatos sobre o arquivo, não sobre o momento.
+        concrete = {
+            "nome_suspeito": is_malware_name,
+            "sem_cmdline": has_no_cmdline,
+            "executa_de_temp": runs_from_temp,
+            "nao_assinado_em_pasta_do_usuario": unsigned_user_dir,
+        }
+        if t.is_trusted:
+            # Um serviço assinado do sistema rodar como SYSTEM não é indício:
+            # é a definição de serviço.
+            circumstantial["privilegiado_com_cpu_alta"] = False
+
+        hard = sum(1 for v in concrete.values() if v)
+        indicators = hard + sum(1 for v in circumstantial.values() if v)
+        # Executável que já passou por instalador e tem assinatura válida
+        # precisa de mais que a média para ser acusado
+        needed = 3 if t.is_trusted else 2
+
+        if is_malware_name or (hard >= 1 and indicators >= needed):
             analysis = BehaviorAnalysis()
             analysis.anomaly_type = "malware_pattern"
             analysis.severity = "critical" if indicators >= 3 else "high"
@@ -563,15 +613,10 @@ def detect_malware_pattern(metric: Metric, processes: List[ProcessSnapshot],
                 "sha256": proc.sha256,
                 "signed": proc.signed,
                 "cmdline": proc.cmdline,
-                "indicators": {
-                    "cpu_com_spike_rede": cpu_high and net_spike,
-                    "nome_suspeito": is_malware_name,
-                    "sem_cmdline": has_no_cmdline,
-                    "executa_de_temp": runs_from_temp,
-                    "privilegiado_com_cpu_alta": is_privileged and cpu_high,
-                    "ferramenta_do_sistema_com_rede": is_lolbin and net_spike,
-                    "nao_assinado_em_pasta_do_usuario": unsigned_user_dir,
-                },
+                "indicators": {**circumstantial, **concrete},
+                "indicios_concretos": hard,
+                "confianca": t.level,
+                "confianca_motivos": t.reasons,
             }
             return analysis
 
@@ -588,7 +633,11 @@ def detect_resource_abuse(metric: Metric, processes: List[ProcessSnapshot],
     baselines = {
         b.process_name: b
         for b in db.query(ProcessBaseline)
-        .filter(ProcessBaseline.machine_id == metric.machine_id, ProcessBaseline.is_known == True)  # noqa: E712
+        .filter(
+            ProcessBaseline.machine_id == metric.machine_id,
+            ProcessBaseline.is_known == True,  # noqa: E712
+            ProcessBaseline.seen_count >= MIN_BASELINE_SAMPLES,
+        )
         .all()
     }
 
@@ -602,11 +651,21 @@ def detect_resource_abuse(metric: Metric, processes: List[ProcessSnapshot],
 
         cpu_ratio = (proc.cpu_percent or 0) / baseline.avg_cpu if baseline.avg_cpu > 0 else 0
         mem_ratio = (proc.mem_percent or 0) / baseline.avg_mem_percent if baseline.avg_mem_percent > 0 else 0
+        # "Fora do padrão" é passar do que este programa JÁ foi visto consumir,
+        # não da média dele: todo programa que faz algo pesado de vez em quando
+        # tem média baixa e pico alto, e comparar só com a média acusava o pico
+        # normal de todo mundo (o caso do antivírus varrendo).
+        above_ever_seen = (proc.cpu_percent or 0) > (baseline.max_cpu or 0) * 1.2
 
-        if cpu_ratio > 5 * s and (proc.cpu_percent or 0) > 20 * s:
+        if above_ever_seen and cpu_ratio > 5 * s and (proc.cpu_percent or 0) > 20 * s:
+            t = ctx.trust(proc)
             analysis = BehaviorAnalysis()
             analysis.anomaly_type = "resource_abuse"
             analysis.severity = "high" if cpu_ratio > 10 * s else "medium"
+            if t.is_security_software:
+                # Antivírus varrendo é o programa fazendo o que promete. Fica
+                # registrado, mas `low` já sai da notificação por padrão.
+                analysis.severity = "low"
             analysis.responsible_process = proc.name
             analysis.confidence = min((cpu_ratio - 5) / 10, 1.0)
             analysis.affected_metrics = {
@@ -624,6 +683,8 @@ def detect_resource_abuse(metric: Metric, processes: List[ProcessSnapshot],
                 "mem_ratio_vs_baseline": round(mem_ratio, 2),
                 "baseline_avg_cpu": round(baseline.avg_cpu, 2),
                 "baseline_max_cpu": round(baseline.max_cpu, 2),
+                "confianca": t.level,
+                "confianca_motivos": t.reasons,
             }
             return analysis
 

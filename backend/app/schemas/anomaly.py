@@ -71,6 +71,7 @@ class AnomalyOut(BaseModel):
     verified_at: Optional[datetime] = None
     steps_progress: Optional[Any] = None
     extra_steps: Optional[Any] = None
+    during_learning: bool = False
 
     class Config:
         from_attributes = True

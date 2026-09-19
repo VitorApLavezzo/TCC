@@ -222,6 +222,21 @@ export function AnomalyDetail() {
         )}
       </header>
 
+      {/*
+        Ressalva, não alerta: explica por que este aviso existe no painel sem
+        ter chegado como notificação. Sem cor de estado — a cor é do problema.
+      */}
+      {anomaly.during_learning && (
+        <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">
+          Detectado enquanto o sistema ainda aprendia o que é normal neste computador, então
+          você não foi notificado. Nas primeiras horas quase tudo parece novo — inclusive
+          programas que sempre estiveram aqui. Fica registrado para você conferir quando
+          quiser.
+        </p>
+      )}
+
+      <TrustNote anomaly={anomaly} />
+
       <div className="mt-6 border-t border-hairline pt-5">
         {lead ? (
           <>
@@ -369,6 +384,28 @@ export function AnomalyDetail() {
         {exp && <Button variant="quiet" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>Gerar nova explicação</Button>}
       </div>
     </div>
+  );
+}
+
+/**
+ * O que se sabe do programa acusado, na hora em que a pessoa está decidindo
+ * se aquilo é um vírus.
+ *
+ * O painel tinha todos esses dados (assinatura, fabricante, em quantos
+ * computadores o executável aparece) e não mostrava nenhum justamente aqui.
+ * Sem isso, "processo consumindo recursos" soa igual para o antivírus da
+ * pessoa e para um minerador.
+ */
+function TrustNote({ anomaly }: { anomaly: Anomaly }) {
+  const behavior = (anomaly.affected_metrics as any)?._behavior;
+  const reasons: string[] = behavior?.confianca_motivos || [];
+  if (!reasons.length) return null;
+  const seguranca = behavior?.confianca >= 3;
+  return (
+    <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">
+      <span className="text-fg">Sobre este programa:</span> {reasons.join(", ")}.
+      {seguranca && " Programas de segurança varrem arquivos e baixam atualizações o tempo todo — é o trabalho deles, e se parece com o de um vírus."}
+    </p>
   );
 }
 

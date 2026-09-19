@@ -14,7 +14,7 @@ from app.models.metric import Metric
 from app.models.process import ProcessSnapshot
 from app.models.user import User
 from app.schemas.metric import MetricCreate, MetricDetailed, MetricOut
-from app.services import baselines, ingestion, ml_service
+from app.services import baselines, ingestion, learning, ml_service
 from app.services.ingestion import anomaly_ws_payload, metric_payload
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
@@ -103,7 +103,7 @@ def get_learning_status(
     O painel usa isso para dizer ao usuário que a detecção ainda está
     calibrando — sem isso, "nenhuma anomalia" é indistinguível de "quebrado".
     """
-    _owned_machine(db, machine_id, current_user)
+    machine = _owned_machine(db, machine_id, current_user)
     collected = db.query(Metric).filter(Metric.machine_id == machine_id).count()
     needed = settings.MIN_TRAINING_SAMPLES
     info = ml_service.model_info(machine_id)
@@ -114,6 +114,10 @@ def get_learning_status(
         "ml_ready": bool(info) and collected >= needed,
         "retrain_every": settings.RETRAIN_EVERY,
         "model": info,
+        # As duas camadas usam a mesma régua: enquanto isto for verdade, os
+        # detectores que dependem de histórico ficam quietos e os avisos que
+        # saem não viram notificação
+        **learning.status(db, machine).as_dict(),
     }
 
 

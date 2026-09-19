@@ -27,6 +27,7 @@ from app.models.explanation import AIExplanation
 from app.models.machine import Machine
 from app.models.notification import Notification
 from app.models.user import User
+from app.services import learning
 from app.services.preferences import get_preferences
 
 # Quanto esperar a explicação da IA antes de mandar a mensagem sem ela
@@ -58,7 +59,13 @@ def on_anomaly(db: Session, anomaly: Anomaly) -> Notification:
         created_at=now,
     )
 
-    if SEVERITY_ORDER.get(anomaly.severity, 0) < SEVERITY_ORDER.get(prefs["min_severity"], 2):
+    if anomaly.during_learning:
+        # Sem digest: um resumo diário cheio de ruído da fase de aprendizado
+        # não é melhor que o ruído — é o mesmo ruído, adiado.
+        progresso = learning.status(db, machine).phrase
+        n.status = "suppressed"
+        n.status_reason = f"máquina ainda aprendendo o que é normal ({progresso})"
+    elif SEVERITY_ORDER.get(anomaly.severity, 0) < SEVERITY_ORDER.get(prefs["min_severity"], 2):
         if prefs["digest"]["enabled"]:
             n.status, n.status_reason = "held", "vai no resumo diário"
         else:

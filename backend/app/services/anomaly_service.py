@@ -20,13 +20,13 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.labels import PERFORMANCE_TYPES, PROCESS_SPECIFIC_TYPES, SEVERITY_ORDER
+from app.core.labels import LEARNING_EXEMPT, PERFORMANCE_TYPES, PROCESS_SPECIFIC_TYPES, SEVERITY_ORDER
 from app.core.timeutil import aware, local_time, tz_offset_minutes, utcnow
 from app.models.anomaly import Anomaly
 from app.models.explanation import AIExplanation
 from app.models.machine import Machine
 from app.models.metric import Metric
-from app.services import feedback, incidents, ml_service
+from app.services import feedback, incidents, learning, ml_service
 from app.services.behavior_analyzer import DetectionContext, analyze_behavior
 
 ANOMALY_COOLDOWN_MINUTES = 30
@@ -110,6 +110,13 @@ def persist_candidate(
     if c.details:
         affected["_behavior"] = c.details
 
+    # Ainda conhecendo a máquina: registra, mas não incomoda. Não é filtro —
+    # o aviso existe e aparece no painel; o que muda é a notificação.
+    during_learning = (
+        c.anomaly_type not in LEARNING_EXEMPT
+        and learning.is_learning(db, machine, now)
+    )
+
     anomaly = Anomaly(
         machine_id=machine.id,
         metric_id=metric.id if metric is not None else None,
@@ -121,6 +128,7 @@ def persist_candidate(
         responsible_process=c.responsible,
         source=c.source,
         related_signals={"signals": sorted(signals), "others": related or []},
+        during_learning=during_learning,
     )
     db.add(anomaly)
     db.flush()
@@ -159,7 +167,8 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
         metric.excluded_from_training = True
 
     sensitivity = feedback.sensitivity_map(db, machine.id)
-    ctx = DetectionContext(offset_minutes=offset, sensitivity=sensitivity, process_starts=process_starts or [])
+    ctx = DetectionContext(offset_minutes=offset, sensitivity=sensitivity, process_starts=process_starts or [],
+                           learning=learning.is_learning(db, machine, now))
 
     # 1. Análise comportamental (padrões avançados)
     findings = analyze_behavior(metric, db, ctx)
