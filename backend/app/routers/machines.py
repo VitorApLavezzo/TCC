@@ -14,6 +14,7 @@ from app.schemas.machine import (
     BulkKeyCreate, BulkKeyOut,
 )
 from app.core.dependencies import get_current_user
+from app.services import ml_service
 
 router = APIRouter(prefix="/api/machines", tags=["machines"])
 
@@ -243,6 +244,10 @@ def delete_machine_cascade(machine_id: int, db: Session):
     db.query(ChangeEvent).filter(ChangeEvent.machine_id == machine_id).delete(synchronize_session=False)
     db.query(InventorySnapshot).filter(InventorySnapshot.machine_id == machine_id).delete(synchronize_session=False)
     db.query(ProcessIdentity).filter(ProcessIdentity.machine_id == machine_id).delete(synchronize_session=False)
+    # O modelo treinado vive em arquivo, fora do banco: sem apagá-lo aqui ele
+    # fica para sempre no volume, e um id reaproveitado (banco restaurado,
+    # ambiente recriado) carregaria o modelo de outra máquina.
+    ml_service._discard(machine_id)
     db.query(Notification).filter(Notification.machine_id == machine_id).delete(synchronize_session=False)
     db.query(EnrollmentCode).filter(EnrollmentCode.machine_id == machine_id).delete(synchronize_session=False)
     db.query(Machine).filter(Machine.id == machine_id).delete(synchronize_session=False)
