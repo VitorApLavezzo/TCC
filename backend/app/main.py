@@ -1,14 +1,16 @@
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 
 from app.config import settings
 from app.database import engine
 from app.routers import (
-    account, actions, agent_api, agent_files, anomalies, auth, chat, demo, evaluation, explanations,
-    insights, machines, metrics, reports, reputation_hub, share, ws,
+    account, actions, agent_api, agent_files, anomalies, audit, auth, chat, demo, evaluation,
+    explanations, insights, machines, metrics, playbooks, reports, reputation_hub, share, study, ws,
 )
 
 
@@ -40,19 +42,62 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# "*" com allow_credentials=True é inválido no padrão CORS: o navegador recusa
+# a resposta e a chamada falha em produção. Como o painel manda o token no
+# cabeçalho Authorization (e não em cookie), liberar a origem sem credenciais
+# é o que corresponde ao uso real; quem publica o sistema fecha a lista no
+# ALLOWED_ORIGINS.
+_origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
+_wildcard = "*" in _origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_origins or ["*"],
+    allow_credentials=not _wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def _observe_requests(request, call_next):
+    """Conta e cronometra cada requisição para o /metrics."""
+    from app.core import observability
+
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        # A rota do template ("/api/machines/{machine_id}"), e não o caminho com
+        # o id: com o caminho, cada máquina viraria uma série de métrica nova.
+        route = request.scope.get("route")
+        path = getattr(route, "path", None) or "desconhecida"
+        labels = {"route": path, "method": request.method, "status": f"{status_code // 100}xx"}
+        observability.inc("anomalydetect_http_requests_total", labels)
+        observability.observe("anomalydetect_http_request_seconds",
+                              time.perf_counter() - started, {"route": path})
+
 for router in (auth, machines, metrics, anomalies, ws, explanations, agent_files, agent_api,
-               actions, chat, insights, reports, account, share, evaluation, demo, reputation_hub):
+               actions, chat, insights, reports, account, share, evaluation, demo, reputation_hub,
+               playbooks, study, audit):
     app.include_router(router.router)
 
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "AnomalyDetect API"}
+
+
+@app.get("/metrics", response_class=PlainTextResponse, include_in_schema=False)
+def metrics():
+    """Métricas do processo no formato do Prometheus.
+
+    Sem autenticação de propósito: não há dado de usuário aqui, só contadores
+    do próprio serviço, e é assim que um coletor consegue raspar a rota. Quem
+    publica na internet fecha /metrics no Nginx.
+    """
+    from app.core import observability
+    return observability.render()

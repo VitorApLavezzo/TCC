@@ -20,6 +20,7 @@ Projeto de TCC — o objetivo é que **qualquer pessoa**, mesmo sem conhecimento
 - [Configurando a IA (Ollama e Groq)](#configurando-a-ia-ollama-e-groq)
 - [Login com Google (opcional)](#login-com-google-opcional)
 - [Principais endpoints da API](#principais-endpoints-da-api)
+- [Operação: observabilidade, CI e segurança](#operação-observabilidade-ci-e-segurança)
 - [Testes](#testes)
 - [Solução de problemas](#solução-de-problemas)
 
@@ -131,6 +132,20 @@ O que este projeto tem e ferramentas parecidas (Zabbix, Netdata, PRTG, NinjaOne)
 
 **Agir, não só avisar** — encerrar processo, limpar temporários, pausar sincronização, **isolar da rede**, tudo com um clique a partir do aviso e registrado; **caixa-preta** (os minutos antes do aviso em alta resolução) e **replay**.
 
+**Automação com autonomia graduada** — uma regra nasce em "só sugerir"; subir para "pedir confirmação" ou "fazer sozinho e avisar" é decisão explícita do dono. Mesmo no nível automático a ação é **anunciada antes**, com uma janela para cancelar, teto por dia, modo de ensaio e uma lista de ações menor que a manual (isolar a rede nunca é automático). Ferramenta de gestão remota paga automatiza há anos — o que falta nelas é o degrau.
+
+**Saber quando não sabe** — o sistema mede se o normal que aprendeu ainda descreve a máquina (divergência de Jensen-Shannon entre a janela de treino e as leituras recentes) e **diz isso em português**: "estou reaprendendo o normal deste computador". Monitoramento comum não conta ao usuário que a régua envelheceu; simplesmente passa a errar.
+
+**Risco de falha de peça em porcentagem** — SMART, ciclos de bateria, temperatura, idade e erros de hardware viram uma frase acionável: "este disco tem cerca de 18% de chance de dar problema nos próximos 90 dias — faça backup hoje", com a conta aberta embaixo.
+
+**A mesma atualização em várias máquinas** — "depois do KB5034123, 6 dos seus 12 computadores ficaram mais lentos". Uma piora isolada é indistinguível de coincidência; a repetição entre máquinas é o que separa acaso de causa.
+
+**Registro inviolável** — cada aviso, ação e automação entra num livro encadeado por hash. Adulterar um registro antigo quebra a cadeia dos seguintes, e a verificação diz exatamente onde. Dá para baixar o relatório e anexar a um chamado.
+
+**Não fica cego sem o servidor** — o agente mantém a faixa do normal localmente e guarda em disco as leituras que não conseguiu enviar, reenviando-as em ordem **com a hora original** quando a conexão volta. O período sem rede deixa de ser um buraco no histórico.
+
+**No celular** — o painel é instalável pela tela inicial (PWA) e recebe as notificações do sistema com o aplicativo fechado, sem loja e sem aplicativo nativo para manter. Exige HTTPS: em `http://` de rede local o navegador não oferece nem a instalação nem as notificações (só `localhost` é exceção) — a tela explica isso e indica as saídas. Telegram e e-mail não dependem de certificado.
+
 **Vários computadores** — comparação com pares ("usa 3× mais memória que os outros 12 iguais"), **detecção de surto** (mesmo programa novo em várias máquinas), reputação coletiva anônima de executáveis e **conselheiro de upgrade** ("+8 GB teriam evitado 80% dos avisos").
 
 **Conversa e diário** — **"Pergunte ao seu computador"** (chat que consulta os dados por ferramentas) e o **diário semanal** em texto corrido.
@@ -141,7 +156,12 @@ O que este projeto tem e ferramentas parecidas (Zabbix, Netdata, PRTG, NinjaOne)
 
 **Energia** — consumo estimado em R$ e CO₂, por máquina e por programa, e detecção de desperdício.
 
-**Para a pesquisa** — avaliação das explicações (👍/👎 e IA-juíza, comparando Claude × Ollama × Groq) e **modo demonstração**, que injeta anomalias pelo painel — passando pela mesma detecção das reais — para apresentar à banca sem travar um computador de verdade.
+**Para a pesquisa** — avaliação das explicações (👍/👎 e IA-juíza, comparando Claude × Ollama × Groq) e **modo demonstração**, que injeta anomalias pelo painel — passando pela mesma detecção das reais — para apresentar à banca sem travar um computador de verdade. Além disso:
+
+- **Estudo de compreensão com pessoas**: cada participante vê os mesmos avisos, metade com a explicação da IA e metade só com os números, em ordem sorteada; o sistema cronometra, corrige e aplica o SUS no fim, com teste estatístico e exportação em CSV. É a única medida do projeto que não vem do sistema avaliando a si mesmo.
+- **Ablação das camadas**: os mesmos cenários rodados só com regras, só com o modelo e com os dois — a resposta em número para "o Isolation Forest acrescenta alguma coisa?".
+- **Validação por retenção temporal**: treino na primeira parte do histórico, medição na parte final, com área sob a curva ROC comparada a um detector de limiar fixo de três desvios.
+- **Fidelidade da explicação**: cada "se você fechar o Chrome, a memória cai para 48%" é conferido contra a leitura seguinte à ação, e a taxa de acerto sai por provedor. Medir se a IA **estava certa**, e não se o texto pareceu bom.
 
 ---
 
@@ -175,6 +195,7 @@ TCC/
 │   ├── actions.py            # Executa comandos do painel (encerrar, limpar, isolar)
 │   ├── blackbox.py           # Caixa-preta em memória + fotografia forense
 │   ├── updater.py            # Autoatualização pelo manifesto do servidor
+│   ├── localguard.py         # Faixa do normal local + fila em disco quando o servidor cai
 │   └── requirements.txt
 │   #  Os módulos acima são opcionais: se faltar algum, o agente roda sem
 │   #  aquela funcionalidade em vez de falhar.
@@ -201,6 +222,9 @@ TCC/
 │   │   │   ├── agent_files.py# Distribuição do agente, install.sh, manifesto
 │   │   │   ├── agent_api.py  # Comandos, caixa-preta, eventos, "tchau" do agente
 │   │   │   ├── explanations.py # Regenerar, reescrever por nível, avaliar
+│   │   │   ├── playbooks.py  # Automações e o freio delas (confirmar/cancelar)
+│   │   │   ├── audit.py      # Livro encadeado e verificação da cadeia
+│   │   │   ├── study.py      # Estudo de compreensão com participantes
 │   │   │   └── ws.py         # WebSockets (tempo real)
 │   │   ├── services/
 │   │   │   ├── anomaly_service.py    # Orquestra a detecção — TODO aviso nasce aqui
@@ -219,7 +243,16 @@ TCC/
 │   │   │   ├── diary.py              # Diário semanal
 │   │   │   ├── energy.py             # Consumo, custo e desperdício
 │   │   │   ├── chat.py + chat_tools.py # Conversa com consultas aos dados
-│   │   │   ├── scheduler.py          # 13 rotinas periódicas
+│   │   │   ├── scheduler.py          # 18 rotinas periódicas (com medição em /metrics)
+│   │   │   ├── drift.py              # O normal aprendido ainda descreve a máquina?
+│   │   │   ├── hardware_risk.py      # Risco de falha de peça, em % e em português
+│   │   │   ├── playbooks.py          # Automação com autonomia graduada
+│   │   │   ├── integrity.py          # Livro de auditoria encadeado por hash
+│   │   │   ├── fidelity.py           # A IA acertou o efeito que previu?
+│   │   │   ├── ml_eval.py            # Retenção temporal (ROC/AUC) e ablação das camadas
+│   │   │   ├── study.py              # Estudo com pessoas: sorteio, tempo, SUS, estatística
+│   │   │   ├── change_correlation.py # A mesma atualização piorando várias máquinas
+│   │   │   ├── push.py               # Web Push (avisos no celular)
 │   │   │   └── explanation_queue.py  # Fila assíncrona de explicações
 │   │   └── core/             # Segurança, migrações automáticas, redação, rótulos
 │   ├── ml/train_all.py       # Treino manual de todos os modelos
@@ -445,11 +478,44 @@ Documentação interativa completa em `/docs`. Resumo:
 | `GET /api/account/privacy/machine/{id}` | JWT | "O que foi enviado sobre mim" |
 | `POST /api/share/anomaly/{id}` · `GET /api/share/view/{token}` | JWT / — | Pacote para o técnico (visualização pública) |
 | `GET /api/evaluation/summary` | JWT | Qualidade das explicações por provedor |
+| `GET /api/evaluation/fidelity` · `/anomaly/{id}/fidelity` | JWT | A IA acertou o efeito que previu? |
+| `GET /api/evaluation/holdout/{machine_id}` | JWT | Validação por retenção temporal (ROC/AUC) do modelo |
+| `POST/GET /api/evaluation/ablation` | JWT | Cenários rodados só com regras, só com modelo e com os dois |
+| `GET /api/insights/machine/{id}/drift` · `/hardware-risk` | JWT | Deriva do modelo / risco de falha das peças |
+| `GET /api/insights/fleet/changes` | JWT | Atualizações que pioraram várias máquinas |
+| `GET/POST/PATCH/DELETE /api/playbooks` · `/runs` · `/runs/{id}/decide` | JWT | Automações e o freio delas |
+| `GET /api/audit/entries` · `/verify` · `/report` | JWT | Livro encadeado e verificação da cadeia |
+| `POST /api/study/sessions` · `/answer` · `/finish` · `GET /api/study/results` | JWT | Estudo de compreensão com participantes |
+| `GET /api/account/push/config` · `POST /push/subscribe` · `/push/test` | JWT | Avisos no celular (Web Push) |
+| `GET /metrics` | — | Métricas do serviço no formato do Prometheus |
 | `POST /api/demo/start` | JWT | Modo demonstração |
 | `GET /api/agent/download/{arquivo}` · `/install.sh` · `/manifest` | — | Distribuição e atualização do agente |
 | `GET /api/agent/commands` · `POST /api/agent/blackbox` · `/events` · `/goodbye` | token do agente | Canal de tempo de execução do agente |
 | `GET /api/agent/validate-token` · `DELETE /api/agent/self` | token do agente | Validar token / auto-remoção |
 | `WS /ws/machine/{id}` · `/ws/user` | JWT (query) | Métricas e anomalias em tempo real |
+
+---
+
+## Operação: observabilidade, CI e segurança
+
+**Métricas do serviço.** `GET /metrics` expõe, no formato de texto do
+Prometheus e sem dependência nova, contadores de requisições por rota, e — o
+que mais importa aqui — a saúde das 18 rotinas do agendador: quantas vezes
+cada uma rodou, quanto demorou e **há quantos segundos ela não termina bem**.
+Uma rotina que parou de rodar aparece como idade crescendo, que é a única
+forma de notar a ausência de algo que deveria acontecer sozinho. A rota é
+aberta (não há dado de usuário nela); num servidor público, feche-a no Nginx.
+
+**Integração contínua.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+roda, a cada push e pull request, os testes do backend (`pytest`), os testes do
+painel (`vitest`) e a verificação de tipos com o build (`tsc && vite build`).
+
+**Segurança.** O modelo de ameaça — quem é confiado, quanto, e quais riscos
+foram aceitos de propósito — está em [SECURITY.md](SECURITY.md). Em resumo:
+login, cadastro e pareamento têm limite de tentativas por IP; a lista de
+origens do CORS é configurável (`ALLOWED_ORIGINS`); toda ação executada numa
+máquina fica lacrada no livro encadeado; e a automação nunca inclui isolar a
+rede.
 
 ---
 
@@ -464,7 +530,20 @@ pytest tests/ -v
 Os testes usam SQLite em memória — não precisam do PostgreSQL nem de Docker.
 Cobrem a API, o motor de detecção, a checagem de números das explicações, a
 política de notificações e os módulos do agente (remoção de segredos, arquivos-isca,
-beaconing, autoatualização).
+beaconing, autoatualização). `tests/test_novidades.py` cobre o que é novo e
+erraria em silêncio: o limite de tentativas, a cadeia de auditoria (inclusive
+uma adulteração), a medida de deriva, o risco de hardware, a conferência das
+previsões, os degraus de autonomia da automação, a nota SUS e a fila de
+leituras do agente.
+
+No painel:
+
+```bash
+cd frontend
+npm install
+npm run test     # vitest: formatação e classificação de estado
+npm run build    # tsc + vite: verificação de tipos e empacotamento
+```
 
 ### Teste ponta a ponta com o agente real
 

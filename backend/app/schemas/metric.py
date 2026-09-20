@@ -145,10 +145,17 @@ class MetricCreate(BaseModel):
     beacons: Optional[List[BeaconCandidate]] = None
     process_starts: Optional[List[ProcessStart]] = None
 
+    # Quando a leitura foi feita no computador (epoch). Só vem preenchido nas
+    # leituras que ficaram guardadas no agente enquanto o servidor estava
+    # inacessível: sem isso, uma hora de fila voltaria toda com o horário da
+    # reconexão e inventaria um pico que nunca existiu.
+    collected_at: Optional[float] = None
+
 
 # Campos que não são colunas de Metric — tratados à parte na ingestão
 INGEST_EXTRA_FIELDS = {
     "processes", "agent_version", "system_info", "inventory", "events", "beacons", "process_starts",
+    "collected_at",
 }
 
 

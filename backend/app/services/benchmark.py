@@ -397,6 +397,12 @@ def run_scenario(db, name: str, owner_id: int) -> ScenarioResult:
     db.add(machine)
     db.commit()
     db.refresh(machine)
+    # O id guardado agora, e não lido do objeto lá no fim: um `rollback` no
+    # meio do cenário expira a instância, e ler `machine.id` depois volta ao
+    # banco — se a linha já não estiver lá, levanta ObjectDeletedError dentro
+    # do próprio `finally`. Era isso que derrubava a rodada inteira e deixava
+    # a máquina efêmera no painel. Mesma precaução que `sweep_orphans` toma.
+    machine_id = machine.id
 
     # Estado do gerador guardado e devolvido: semear o módulo global é o que
     # funciona com o `random` que a demonstração usa, mas o processo inteiro
@@ -432,7 +438,7 @@ def run_scenario(db, name: str, owner_id: int) -> ScenarioResult:
         db.rollback()
     finally:
         random.setstate(estado)
-        _drop_machine(db, machine.id)
+        _drop_machine(db, machine_id)
 
     return resultado
 
@@ -528,6 +534,7 @@ def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 
     db.add(machine)
     db.commit()
     db.refresh(machine)
+    machine_id = machine.id  # ver o comentário em run_scenario
 
     inicio_medido = fim_medido = None
     try:
@@ -554,7 +561,7 @@ def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 
         resultado.error = f"{type(e).__name__}: {e}"
         db.rollback()
     finally:
-        _drop_machine(db, machine.id)
+        _drop_machine(db, machine_id)
 
     return resultado
 

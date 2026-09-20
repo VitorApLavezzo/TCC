@@ -11,6 +11,7 @@ from app.models.user import User
 from app.schemas.user import UserCreate, UserOut, Token
 from app.core.security import get_password_hash, verify_password, create_access_token
 from app.core.dependencies import get_current_user
+from app.core.ratelimit import limit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -28,7 +29,7 @@ def auth_config():
     return {"google_client_id": settings.GOOGLE_CLIENT_ID or None}
 
 
-@router.post("/google", response_model=Token)
+@router.post("/google", response_model=Token, dependencies=[Depends(limit("google", 20, 300))])
 def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=400, detail="Login com Google não configurado")
@@ -82,7 +83,10 @@ def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer"}
 
 
-@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+# Cadastro e login são os dois pontos abertos a quem não tem conta: sem limite,
+# adivinhar senha ou criar contas em massa custa só tempo de CPU do servidor.
+@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(limit("register", 5, 3600))])
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user_in.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -99,7 +103,7 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
     return user
 
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=Token, dependencies=[Depends(limit("login", 10, 300))])
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):

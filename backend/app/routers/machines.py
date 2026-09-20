@@ -2,7 +2,7 @@ import secrets
 from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.core.timeutil import aware, utcnow
 from app.database import get_db
 from app.models.machine import Machine
@@ -14,6 +14,7 @@ from app.schemas.machine import (
     BulkKeyCreate, BulkKeyOut,
 )
 from app.core.dependencies import get_current_user
+from app.core.ratelimit import limit
 from app.services import ml_service
 
 router = APIRouter(prefix="/api/machines", tags=["machines"])
@@ -85,7 +86,11 @@ def revoke_bulk_key(key_id: int, db: Session = Depends(get_db), current_user: Us
     db.commit()
 
 
-@router.post("/enroll", response_model=AgentEnrollResponse)
+# O pareamento aceita um código de seis caracteres de quem ainda não tem token:
+# 30 tentativas por hora por IP mantêm a instalação legítima confortável e
+# tornam a varredura do espaço de códigos inviável.
+@router.post("/enroll", response_model=AgentEnrollResponse,
+             dependencies=[Depends(limit("enroll", 30, 3600))])
 def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
     """Chamado pelo agente: troca o código/chave pelo token definitivo desta máquina.
 
@@ -206,9 +211,42 @@ def delete_machine_cascade(machine_id: int, db: Session):
     from app.models.identity import ProcessIdentity
     from app.models.blackbox import BlackboxCapture
     from app.models.notification import Notification, ShareLink
+    from app.models.mlhealth import DriftCheck, ExplanationOutcome
+    from app.models.hardware import HardwareRisk
+    from app.models.ledger import LedgerEntry
+    from app.models.playbook import Playbook, PlaybookRun
+    from app.models.study import StudyResponse
 
     metric_ids = select(Metric.id).where(Metric.machine_id == machine_id)
     anomaly_ids = select(Anomaly.id).where(Anomaly.machine_id == machine_id)
+
+    # Guardado antes de apagar: depois não há de quem falar no registro
+    alvo = db.query(Machine).filter(Machine.id == machine_id).first()
+    nome = alvo.name if alvo else None
+    dono_id = alvo.owner_id if alvo else None
+    avisos = db.query(Anomaly).filter(Anomaly.machine_id == machine_id).count()
+
+    # Tabelas novas que apontam para esta máquina ou para os avisos dela. Sem
+    # soltar estas referências, o Postgres recusa apagar as anomalias e a
+    # remoção inteira falha — inclusive a das máquinas efêmeras do benchmark,
+    # que ficavam para trás no painel (o SQLite dos testes não impõe FK, então
+    # a suíte passava).
+    db.query(ExplanationOutcome).filter(ExplanationOutcome.machine_id == machine_id).delete(
+        synchronize_session=False)
+    db.query(PlaybookRun).filter(PlaybookRun.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(Playbook).filter(Playbook.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(DriftCheck).filter(DriftCheck.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(HardwareRisk).filter(HardwareRisk.machine_id == machine_id).delete(synchronize_session=False)
+    # As respostas do estudo são dado de pesquisa: sobrevivem à máquina, só
+    # perdem o ponteiro para o aviso que já não existe.
+    db.query(StudyResponse).filter(StudyResponse.anomaly_id.in_(anomaly_ids)).update(
+        {StudyResponse.anomaly_id: None}, synchronize_session=False)
+    # O livro de auditoria idem, e por um motivo mais forte: apagar entrada de
+    # um registro que existe para ser inviolável seria contraditório. O elo da
+    # cadeia não usa machine_id, então soltar a referência preserva a
+    # verificação intacta.
+    db.query(LedgerEntry).filter(LedgerEntry.machine_id == machine_id).update(
+        {LedgerEntry.machine_id: None}, synchronize_session=False)
 
     db.query(ProcessSnapshot).filter(ProcessSnapshot.metric_id.in_(metric_ids)).delete(synchronize_session=False)
     db.query(AIExplanation).filter(AIExplanation.anomaly_id.in_(anomaly_ids)).delete(synchronize_session=False)
@@ -250,8 +288,37 @@ def delete_machine_cascade(machine_id: int, db: Session):
     ml_service._discard(machine_id)
     db.query(Notification).filter(Notification.machine_id == machine_id).delete(synchronize_session=False)
     db.query(EnrollmentCode).filter(EnrollmentCode.machine_id == machine_id).delete(synchronize_session=False)
+    _seal_removal(db, machine_id, nome, dono_id, avisos)
     db.query(Machine).filter(Machine.id == machine_id).delete(synchronize_session=False)
     db.commit()
+
+
+def _seal_removal(db: Session, machine_id: int, nome: Optional[str],
+                  dono_id: Optional[int], avisos: int) -> None:
+    """Lacra no livro que a máquina foi removida.
+
+    Remover apaga métricas, avisos e histórico de uma vez, e até aqui não
+    deixava rastro nenhum: depois do fato não havia como saber se quem apagou
+    foi o painel, o desinstalador ou uma rotina. O registro fica sem
+    `machine_id` de propósito — a máquina deixa de existir na linha seguinte.
+    Máquina sintética (demonstração ou benchmark) não entra, pelo mesmo motivo
+    que os avisos dela não entram.
+    """
+    from app.services import integrity
+
+    if nome and nome.startswith("[BENCH]"):
+        return
+    try:
+        integrity.append(
+            db,
+            kind="machine_removed",
+            ref_id=machine_id,
+            user_id=dono_id,
+            payload={"nome": nome, "avisos_apagados": avisos},
+            commit=False,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[Livro] Remoção da máquina {machine_id} não registrada: {e}")
 
 
 @router.delete("/{machine_id}", status_code=status.HTTP_204_NO_CONTENT)

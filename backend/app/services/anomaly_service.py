@@ -33,6 +33,27 @@ from app.services.behavior_analyzer import DetectionContext, analyze_behavior
 
 ANOMALY_COOLDOWN_MINUTES = 30
 
+# Qual camada de detecção está ativa. Em operação é sempre "ambas"; os outros
+# valores existem para o estudo de ablação (ml_eval.py), que roda o mesmo
+# conjunto de cenários com uma camada de cada vez para responder, com número,
+# o que cada uma acrescenta. Mudar isso em produção degrada a detecção de
+# propósito — por isso fica aqui, explícito, e não escondido numa flag.
+DETECTION_LAYERS = ("ambas", "regras", "ml")
+_active_layer = "ambas"
+
+
+def set_detection_layer(layer: str) -> str:
+    """Troca a camada ativa e devolve a anterior (para restaurar depois)."""
+    global _active_layer
+    if layer not in DETECTION_LAYERS:
+        raise ValueError(f"Camada desconhecida: {layer}")
+    anterior, _active_layer = _active_layer, layer
+    return anterior
+
+
+def detection_layer() -> str:
+    return _active_layer
+
 
 @dataclass
 class Candidate:
@@ -156,6 +177,36 @@ def persist_candidate(
     except Exception as e:
         print(f"[AnomalyService] Notificação não criada para #{anomaly.id}: {e}")
 
+    # Lacra o aviso no livro encadeado: é o que permite provar depois que o
+    # registro não foi criado nem editado a posteriori.
+    try:
+        from app.services import integrity
+        if integrity.is_auditable(machine):
+            integrity.append(
+                db,
+                kind="anomaly",
+                ref_id=anomaly.id,
+                machine_id=machine.id,
+                user_id=machine.owner_id,
+                payload={
+                    "tipo": anomaly.anomaly_type,
+                    "gravidade": anomaly.severity,
+                    "programa": anomaly.responsible_process,
+                    "origem": anomaly.source,
+                    "detectado_em": anomaly.detected_at,
+                },
+            )
+    except Exception as e:
+        print(f"[Livro] Registro do aviso #{anomaly.id} falhou: {e}")
+
+    # Uma regra de automação pode existir para este aviso: quem decide se age,
+    # se pede confirmação ou se só sugere é o playbooks.
+    try:
+        from app.services import playbooks
+        playbooks.on_anomaly(db, machine, anomaly)
+    except Exception as e:
+        print(f"[Playbooks] Avaliação do aviso #{anomaly.id} falhou: {e}")
+
     return anomaly
 
 
@@ -173,7 +224,7 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
                            learning=learning.is_learning(db, machine, now))
 
     # 1. Análise comportamental (padrões avançados)
-    findings = analyze_behavior(metric, db, ctx)
+    findings = analyze_behavior(metric, db, ctx) if _active_layer != "ml" else []
 
     # 2. Isolation Forest (desvio estatístico)
     is_statistical, score = ml_service.predict_anomaly(machine.id, metric, offset, sensitivity.get("ml", 1.0))
@@ -187,6 +238,8 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
             .first()
         )
         is_statistical = bool(previous and previous[0] is not None and previous[0] < 0)
+    if _active_layer == "regras":
+        is_statistical = False
     db.commit()
 
     # Retreino incremental — mais frequente = modelo acompanha melhor o comportamento atual

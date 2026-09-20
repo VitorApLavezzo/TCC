@@ -200,6 +200,23 @@ def _send(db: Session, user: User, prefs: Dict, text: str, notifications: List[N
             sent["email"] = "ok"
         except Exception as e:
             sent["email"] = f"erro: {str(e)[:120]}"
+
+    # Notificação do celular: só sai se a pessoa instalou o painel como
+    # aplicativo e autorizou o aviso naquele aparelho.
+    if channels.get("push", True):
+        try:
+            from app.services import push
+            entregues = push.send_to_user(
+                db, user.id,
+                title=primary.title or "AnomalyDetect",
+                body=text[:300],
+                link=_link(primary),
+                tag=f"anomaly-{primary.id}",
+            )
+            if entregues:
+                sent["push"] = f"ok ({entregues})"
+        except Exception as e:
+            sent["push"] = f"erro: {str(e)[:120]}"
     return sent
 
 

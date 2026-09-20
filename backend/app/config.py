@@ -81,6 +81,37 @@ class Settings(BaseSettings):
     METRIC_RETENTION_DAYS: int = 120
     PROCESS_SNAPSHOT_RETENTION_DAYS: int = 21
 
+    # Origens autorizadas a chamar a API pelo navegador, separadas por vírgula
+    # ("*" libera qualquer uma, e nesse caso as credenciais de origem cruzada
+    # ficam desligadas — a combinação "*" + credenciais é inválida no padrão
+    # CORS e os navegadores recusam). O painel autentica por Bearer no
+    # cabeçalho, não por cookie, então nada se perde com isso.
+    ALLOWED_ORIGINS: str = "*"
+
+    # Limite de tentativas por IP em login, cadastro e pareamento
+    RATE_LIMIT_ENABLED: bool = True
+
+    # --- Deriva do modelo -------------------------------------------------
+    # Distância (Jensen-Shannon média entre as métricas) a partir da qual o
+    # normal aprendido não descreve mais a máquina
+    DRIFT_WARN: float = 0.20
+    DRIFT_CRITICAL: float = 0.35
+    # Quantas leituras recentes entram na comparação com a janela de treino
+    DRIFT_RECENT_SAMPLES: int = 300
+
+    # --- Playbooks (automação com autonomia graduada) ---------------------
+    # Janela de arrependimento: uma ação automática é anunciada e só acontece
+    # depois deste tempo, para a pessoa poder cancelar antes
+    PLAYBOOK_UNDO_SECONDS: int = 120
+    # Teto de execuções automáticas por playbook por dia (trava de segurança)
+    PLAYBOOK_DAILY_LIMIT: int = 10
+
+    # --- Notificação no celular (Web Push) --------------------------------
+    # Geradas uma vez com `docker compose exec backend python -m app.services.push`
+    VAPID_PUBLIC_KEY: str = ""
+    VAPID_PRIVATE_KEY: str = ""
+    VAPID_CONTACT_EMAIL: str = ""
+
     class Config:
         env_file = ".env"
 

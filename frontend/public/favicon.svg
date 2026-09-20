@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AnomalyDetect">
+  <rect width="512" height="512" rx="96" fill="#0b0d0e"/>
+  <path d="M56 300h84l40-96 52 176 44-120 36 60h144"
+        fill="none" stroke="#5ee3a1" stroke-width="28"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -12,6 +12,9 @@ import { useToast } from "../components/ui/Toast";
 import { accountApi, errorMessage } from "../services/api";
 import { GLOSSARY } from "../lib/glossary";
 import { LANGUAGE_LEVEL_LABELS, LanguageLevel } from "../types";
+import { PushDevices } from "../components/account/PushDevices";
+import { AuditLedger } from "../components/account/AuditLedger";
+import { Playbooks } from "../components/automation/Playbooks";
 
 const GLOSSARY_ORDER: { term: keyof typeof GLOSSARY; label: string }[] = [
   { term: "cpu", label: "Processador" },
@@ -226,6 +229,12 @@ export function Account() {
           </Section>
         </>
       ) : null}
+
+      <PushDevices />
+
+      <Playbooks />
+
+      <AuditLedger />
 
       <Section title="Aparência">
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -100,14 +100,46 @@ def complete(db: Session, machine: Machine, command_id: int, ok: bool, result: O
     # Uma ação que deveria resolver o aviso inicia a verificação automática
     if ok and cmd.anomaly_id and cmd.command in ("kill_process", "clean_temp", "stop_sync_client"):
         from app.models.anomaly import Anomaly
-        from app.services import resolution
+        from app.services import fidelity, resolution
         anomaly = db.query(Anomaly).filter(Anomaly.id == cmd.anomaly_id).first()
         if anomaly:
             anomaly.is_resolved = True
             anomaly.resolved_at = now
             resolution.start(db, anomaly, f"Ação '{COMMANDS[cmd.command][0]}' executada. Conferindo se resolveu.")
+            # A explicação previu aonde a máquina chegaria depois desta ação.
+            # Aqui a promessa fica registrada para ser conferida daqui a pouco.
+            try:
+                fidelity.register_from_action(db, anomaly.id, machine.id, cmd.command, cmd.id)
+            except Exception as e:
+                print(f"[Fidelidade] Não foi possível registrar a previsão: {e}")
+    _record_ledger(db, machine, cmd, ok)
     db.commit()
     return cmd
+
+
+def _record_ledger(db: Session, machine: Machine, cmd: AgentCommand, ok: bool) -> None:
+    """Lacra a execução no livro encadeado (ver integrity.py)."""
+    try:
+        from app.services import integrity
+        if not integrity.is_auditable(machine):
+            return
+        integrity.append(
+            db,
+            kind="action",
+            ref_id=cmd.id,
+            machine_id=machine.id,
+            user_id=cmd.requested_by,
+            payload={
+                "comando": cmd.command,
+                "parametros": cmd.params or {},
+                "resultado": "ok" if ok else "falhou",
+                "origem": cmd.source,
+                "aviso": cmd.anomaly_id,
+            },
+            commit=False,
+        )
+    except Exception as e:
+        print(f"[Livro] Registro da ação {cmd.id} falhou: {e}")
 
 
 def expire_old(db: Session) -> int:

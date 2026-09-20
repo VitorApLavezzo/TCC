@@ -31,7 +31,7 @@ def delete_self(machine: Machine = Depends(get_machine_by_token), db: Session = 
 # manifesto abaixo — funcionalidades novas chegam sem reinstalar.
 ALLOWED_FILES = [
     "agent.py", "collector.py", "requirements.txt", "privacy.py", "sensors.py", "security.py",
-    "blackbox.py", "actions.py", "inventory.py", "updater.py",
+    "blackbox.py", "actions.py", "inventory.py", "updater.py", "localguard.py",
 ]
 
 _dist_dir = os.getenv("AGENT_DIST_DIR", "/app/agent_dist")

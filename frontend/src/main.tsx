@@ -8,3 +8,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <App />
   </React.StrictMode>
 );
+
+// Service worker: casca offline e recebimento das notificações no celular.
+// Registrado depois do load para não disputar banda com a primeira pintura, e
+// só em produção — em desenvolvimento ele serviria arquivos antigos do cache.
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((erro) => {
+      console.warn("Service worker não registrado:", erro);
+    });
+  });
+}

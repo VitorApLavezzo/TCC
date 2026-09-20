@@ -69,6 +69,11 @@ try:
     import updater
 except Exception:
     updater = None
+try:
+    from localguard import LocalGuard, OfflineBuffer
+except Exception:
+    LocalGuard = None
+    OfflineBuffer = None
 
 
 def _load_saved_config() -> dict:
@@ -365,32 +370,86 @@ def _HAS(mod) -> bool:
     return mod is not None
 
 
+# Guarda local e fila de leituras não enviadas. Ficam ao lado da configuração
+# do agente, na mesma pasta que já é dele.
+_guard = LocalGuard() if LocalGuard else None
+_buffer = OfflineBuffer(os.path.join(_config_dir, "pending_metrics.jsonl")) if OfflineBuffer else None
+_offline_since = None
+
+
+def _handle_offline(metrics: dict) -> None:
+    """Servidor fora do ar: guarda a leitura e registra o que dá para ver daqui."""
+    global _offline_since
+    if _guard is None or _buffer is None:
+        return
+    if _offline_since is None:
+        _offline_since = time.time()
+        logger.warning("Sem contato com o servidor — guardando as leituras e vigiando localmente.")
+    _buffer.add(metrics)
+    for achado in _guard.check(metrics):
+        logger.warning(f"[local] {achado['message']} (sem servidor; será reavaliado na reconexão)")
+
+
+def _drain_buffer() -> None:
+    """Conexão de volta: devolve a fila ao servidor, da mais antiga para a mais nova."""
+    global _offline_since
+    if _buffer is None:
+        return
+    if _offline_since is not None:
+        minutos = (time.time() - _offline_since) / 60
+        logger.info(f"Servidor de volta depois de {minutos:.0f} min. Enviando o que ficou guardado.")
+        _offline_since = None
+    pendentes = _buffer.pending()
+    if not pendentes:
+        return
+    enviadas = _buffer.flush(lambda registro: _post_metrics(registro) is not None)
+    if enviadas:
+        logger.info(f"{enviadas} de {pendentes} leituras guardadas foram enviadas.")
+
+
 # ---------------------------------------------------------------------------
 # Envio e resposta do servidor
 # ---------------------------------------------------------------------------
 
-def send_metrics(metrics: dict):
-    global _paused, _current_interval, _focus_until, _network_isolated
+def _post_metrics(metrics: dict):
+    """Envia uma leitura e devolve a resposta do servidor, ou None se não deu.
+
+    Separado de `send_metrics` porque a fila de leituras atrasadas precisa
+    exatamente disto e de mais nada: nada de trocar o intervalo de coleta ou
+    executar comandos com base numa resposta de uma leitura de duas horas atrás.
+    """
     try:
-        response = requests.post(INGEST_ENDPOINT, json=metrics, headers={"X-Agent-Token": API_TOKEN}, timeout=20)
+        response = requests.post(INGEST_ENDPOINT, json=metrics,
+                                 headers={"X-Agent-Token": API_TOKEN}, timeout=20)
     except requests.exceptions.ConnectionError:
         logger.error(f"Cannot connect to backend at {API_URL}")
-        return False
+        return None
     except requests.exceptions.Timeout:
         logger.error("Request timed out")
-        return False
+        return None
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
-        return False
+        return None
 
     if response.status_code == 401:
         logger.error("Token rejeitado pelo servidor. Refaça o pareamento.")
-        return False
+        return None
     if response.status_code != 202:
         logger.error(f"Failed to send metrics: {response.status_code} - {response.text[:200]}")
-        return False
+        return None
+    return response.json()
 
-    data = response.json()
+
+def send_metrics(metrics: dict):
+    global _paused, _current_interval, _focus_until, _network_isolated
+    if _guard is not None:
+        _guard.observe(metrics)
+
+    data = _post_metrics(metrics)
+    if data is None:
+        _handle_offline(metrics)
+        return False
+    _drain_buffer()
     if data.get("paused"):
         if not _paused:
             logger.info("Coleta pausada pelo painel — aguardando retomada.")

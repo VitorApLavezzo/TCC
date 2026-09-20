@@ -32,6 +32,9 @@ ANOMALY_TYPE_LABELS = {
     "beaconing": "Programa Contatando a Internet em Intervalos Regulares",
     "disk_forecast": "Disco Vai Encher em Breve",
     "outbreak_suspected": "Mesmo Programa Surgindo em Vários Computadores",
+    "model_drift": "O Normal Desta Máquina Mudou",
+    "hardware_failure_risk": "Risco de Falha de Peça",
+    "change_regression": "Piora Depois de uma Atualização",
     "unknown": "Anomalia Desconhecida",
 }
 
@@ -67,6 +70,9 @@ SECURITY_TYPES = {
 LEARNING_EXEMPT = {
     "ransomware_canary", "process_masquerading", "suspicious_command",
     "suspicious_parent", "suspicious_process",
+    # Desgaste de peça e regressão depois de uma atualização saem do
+    # inventário e da comparação antes/depois, não da faixa aprendida.
+    "hardware_failure_risk", "change_regression",
 }
 
 # Onde o cartão "e se eu fechar?" faz sentido. Ele fala de memória e

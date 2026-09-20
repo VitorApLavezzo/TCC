@@ -6,6 +6,7 @@ das coletas reais: o que aparece na demonstração é o que o sistema detecta de
 verdade, não uma encenação.
 """
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -56,6 +57,25 @@ def anomaly_ws_payload(anomaly: Anomaly) -> dict:
     }
 
 
+# Uma leitura atrasada da fila do agente pode ser de horas atrás; mais velha
+# que isto é lixo (relógio errado, máquina parada por semanas) e entra com a
+# hora da chegada.
+MAX_BACKFILL_HOURS = 48
+
+
+def _reading_time(payload: MetricCreate, now):
+    """Hora em que a leitura foi feita, e não a hora em que chegou."""
+    if not payload.collected_at:
+        return now
+    try:
+        quando = datetime.fromtimestamp(float(payload.collected_at), tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return now
+    if quando > now or quando < now - timedelta(hours=MAX_BACKFILL_HOURS):
+        return now
+    return quando
+
+
 def ingest(db: Session, machine: Machine, payload: MetricCreate, now=None) -> IngestResult:
     now = now or utcnow()
     if payload.agent_version:
@@ -79,7 +99,7 @@ def ingest(db: Session, machine: Machine, payload: MetricCreate, now=None) -> In
     metric_data = payload.model_dump(exclude=INGEST_EXTRA_FIELDS)
     if metric_data.get("cpu_per_core") is not None:
         metric_data["cpu_per_core"] = list(metric_data["cpu_per_core"])
-    metric = Metric(machine_id=machine.id, timestamp=now, **metric_data)
+    metric = Metric(machine_id=machine.id, timestamp=_reading_time(payload, now), **metric_data)
     db.add(metric)
     db.flush()
 

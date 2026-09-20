@@ -12,9 +12,12 @@ import { useToast } from "../components/ui/Toast";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ArrowLeft } from "lucide-react";
+import { ModelHealth } from "../components/reliability/ModelHealth";
+import { HardwareRisk } from "../components/reliability/HardwareRisk";
 
 const TABS = [
   { id: "previsoes", label: "Previsões" },
+  { id: "saude", label: "Saúde" },
   { id: "diario", label: "Diário" },
   { id: "energia", label: "Energia" },
   { id: "mudancas", label: "Mudanças" },
@@ -22,6 +25,19 @@ const TABS = [
   { id: "programas", label: "Programas" },
   { id: "privacidade", label: "Privacidade" },
 ];
+
+/**
+ * Saúde: as duas perguntas de confiabilidade que nenhuma tela respondia.
+ * O modelo ainda entende esta máquina? As peças dela vão durar?
+ */
+function HealthTab({ machineId }: { machineId: number }) {
+  return (
+    <div className="space-y-8">
+      <ModelHealth machineId={machineId} />
+      <HardwareRisk machineId={machineId} />
+    </div>
+  );
+}
 
 export function MachineDetail() {
   const { id } = useParams<{ id: string }>();
@@ -60,6 +76,7 @@ export function MachineDetail() {
       </div>
 
       {tab === "previsoes" && <ForecastTab machineId={machineId} />}
+      {tab === "saude" && <HealthTab machineId={machineId} />}
       {tab === "diario" && <DiaryTab machineId={machineId} />}
       {tab === "energia" && <EnergyTab machineId={machineId} />}
       {tab === "mudancas" && <ChangesTab machineId={machineId} />}

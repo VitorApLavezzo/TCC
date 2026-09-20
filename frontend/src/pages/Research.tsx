@@ -6,6 +6,9 @@ import { Button } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { DetectionBenchmark } from "../components/research/DetectionBenchmark";
+import { ModelEvidence } from "../components/research/ModelEvidence";
+import { HumanStudy } from "../components/research/HumanStudy";
+import { ExplanationFidelity } from "../components/research/ExplanationFidelity";
 
 /**
  * Página de pesquisa — os dados quantitativos que o TCC precisa sobre a
@@ -53,6 +56,12 @@ export function Research() {
       />
 
       <DetectionBenchmark />
+
+      <ModelEvidence />
+
+      <HumanStudy />
+
+      <ExplanationFidelity />
 
       <Section
         title="Qualidade das explicações"

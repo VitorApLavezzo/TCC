@@ -1,0 +1,49 @@
+name: CI
+
+# Os 187 testes do backend e o build do painel rodavam só na máquina de quem
+# programou. Aqui rodam a cada push e a cada pull request: um teste quebrado
+# aparece antes de virar defeito na apresentação.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          # psutil e requests são do agente: test_agent.py importa os módulos dele
+          pip install psutil requests pytest
+      - name: Rodar os testes
+        working-directory: backend
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend (tsc + build + vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Instalar dependências
+        working-directory: frontend
+        run: npm ci
+      - name: Testes de unidade
+        working-directory: frontend
+        run: npm run test
+      - name: Verificação de tipos e build
+        working-directory: frontend
+        run: npm run build

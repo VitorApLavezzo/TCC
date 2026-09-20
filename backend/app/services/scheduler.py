@@ -11,6 +11,11 @@ from typing import Callable, List, Tuple
 
 from app.database import SessionLocal
 
+# Quando cada rotina terminou bem pela última vez. Vira a idade exposta em
+# /metrics: uma rotina que parou de rodar aparece como idade crescendo, que é
+# o único jeito de notar a ausência de algo que deveria acontecer sozinho.
+_last_success: dict = {}
+
 
 def _jobs() -> List[Tuple[str, int, Callable]]:
     from app.services import commands, incidents, maintenance, notifications, resolution
@@ -39,19 +44,39 @@ def _jobs() -> List[Tuple[str, int, Callable]]:
         ]
     except ImportError as e:
         print(f"[Scheduler] Rotinas de análise indisponíveis: {e}")
+
+    try:
+        from app.services import change_correlation, drift, fidelity, hardware_risk, playbooks
+        jobs += [
+            # A automação é a única rotina que AGE na máquina: intervalo curto,
+            # porque é ela que respeita a janela de arrependimento.
+            ("automações", 30, playbooks.dispatch_due),
+            ("fidelidade das previsões", 120, fidelity.measure_pending),
+            ("deriva do modelo", 12 * 3600, drift.run_all),
+            ("risco de hardware", 12 * 3600, hardware_risk.run_all),
+            ("atualizações na frota", 12 * 3600, change_correlation.run_all),
+        ]
+    except ImportError as e:
+        print(f"[Scheduler] Rotinas novas indisponíveis: {e}")
     return jobs
 
 
 def _run(name: str, fn: Callable):
+    from app.core import observability
+
     db = SessionLocal()
     started = time.monotonic()
     try:
         result = fn(db)
         elapsed = time.monotonic() - started
+        observability.inc("anomalydetect_scheduler_runs_total", {"routine": name, "result": "ok"})
+        observability.gauge("anomalydetect_scheduler_duration_seconds", round(elapsed, 3), {"routine": name})
+        _last_success[name] = time.time()
         if result or elapsed > 5:
             print(f"[Scheduler] {name}: {result} ({elapsed:.1f}s)")
     except Exception as e:
         db.rollback()
+        observability.inc("anomalydetect_scheduler_runs_total", {"routine": name, "result": "error"})
         print(f"[Scheduler] {name} falhou: {e}")
     finally:
         db.close()
@@ -69,4 +94,14 @@ async def run():
             if now - last_run.get(name, float("-inf")) >= interval:
                 last_run[name] = now
                 await loop.run_in_executor(None, _run, name, fn)
+        _publish_ages()
         await asyncio.sleep(5)
+
+
+def _publish_ages() -> None:
+    from app.core import observability
+
+    wall = time.time()
+    for name, when in _last_success.items():
+        observability.gauge("anomalydetect_scheduler_last_success_age_seconds",
+                            round(wall - when, 1), {"routine": name})

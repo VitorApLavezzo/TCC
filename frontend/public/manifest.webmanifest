@@ -1,0 +1,30 @@
+{
+  "name": "AnomalyDetect — a saúde dos seus computadores",
+  "short_name": "AnomalyDetect",
+  "description": "Acompanhe seus computadores e entenda, em português simples, o que está acontecendo quando algo sai do normal.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b0d0e",
+  "theme_color": "#0b0d0e",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Avisos", "url": "/anomalies" },
+    { "name": "Computadores", "url": "/machines" }
+  ]
+}

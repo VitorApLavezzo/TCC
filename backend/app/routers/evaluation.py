@@ -121,3 +121,57 @@ def download_benchmark(run_id: int, fmt: str = "md", db: Session = Depends(get_d
     corpo = run.csv if fmt == "csv" else run.markdown
     nome = f"benchmark-deteccao-{run_id}.{'csv' if fmt == 'csv' else 'md'}"
     return PlainTextResponse(corpo or "", headers={"Content-Disposition": f'attachment; filename="{nome}"'})
+
+
+@router.get("/fidelity")
+def fidelity_summary(days: int = 90, db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)):
+    """A IA acertou o que previu? Taxa de acerto por provedor."""
+    from app.services import fidelity
+    return fidelity.summary(db, user.id, days)
+
+
+@router.get("/anomaly/{anomaly_id}/fidelity")
+def fidelity_for_anomaly(anomaly_id: int, db: Session = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    from app.services import fidelity
+    _owns(db, anomaly_id, user)
+    return fidelity.for_anomaly(db, anomaly_id) or {"status": "none"}
+
+
+@router.get("/holdout/{machine_id}")
+def holdout(machine_id: int, db: Session = Depends(get_db),
+            user: User = Depends(get_current_user)):
+    """Validação por retenção temporal do modelo desta máquina (ROC/AUC)."""
+    from app.services import ml_eval
+    machine = db.query(Machine).filter(Machine.id == machine_id,
+                                       Machine.owner_id == user.id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    return ml_eval.holdout(db, machine)
+
+
+@router.post("/ablation")
+def start_ablation(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Roda os cenários três vezes (regras, modelo, os dois) em segundo plano."""
+    from app.services import jobs
+    jobs.submit(_run_ablation, user.id)
+    return {"started": True}
+
+
+_ABLATION_CACHE: dict = {}
+
+
+def _run_ablation(db, user_id: int):
+    from app.services import ml_eval
+    _ABLATION_CACHE[user_id] = {"status": "running"}
+    try:
+        _ABLATION_CACHE[user_id] = {"status": "done", **ml_eval.ablation(db, user_id)}
+    except Exception as e:
+        _ABLATION_CACHE[user_id] = {"status": "error", "detail": str(e)}
+
+
+@router.get("/ablation")
+def ablation_result(user: User = Depends(get_current_user)):
+    """Último resultado da ablação desta conta (fica em memória, como o estudo é pontual)."""
+    return _ABLATION_CACHE.get(user.id, {"status": "none"})

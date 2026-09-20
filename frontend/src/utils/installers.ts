@@ -18,7 +18,7 @@ export type InstallerAuth =
  * é ignorada, em vez de derrubar a instalação inteira.
  */
 const CORE_FILES = ["agent.py", "collector.py", "privacy.py", "requirements.txt"];
-const EXTRA_FILES = ["sensors.py", "security.py", "inventory.py", "actions.py", "blackbox.py", "updater.py"];
+const EXTRA_FILES = ["sensors.py", "security.py", "inventory.py", "actions.py", "blackbox.py", "updater.py", "localguard.py"];
 
 function authEnvBat(auth: InstallerAuth): string {
   return auth.code !== undefined

@@ -189,6 +189,62 @@ export const evaluationApi = {
     api.post(`/evaluation/benchmark${realMachineId ? `?real_machine_id=${realMachineId}` : ""}`),
   benchmarkDownload: (runId: number, fmt: "md" | "csv") =>
     api.get(`/evaluation/benchmark/${runId}/download?fmt=${fmt}`, { responseType: "text" }),
+  // A IA previu um efeito; isto diz se o efeito aconteceu
+  fidelity: (days = 90) => api.get(`/evaluation/fidelity?days=${days}`),
+  fidelityForAnomaly: (anomalyId: number) => api.get(`/evaluation/anomaly/${anomalyId}/fidelity`),
+  // Validação por retenção temporal e ablação das camadas de detecção
+  holdout: (machineId: number) => api.get(`/evaluation/holdout/${machineId}`),
+  ablation: () => api.get("/evaluation/ablation"),
+  runAblation: () => api.post("/evaluation/ablation"),
+};
+
+/** Deriva do modelo, risco de hardware e correlação de atualizações na frota. */
+export const reliabilityApi = {
+  drift: (machineId: number, history = false) =>
+    api.get(`/insights/machine/${machineId}/drift`, { params: { history } }),
+  hardwareRisk: (machineId: number) => api.get(`/insights/machine/${machineId}/hardware-risk`),
+  fleetChanges: (days = 45) => api.get("/insights/fleet/changes", { params: { days } }),
+};
+
+/** Automação com autonomia graduada. */
+export const playbooksApi = {
+  list: () => api.get("/playbooks"),
+  create: (data: object) => api.post("/playbooks", data),
+  update: (id: number, data: object) => api.patch(`/playbooks/${id}`, data),
+  remove: (id: number) => api.delete(`/playbooks/${id}`),
+  runs: (params?: { limit?: number; anomaly_id?: number }) => api.get("/playbooks/runs", { params }),
+  decide: (runId: number, approve: boolean) =>
+    api.post(`/playbooks/runs/${runId}/decide`, { approve }),
+};
+
+/** Livro de auditoria encadeado por hash. */
+export const auditApi = {
+  entries: (params?: { limit?: number; kind?: string }) => api.get("/audit/entries", { params }),
+  verify: () => api.get("/audit/verify"),
+  report: () => api.get("/audit/report", { responseType: "text" }),
+};
+
+/** Estudo de compreensão com participantes. */
+export const studyApi = {
+  config: () => api.get("/study/config"),
+  sessions: () => api.get("/study/sessions"),
+  create: (data: { participant_code: string; expertise: string; items: number }) =>
+    api.post("/study/sessions", data),
+  next: (sessionId: number) => api.get(`/study/sessions/${sessionId}/next`),
+  answer: (sessionId: number, data: object) => api.post(`/study/sessions/${sessionId}/answer`, data),
+  finish: (sessionId: number, data: { sus_answers: number[]; notes?: string }) =>
+    api.post(`/study/sessions/${sessionId}/finish`, data),
+  results: () => api.get("/study/results"),
+  exportCsv: () => api.get("/study/export", { responseType: "text" }),
+};
+
+/** Notificação no celular (Web Push). */
+export const pushApi = {
+  config: () => api.get("/account/push/config"),
+  devices: () => api.get("/account/push/devices"),
+  subscribe: (subscription: object) => api.post("/account/push/subscribe", subscription),
+  unsubscribe: (endpoint: string) => api.delete("/account/push/subscribe", { params: { endpoint } }),
+  test: () => api.post("/account/push/test"),
 };
 
 export const demoApi = {

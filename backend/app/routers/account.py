@@ -6,7 +6,7 @@ e o painel de privacidade "o que foi enviado sobre mim".
 import secrets
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -102,3 +102,63 @@ def privacy_view(machine_id: int, db: Session = Depends(get_db), user: User = De
         raise HTTPException(status_code=404, detail="Machine not found")
     from app.services import privacy_report
     return privacy_report.build(db, machine)
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str
+    keys: Dict[str, str]
+
+
+@router.get("/push/config")
+def push_config():
+    """Chave pública para o navegador assinar, e por que o canal está desligado.
+
+    Os dois motivos possíveis exigem ações diferentes — gerar as chaves ou
+    instalar a biblioteca e reconstruir a imagem —, e a tela só consegue dizer
+    qual é se o servidor contar.
+    """
+    from app.services import push
+    return {
+        "enabled": push.available(),
+        "public_key": push.public_key(),
+        "library_installed": push.library_installed(),
+        "keys_configured": push.keys_configured(),
+    }
+
+
+@router.get("/push/devices")
+def push_devices(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.services import push
+    return {"devices": push.devices(db, user.id)}
+
+
+@router.post("/push/subscribe", status_code=201)
+def push_subscribe(body: PushSubscriptionIn, request: Request, db: Session = Depends(get_db),
+                   user: User = Depends(get_current_user)):
+    from app.services import push
+    if not push.available():
+        raise HTTPException(status_code=400,
+                            detail="As notificações no celular não estão configuradas neste servidor.")
+    try:
+        row = push.subscribe(db, user.id, body.model_dump(),
+                             user_agent=request.headers.get("user-agent"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"id": row.id}
+
+
+@router.delete("/push/subscribe", status_code=204)
+def push_unsubscribe(endpoint: str, db: Session = Depends(get_db),
+                     user: User = Depends(get_current_user)):
+    from app.services import push
+    push.unsubscribe(db, user.id, endpoint)
+
+
+@router.post("/push/test")
+def push_test(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Manda um aviso de teste para os aparelhos — é como a pessoa confere que funcionou."""
+    from app.services import push
+    entregues = push.send_to_user(db, user.id, "AnomalyDetect",
+                                  "Tudo certo: é assim que um aviso vai aparecer aqui.",
+                                  link=settings.PUBLIC_BASE_URL or "/")
+    return {"delivered": entregues}

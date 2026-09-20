@@ -18,6 +18,7 @@ import { health, LEVEL_CLASS, THRESHOLDS } from "../lib/health";
 import { Feedback, VerificationTag } from "../components/anomaly/Feedback";
 import { AdaptiveSteps } from "../components/anomaly/AdaptiveSteps";
 import { AnomalyActions } from "../components/anomaly/Actions";
+import { PredictionCheck } from "../components/anomaly/PredictionCheck";
 import { IncidentChain } from "../components/anomaly/IncidentChain";
 import { ShareButton } from "../components/anomaly/ShareButton";
 import { Replay } from "../components/anomaly/Replay";
@@ -280,6 +281,10 @@ export function AnomalyDetail() {
           <AnomalyActions anomaly={anomaly} machine={machine} />
         </Section>
       )}
+
+      {/* Depois da ação, a promessa do cartão "e se eu fechar?" é conferida
+          contra a leitura seguinte. */}
+      <PredictionCheck anomalyId={anomaly.id} />
 
       {(shown?.recommendations?.length ?? 0) > 0 && (
         <Section className="mt-9" title="O que fazer, passo a passo" description="Marque o que já tentou — o sistema sugere o próximo">

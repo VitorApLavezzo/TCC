@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { clsx } from "clsx";
 import { ChevronDown } from "lucide-react";
 import { anomaliesApi, metricsApi, machinesApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
@@ -10,7 +9,8 @@ import { Verdict } from "../components/Verdict";
 import { AnomalyEvent, AnomalyTimeline } from "../components/AnomalyEvent";
 import { FreshnessTag } from "../components/FreshnessTag";
 import { StaleBanner } from "../components/StaleBanner";
-import { MetricChart } from "../components/charts/MetricChart";
+import { HistoryPanel } from "../components/dashboard/HistoryPanel";
+import { PendingRuns } from "../components/automation/PendingRuns";
 import { PageHeader, Panel, PanelLabel, DataList, DataRow } from "../components/ui/Layout";
 import { VitalStrip, VitalItem, Meter } from "../components/ui/VitalStrip";
 import { Explain } from "../components/ui/Explain";
@@ -20,7 +20,7 @@ import { FocusModeControl } from "../components/FocusModeControl";
 import { EmptyState } from "../components/ui/EmptyState";
 import { VitalsSkeleton, Skeleton } from "../components/ui/Skeleton";
 import { health, toneOf, worstLevel, bandFor, THRESHOLDS, Level } from "../lib/health";
-import { bytesPerSec, formatUptime, gigabytes, pluralize, timeAgo } from "../lib/format";
+import { bytesPerSec, formatUptime, gigabytes, pluralize } from "../lib/format";
 import { useStatus } from "../context/StatusContext";
 
 const MAX_CHART_POINTS = 60;
@@ -36,7 +36,6 @@ export function Dashboard() {
   const [learning, setLearning] = useState<LearningStatus | null>(null);
   const [baseline, setBaseline] = useState<LearnedBaseline | null>(null);
   const [switching, setSwitching] = useState(false);
-  const [chartTab, setChartTab] = useState(0);
   const selectedRef = useRef<number | null>(null);
   selectedRef.current = selectedMachine;
 
@@ -244,35 +243,6 @@ export function Dashboard() {
     return { label: worst.label.toLowerCase(), value: `${worst.value}${worst.unit ?? ""}` };
   })();
 
-  // Um único gráfico com abas, no lugar de quatro cartões fixos — a pessoa
-  // olha uma medida de cada vez, na resolução em que ela merece atenção.
-  const CHART_TABS: {
-    key: keyof Metric;
-    label: string;
-    term?: string;
-    unit: string;
-    threshold?: number;
-    domain?: [number, number];
-  }[] = [
-    { key: "cpu_percent", label: "Processador", term: "cpu", unit: "%", threshold: THRESHOLDS.cpu.warn },
-    { key: "mem_percent", label: "Memória", term: "memoria", unit: "%", threshold: THRESHOLDS.memory.warn },
-    { key: "disk_percent", label: "Disco", term: "disco", unit: "%", threshold: THRESHOLDS.disk.warn },
-    {
-      key: "net_connections",
-      label: "Conexões",
-      term: "conexoes",
-      unit: "",
-      domain: [0, Math.max(...metrics.map((m) => m.net_connections ?? 0), 0) + 10],
-    },
-  ];
-  const activeTab = CHART_TABS[Math.min(chartTab, CHART_TABS.length - 1)];
-  const tabSeries = metrics
-    .map((m) => (typeof m[activeTab.key] === "number" ? (m[activeTab.key] as number) : null))
-    .filter((v): v is number => v !== null);
-  const tabNow = tabSeries.length ? Math.round(tabSeries[tabSeries.length - 1]) : null;
-  const tabMin = tabSeries.length ? Math.round(Math.min(...tabSeries)) : null;
-  const tabMax = tabSeries.length ? Math.round(Math.max(...tabSeries)) : null;
-
   const avisosPanel = (
     <Panel className="flex flex-col gap-3 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -399,6 +369,10 @@ export function Dashboard() {
         />
 
         {switching ? <VitalsSkeleton /> : lm && <VitalStrip items={vitals} />}
+
+        {/* Automação esperando uma decisão: fica no alto porque a janela de
+            cancelamento é curta e vence sozinha. */}
+        <PendingRuns />
       </div>
 
       {!switching && !lm && (
@@ -415,70 +389,12 @@ export function Dashboard() {
 
       {lm && !switching && metrics.length > 1 ? (
         <div className="grid grid-cols-1 gap-4 min-[1081px]:grid-cols-3">
-          <Panel className="p-5 min-[1081px]:col-span-2">
-            <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="font-display text-md font-semibold text-fg">Últimas horas</h3>
-                <p className="mt-0.5 text-xs text-fg-3">
-                  {metrics.length} leituras · a mais recente {timeAgo(lm.timestamp, now)}
-                </p>
-              </div>
-              <div
-                role="tablist"
-                aria-label="Medida do gráfico"
-                className="inline-flex flex-wrap gap-0.5 rounded-control border border-hairline bg-canvas p-1"
-              >
-                {CHART_TABS.map((t, i) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    role="tab"
-                    aria-selected={i === chartTab}
-                    tabIndex={i === chartTab ? 0 : -1}
-                    onClick={() => setChartTab(i)}
-                    className={clsx(
-                      "rounded-[7px] px-3 py-1.5 text-xs font-medium transition-colors",
-                      i === chartTab ? "bg-surface text-fg shadow-raise" : "text-fg-2 hover:text-fg"
-                    )}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <MetricChart
-              bare
-              metrics={metrics}
-              dataKey={activeTab.key}
-              label={activeTab.label}
-              unit={activeTab.unit}
-              term={activeTab.term}
-              threshold={activeTab.threshold}
-              domain={activeTab.domain}
-            />
-
-            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-fg-2">
-              <span>
-                Agora <b className="tnum font-mono font-medium text-fg">{tabNow ?? "--"}{activeTab.unit}</b>
-              </span>
-              <span>
-                Mínimo <b className="tnum font-mono font-medium text-fg">{tabMin ?? "--"}{activeTab.unit}</b>
-              </span>
-              <span>
-                Máximo <b className="tnum font-mono font-medium text-fg">{tabMax ?? "--"}{activeTab.unit}</b>
-              </span>
-              {activeTab.threshold !== undefined && (
-                <span>
-                  Limite de atenção{" "}
-                  <b className="tnum font-mono font-medium text-fg">
-                    {activeTab.threshold}
-                    {activeTab.unit}
-                  </b>
-                </span>
-              )}
-            </div>
-          </Panel>
+          <HistoryPanel
+            metrics={metrics}
+            lastTimestamp={lm.timestamp}
+            now={now}
+            className="min-[1081px]:col-span-2"
+          />
 
           {avisosPanel}
         </div>

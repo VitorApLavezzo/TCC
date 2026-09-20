@@ -17,6 +17,7 @@ import { AnomalyDetail } from "./pages/AnomalyDetail";
 import { Chat } from "./pages/Chat";
 import { Demo } from "./pages/Demo";
 import { Research } from "./pages/Research";
+import { Study } from "./pages/Study";
 import { SharedView } from "./pages/SharedView";
 import { Account } from "./pages/Account";
 import { NotFound } from "./pages/NotFound";
@@ -124,6 +125,14 @@ export default function App() {
                       element={
                         <PrivateRoute>
                           <Research />
+                        </PrivateRoute>
+                      }
+                    />
+                    <Route
+                      path="/estudo"
+                      element={
+                        <PrivateRoute>
+                          <Study />
                         </PrivateRoute>
                       }
                     />

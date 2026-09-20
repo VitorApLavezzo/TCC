@@ -76,6 +76,20 @@ services:
       # Energia
       DEFAULT_TARIFF_KWH: ${DEFAULT_TARIFF_KWH:-0.85}
       DEFAULT_CO2_KG_PER_KWH: ${DEFAULT_CO2_KG_PER_KWH:-0.0385}
+      # Segurança da API (origens do CORS e limite de tentativas por IP)
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      # Avisos no celular (Web Push). Vazio desativa o canal.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_CONTACT_EMAIL: ${VAPID_CONTACT_EMAIL:-}
+      # Deriva do modelo
+      DRIFT_WARN: ${DRIFT_WARN:-0.20}
+      DRIFT_CRITICAL: ${DRIFT_CRITICAL:-0.35}
+      DRIFT_RECENT_SAMPLES: ${DRIFT_RECENT_SAMPLES:-300}
+      # Automações: janela de arrependimento e teto diário
+      PLAYBOOK_UNDO_SECONDS: ${PLAYBOOK_UNDO_SECONDS:-120}
+      PLAYBOOK_DAILY_LIMIT: ${PLAYBOOK_DAILY_LIMIT:-10}
     volumes:
       - ./backend:/app
       - ./agent:/app/agent_dist:ro

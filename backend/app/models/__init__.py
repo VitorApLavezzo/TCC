@@ -19,9 +19,17 @@ from app.models.blackbox import BlackboxCapture
 from app.models.notification import Notification, ShareLink
 from app.models.demo import DemoSession
 from app.models.hub import HubInstallation, HubContribution
+from app.models.mlhealth import DriftCheck, ExplanationOutcome
+from app.models.hardware import HardwareRisk
+from app.models.ledger import LedgerEntry
+from app.models.playbook import Playbook, PlaybookRun
+from app.models.push import PushSubscription
+from app.models.study import StudySession, StudyResponse
 
 __all__ = [
     "HubInstallation", "HubContribution",
+    "DriftCheck", "ExplanationOutcome", "HardwareRisk", "LedgerEntry",
+    "Playbook", "PlaybookRun", "PushSubscription", "StudySession", "StudyResponse",
     "User", "Machine", "Metric", "ProcessSnapshot", "Incident", "Anomaly", "AIExplanation",
     "ProcessBaseline", "EnrollmentCode", "DetectionRule", "DetectorCalibration", "AgentCommand",
     "Diagnostic", "ChatMessage", "Report", "InventorySnapshot", "ChangeEvent", "ProcessIdentity",
