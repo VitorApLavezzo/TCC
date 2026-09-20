@@ -527,11 +527,24 @@ def sweep_orphans(db, owner_id: int) -> int:
     fabricadas, indistinguível de uma real para quem olha a lista.
     """
     from app.models.machine import Machine
-    orfas = (
-        db.query(Machine)
+    # Ids, não objetos: depois do delete a instância fica inutilizável e
+    # ler `m.id` levanta ObjectDeletedError
+    ids = [
+        row[0] for row in db.query(Machine.id)
         .filter(Machine.owner_id == owner_id, Machine.name.like(f"{BENCH_PREFIX}%"))
         .all()
-    )
-    for m in orfas:
-        _drop_machine(db, m.id)
-    return len(orfas)
+    ]
+    removidas = 0
+    for machine_id in ids:
+        try:
+            _drop_machine(db, machine_id)
+        except Exception as e:  # noqa: BLE001
+            db.rollback()
+            print(f"[Benchmark] Órfã {machine_id} resistiu à remoção: {e}")
+            continue
+        # Conta o que saiu de verdade, não o que foi tentado: a versão
+        # anterior dizia ter limpado máquinas que continuavam no painel, e o
+        # teste não pegava porque o SQLite não impõe chave estrangeira
+        if db.query(Machine.id).filter(Machine.id == machine_id).first() is None:
+            removidas += 1
+    return removidas

@@ -359,3 +359,26 @@ class TestRobustez:
         r = benchmark.run_real_scenario(db, origem.id, origem.owner_id, minutes=6000, limit=140)
         assert r.error is None, r.error
         assert r.steps == 140 - benchmark.WARMUP_STEPS
+
+
+class TestVarreduraHonesta:
+    def test_conta_so_o_que_removeu_de_verdade(self, db, monkeypatch):
+        """A varredura dizia ter removido máquinas que continuaram lá quando a
+        remoção falhava. O teste original passou porque o SQLite não impõe
+        chave estrangeira e nada falhava — o Postgres é que reprovou."""
+        from app.core.security import get_password_hash
+        from app.models.machine import Machine
+        from app.models.user import User
+        from app.services import benchmark
+        u = User(email="sw@t.com", username="sw", hashed_password=get_password_hash("x"))
+        db.add(u)
+        db.flush()
+        for i in range(2):
+            db.add(Machine(name=f"[BENCH] x{i}", hostname=f"h{i}", agent_token=f"tk-sw{i}", owner_id=u.id))
+        db.commit()
+
+        def falha_sempre(_db, _machine_id):
+            raise RuntimeError("chave estrangeira")
+        monkeypatch.setattr(benchmark, "_drop_machine", falha_sempre)
+
+        assert benchmark.sweep_orphans(db, u.id) == 0
