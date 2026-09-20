@@ -140,11 +140,20 @@ export function DetectionBenchmark({ realMachineId }: { realMachineId?: number }
           </p>
 
           <Panel>
-            <div className="grid gap-x-8 gap-y-4 sm:grid-cols-4">
+            <div className="grid gap-x-8 gap-y-4 sm:grid-cols-5">
               <Metric label="Precisão" value={pct(m?.precision)} hint="dos avisos, quantos eram problema" />
               <Metric label="Revocação" value={pct(m?.recall)} hint="dos problemas, quantos foram achados" />
               <Metric label="F1" value={pct(m?.f1)} hint="equilíbrio entre as duas" />
-              <Metric label="Alarme falso" value={pct(m?.false_positive_rate)} hint="do normal, quanto virou aviso" />
+              <Metric
+                label="Alarme falso"
+                value={pct(m?.false_positive_rate)}
+                hint="do normal, quanto gerou algum aviso"
+              />
+              <Metric
+                label="Alarme que interrompe"
+                value={pct(m?.false_positive_rate_notified)}
+                hint="quanto disso chega como notificação"
+              />
             </div>
           </Panel>
 

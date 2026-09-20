@@ -382,3 +382,61 @@ class TestVarreduraHonesta:
         monkeypatch.setattr(benchmark, "_drop_machine", falha_sempre)
 
         assert benchmark.sweep_orphans(db, u.id) == 0
+
+
+class TestTaxaPorHora:
+    """No cenário de uso real, "qualquer aviso em 490 leituras" trata igual um
+    sistema que avisa uma vez por dia e outro que avisa cem. A taxa por hora é
+    o número proporcional à observação."""
+
+    def test_cenario_real_informa_quantas_horas_cobriu(self, db):
+        from app.services import benchmark
+        from tests.test_benchmark import TestCenariosDeDadoReal
+        origem = TestCenariosDeDadoReal()._maquina_com_historico(db, leituras=200)
+        r = benchmark.run_real_scenario(db, origem.id, origem.owner_id, minutes=6000)
+        assert r.error is None, r.error
+        # 200 leituras de 2 em 2 min = 400 min; 110 de aquecimento saem da conta
+        assert 2.5 < r.hours < 3.5
+
+    def test_avisos_por_hora_sai_da_janela_medida(self):
+        from app.services.benchmark import ScenarioResult
+        r = ScenarioResult(name="x", label="X", family="real", expected=None,
+                           detected=["high_cpu", "network_spike"], hours=4.0)
+        assert r.alerts_per_hour == 0.5
+
+    def test_sem_janela_a_taxa_nao_existe(self):
+        """Cenário sintético não tem duração real: taxa por hora ali seria
+        número inventado."""
+        from app.services.benchmark import ScenarioResult
+        r = ScenarioResult(name="x", label="X", family="attack", expected="cpu_loop", detected=["cpu_loop"])
+        assert r.alerts_per_hour is None
+
+
+class TestDuasTaxas:
+    """Aviso registrado e aviso que interrompe a pessoa são coisas diferentes.
+    Reportar as duas é mais informativo — e manter a antiga na tabela impede a
+    acusação de ter afrouxado a régua depois de ver o resultado."""
+
+    def _res(self, familia, detected, notified):
+        from app.services.benchmark import ScenarioResult
+        return ScenarioResult(name="x", label="X", family=familia, expected=None,
+                              detected=detected, notified=notified)
+
+    def test_aviso_de_baixa_severidade_conta_no_gerado_mas_nao_no_notificado(self):
+        from app.services.benchmark import confusion
+        m = confusion([self._res("normal", ["high_cpu"], []), self._res("normal", [], [])])
+        assert m["false_positives"] == 1
+        assert m["false_positive_rate"] == 0.5
+        assert m["false_positives_notified"] == 0
+        assert m["false_positive_rate_notified"] == 0.0
+
+    def test_aviso_que_notifica_conta_nas_duas(self):
+        from app.services.benchmark import confusion
+        m = confusion([self._res("normal", ["cpu_loop"], ["cpu_loop"]), self._res("normal", [], [])])
+        assert m["false_positives"] == 1 and m["false_positives_notified"] == 1
+
+    def test_veredito_continua_baseado_no_que_foi_gerado(self):
+        """Conservador de propósito: um aviso silencioso ainda é um aviso que
+        o sistema não deveria ter produzido."""
+        r = self._res("normal", ["high_cpu"], [])
+        assert r.verdict == "falso positivo"

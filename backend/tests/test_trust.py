@@ -26,7 +26,8 @@ def _machine(db, **over):
 def _proc(**over):
     base = {"name": "app.exe", "exe": "C:\\Program Files\\App\\app.exe", "signed": "signed",
             "publisher": "App Inc", "sha256": "a" * 64, "cpu_percent": 5.0, "mem_percent": 2.0,
-            "username": "user", "cmdline": "app.exe", "pid": 100, "ppid": 4, "parent_name": "explorer.exe"}
+            "username": "user", "cmdline": "app.exe", "pid": 100, "ppid": 4, "parent_name": "explorer.exe",
+            "num_threads": 8, "mem_rss": 1e9, "status": "running"}
     return SimpleNamespace(**{**base, **over})
 
 
@@ -294,3 +295,53 @@ class TestConfiancaNoCaminhoDoModelo:
     def test_sem_processo_responsavel_nada_muda(self, db):
         from app.services.anomaly_service import ml_severity
         assert ml_severity("network_spike", "medium", None) == "medium"
+
+
+class TestCpuLoopComConfianca:
+    """Um jogo a 90% de processador não está travado em laço infinito — está
+    funcionando como foi projetado. O detector não distinguia carga intensa
+    legítima de carga intensa patológica."""
+
+    def _historico(self, db, machine_id, proc_name, cpu):
+        from datetime import timedelta
+        from app.core.timeutil import utcnow
+        from app.models.metric import Metric
+        from app.models.process import ProcessSnapshot
+        agora = utcnow()
+        anteriores = []
+        for i in range(5, 0, -1):
+            met = Metric(machine_id=machine_id, cpu_percent=cpu, mem_percent=40,
+                         timestamp=agora - timedelta(seconds=i * 30))
+            db.add(met)
+            db.flush()
+            db.add(ProcessSnapshot(metric_id=met.id, pid=9, name=proc_name, cpu_percent=cpu,
+                                   mem_percent=5.0, mem_rss=1e9, num_threads=8, status="running"))
+            anteriores.append(met)
+        atual = Metric(machine_id=machine_id, cpu_percent=cpu, mem_percent=40, timestamp=agora)
+        db.add(atual)
+        db.commit()
+        return atual, anteriores
+
+    def test_jogo_assinado_nao_e_diagnosticado_como_travado(self, db):
+        from app.services.behavior_analyzer import DetectionContext, detect_cpu_loop
+        from app.services import trust
+        m = _machine(db)
+        atual, anteriores = self._historico(db, m.id, "jogo.exe", 92)
+        proc = _proc(name="jogo.exe", exe="C:\\Program Files (x86)\\Steam\\jogo.exe",
+                     publisher="Estudio SA", cpu_percent=92.0)
+        ctx = DetectionContext(trust_levels=trust.evaluate_all(db, m.id, [proc]))
+        r = detect_cpu_loop(atual, [proc], anteriores, db, ctx)
+        assert r is not None, "o consumo alto continua sendo registrado"
+        assert r.anomaly_type == "high_cpu"
+        assert r.severity == "low"
+
+    def test_executavel_desconhecido_continua_sendo_loop(self, db):
+        from app.services.behavior_analyzer import DetectionContext, detect_cpu_loop
+        from app.services import trust
+        m = _machine(db)
+        atual, anteriores = self._historico(db, m.id, "runaway.exe", 99)
+        proc = _proc(name="runaway.exe", exe="C:\\Users\\v\\Downloads\\runaway.exe",
+                     signed="unsigned", publisher=None, cpu_percent=99.0)
+        ctx = DetectionContext(trust_levels=trust.evaluate_all(db, m.id, [proc]))
+        r = detect_cpu_loop(atual, [proc], anteriores, db, ctx)
+        assert r is not None and r.anomaly_type == "cpu_loop"

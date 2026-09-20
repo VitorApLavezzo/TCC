@@ -108,8 +108,13 @@ def _scenario_step(scenario: str, phase: str, k: int, metric: Dict, procs: List[
                       "username": "demo", "cmdline": "svchost.exe -k netsvcs"})
     elif scenario == "beaconing":
         metric["net_connections"] += 2
+        # IP público de verdade, e não a faixa de documentação (203.0.113.0/24):
+        # o detector exige destino público, e o Python classifica TODAS as
+        # faixas reservadas para documentação da RFC 5737 como privadas — o
+        # cenário era descartado antes de ser avaliado e nunca detectou nada.
+        # 45.33.32.156 é scanme.nmap.org, host mantido publicamente para testes.
         beacons.append({"process": "updater_x.exe", "exe": "C:\\Users\\demo\\AppData\\Roaming\\updater_x.exe",
-                        "remote_ip": "203.0.113.77", "remote_port": 443, "events": 6 + k,
+                        "remote_ip": "45.33.32.156", "remote_port": 443, "events": 6 + k,
                         "median_interval": 60.0, "jitter": 0.03})
         procs.append({"name": "updater_x.exe", "cpu_percent": 1.5, "mem_percent": 1.0,
                       "exe": "C:\\Users\\demo\\AppData\\Roaming\\updater_x.exe", "signed": "unsigned", "username": "demo"})

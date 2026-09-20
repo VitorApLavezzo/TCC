@@ -32,6 +32,20 @@ REAL = "real"
 # Famílias em que o gabarito é "não deve avisar nada"
 QUIET_FAMILIES = (NORMAL, REAL)
 
+# Severidade a partir da qual um aviso interrompe a pessoa. É a mesma
+# severidade mínima padrão das preferências de notificação: abaixo dela o
+# aviso fica registrado no painel e não vira mensagem.
+NOTIFYING = ("medium", "high", "critical")
+
+
+def _record(resultado: "ScenarioResult", anomalies) -> None:
+    """Registra o que um passo produziu, separando o que interromperia."""
+    for anomaly in anomalies:
+        if anomaly.anomaly_type not in resultado.detected:
+            resultado.detected.append(anomaly.anomaly_type)
+        if anomaly.severity in NOTIFYING and anomaly.anomaly_type not in resultado.notified:
+            resultado.notified.append(anomaly.anomaly_type)
+
 
 @dataclass
 class ScenarioResult:
@@ -42,8 +56,26 @@ class ScenarioResult:
     expected: Optional[str]
     # Tipos de aviso que o sistema de fato gerou
     detected: List[str] = field(default_factory=list)
+    # Subconjunto de `detected` que chegaria à pessoa: severidade igual ou
+    # acima da mínima padrão. Um aviso `low` fica no painel e não interrompe.
+    notified: List[str] = field(default_factory=list)
     steps: int = 0
+    # Horas de observação que a janela medida cobriu. Só existe em cenário
+    # real: um cenário sintético não tem duração no mundo.
+    hours: Optional[float] = None
     error: Optional[str] = None
+
+    @property
+    def alerts_per_hour(self) -> Optional[float]:
+        """Avisos por hora — o número proporcional à observação.
+
+        O veredito binário trata igual um sistema que avisa uma vez por dia e
+        outro que avisa cem vezes. Para dado real, essa diferença é a coisa
+        mais importante que existe.
+        """
+        if not self.hours:
+            return None
+        return len(self.detected) / self.hours
 
     @property
     def verdict(self) -> str:
@@ -87,6 +119,7 @@ def confusion(results: List[ScenarioResult]) -> Dict[str, Any]:
     fn = len(ataques) - tp
     fp = sum(1 for r in quietos if r.detected)
     tn = len(quietos) - fp
+    fp_notificado = sum(1 for r in quietos if r.notified)
 
     precision = _ratio(tp, tp + fp)
     recall = _ratio(tp, tp + fn)
@@ -106,6 +139,8 @@ def confusion(results: List[ScenarioResult]) -> Dict[str, Any]:
         "recall": recall,
         "f1": f1,
         "false_positive_rate": _ratio(fp, fp + tn),
+        "false_positives_notified": fp_notificado,
+        "false_positive_rate_notified": _ratio(fp_notificado, len(quietos)),
         "scenarios": len(considerados),
         "errors": sum(1 for r in results if r.error),
     }
@@ -140,7 +175,8 @@ def to_markdown(result: BenchmarkResult) -> str:
         f"| Precisão | {_pct(m['precision'])} | dos avisos emitidos, quantos eram problema de verdade |",
         f"| Revocação | {_pct(m['recall'])} | dos problemas existentes, quantos foram encontrados |",
         f"| F1 | {_pct(m['f1'])} | equilíbrio entre as duas |",
-        f"| Taxa de alarme falso | {_pct(m['false_positive_rate'])} | das situações normais, quantas geraram aviso |",
+        f"| Taxa de alarme falso (qualquer aviso) | {_pct(m['false_positive_rate'])} | das situações normais, quantas geraram algum aviso |",
+        f"| Taxa de alarme falso (que interrompe) | {_pct(m.get('false_positive_rate_notified'))} | das situações normais, quantas geraram aviso que chega à pessoa |",
         "",
         "## Cenário a cenário",
         "",
@@ -149,6 +185,8 @@ def to_markdown(result: BenchmarkResult) -> str:
     ]
     for r in result.scenarios:
         detectado = ", ".join(r.detected) if r.detected else "nada"
+        if r.alerts_per_hour is not None:
+            detectado += f" ({r.alerts_per_hour:.2f} avisos/h em {r.hours:.1f}h)"
         linhas.append(
             f"| {r.label} | {FAMILY_LABEL.get(r.family, r.family)} | {r.expected or 'nenhum aviso'} "
             f"| {detectado} | {r.verdict} |"
@@ -161,10 +199,13 @@ def to_markdown(result: BenchmarkResult) -> str:
 def to_csv(result: BenchmarkResult) -> str:
     saida = io.StringIO()
     w = csv.writer(saida)
-    w.writerow(["cenario", "rotulo", "familia", "esperado", "detectado", "veredito"])
+    w.writerow(["cenario", "rotulo", "familia", "esperado", "detectado", "notificados",
+                "horas", "avisos_por_hora", "veredito"])
     for r in result.scenarios:
         # Tipos separados por ponto e vírgula: a vírgula é o separador de coluna
-        w.writerow([r.name, r.label, r.family, r.expected or "", "; ".join(r.detected), r.verdict])
+        w.writerow([r.name, r.label, r.family, r.expected or "", "; ".join(r.detected),
+                    "; ".join(r.notified), f"{r.hours:.2f}" if r.hours else "",
+                    f"{r.alerts_per_hour:.3f}" if r.alerts_per_hour is not None else "", r.verdict])
     return saida.getvalue()
 
 
@@ -385,9 +426,7 @@ def run_scenario(db, name: str, owner_id: int) -> ScenarioResult:
             else:
                 spec["overlay"](k, data, procs)
                 extra = {}
-            for anomaly in _feed(db, machine, data, procs, ts, extra):
-                if anomaly.anomaly_type not in resultado.detected:
-                    resultado.detected.append(anomaly.anomaly_type)
+            _record(resultado, _feed(db, machine, data, procs, ts, extra))
     except Exception as e:  # noqa: BLE001 — um cenário quebrado não derruba a rodada
         resultado.error = f"{type(e).__name__}: {e}"
         db.rollback()
@@ -490,6 +529,7 @@ def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 
     db.commit()
     db.refresh(machine)
 
+    inicio_medido = fim_medido = None
     try:
         for i, leitura in enumerate(leituras):
             dados = {c: getattr(leitura, c) for c in campos}
@@ -503,10 +543,13 @@ def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 
             criadas = _feed(db, machine, dados, procs, aware(leitura.timestamp), {})
             # As primeiras leituras são o aquecimento e não entram na medição
             if i >= WARMUP_STEPS:
+                if resultado.steps == 0:
+                    inicio_medido = aware(leitura.timestamp)
+                fim_medido = aware(leitura.timestamp)
                 resultado.steps += 1
-                for anomaly in criadas:
-                    if anomaly.anomaly_type not in resultado.detected:
-                        resultado.detected.append(anomaly.anomaly_type)
+                _record(resultado, criadas)
+        if resultado.steps:
+            resultado.hours = (fim_medido - inicio_medido).total_seconds() / 3600
     except Exception as e:  # noqa: BLE001
         resultado.error = f"{type(e).__name__}: {e}"
         db.rollback()

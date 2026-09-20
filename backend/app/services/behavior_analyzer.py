@@ -384,8 +384,18 @@ def detect_cpu_loop(metric: Metric, processes: List[ProcessSnapshot],
 
     if sustained_high >= needed and dominance > 0.4:
         analysis = BehaviorAnalysis()
-        analysis.anomaly_type = "cpu_loop"
-        analysis.severity = "high" if (suspect.cpu_percent or 0) > 95 else "medium"
+        # A confiança muda o DIAGNÓSTICO, não só a severidade. Um jogo ou um
+        # compilador assinado e instalado em pasta de programas segurando 90%
+        # do processador por horas não está travado em laço infinito — está
+        # fazendo o que foi projetado para fazer. Chamar isso de "loop
+        # infinito" é afirmar um defeito que não existe; o consumo alto, esse
+        # sim, continua sendo registrado, e `low` sai da notificação sozinho.
+        trusted = ctx.trust(suspect).is_trusted
+        analysis.anomaly_type = "high_cpu" if trusted else "cpu_loop"
+        if trusted:
+            analysis.severity = "low"
+        else:
+            analysis.severity = "high" if (suspect.cpu_percent or 0) > 95 else "medium"
         analysis.responsible_process = suspect.name
         analysis.confidence = min(sustained_high / max(len(window), 1), 1.0)
         analysis.affected_metrics = {

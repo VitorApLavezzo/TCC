@@ -199,7 +199,7 @@ def test_demonstracao_continua_detectando(client, auth, db):
     from app.services import demo
     from app.models.demo import DemoSession
 
-    for cenario in ("cpu_loop", "memory_leak", "masquerade"):
+    for cenario in ("cpu_loop", "memory_leak", "masquerade", "beaconing"):
         res = client.post("/api/demo/start", json={"scenario": cenario, "auto_run": False}, headers=auth)
         assert res.status_code == 200
         sessao = db.query(DemoSession).filter(DemoSession.id == res.json()["id"]).first()
