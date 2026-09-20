@@ -3,6 +3,7 @@ from app.models.machine import Machine
 from app.models.metric import Metric
 from app.models.process import ProcessSnapshot
 from app.models.incident import Incident
+from app.models.benchmark import BenchmarkRun
 from app.models.anomaly import Anomaly
 from app.models.explanation import AIExplanation
 from app.models.process_baseline import ProcessBaseline
@@ -25,4 +26,5 @@ __all__ = [
     "ProcessBaseline", "EnrollmentCode", "DetectionRule", "DetectorCalibration", "AgentCommand",
     "Diagnostic", "ChatMessage", "Report", "InventorySnapshot", "ChangeEvent", "ProcessIdentity",
     "HashReputation", "BlackboxCapture", "Notification", "ShareLink", "DemoSession",
+    "BenchmarkRun",
 ]

@@ -417,3 +417,92 @@ def run(db, owner_id: int, names: Optional[List[str]] = None) -> BenchmarkResult
         metrics=confusion(resultados),
         duration_ms=int((time.monotonic() - inicio) * 1000),
     )
+
+
+MIN_REAL_STEPS = 10
+
+
+def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 240) -> ScenarioResult:
+    """Reproduz leituras já gravadas de uma máquina de verdade.
+
+    É o número mais forte do capítulo de resultados: aqui o gabarito não foi
+    escrito por quem está sendo avaliado. A premissa é simples — a pessoa
+    estava usando o computador normalmente, então todo aviso gerado nesta
+    janela é um incômodo que ela não pediu.
+
+    A janela é reproduzida numa máquina efêmera, não medida na original: a
+    original já tem histórico, baselines e modelo treinado, e medir nela seria
+    medir um estado que não dá para reconstruir depois.
+    """
+    import secrets
+    from datetime import timedelta
+    from app.core.timeutil import aware, utcnow
+    from app.models.machine import Machine
+    from app.models.metric import Metric
+    from app.models.process import ProcessSnapshot
+
+    origem = db.query(Machine).filter(Machine.id == source_machine_id).first()
+    resultado = ScenarioResult(
+        name=f"real_{source_machine_id}",
+        label=f"Uso real de {origem.name if origem else source_machine_id} ({minutes} min)",
+        family=REAL, expected=None,
+    )
+    if origem is None:
+        resultado.error = "máquina de origem não encontrada"
+        return resultado
+
+    corte = utcnow() - timedelta(minutes=minutes)
+    leituras = (
+        db.query(Metric)
+        .filter(Metric.machine_id == source_machine_id, Metric.timestamp >= corte)
+        .order_by(Metric.timestamp.asc())
+        .all()
+    )
+    if len(leituras) < WARMUP_STEPS + MIN_REAL_STEPS:
+        # Sem leituras para aquecer E medir, o cenário não pode virar um
+        # verdadeiro negativo de graça: isso inflaria a taxa de acerto
+        resultado.error = (f"leituras insuficientes: {len(leituras)}, "
+                           f"precisa de {WARMUP_STEPS + MIN_REAL_STEPS}")
+        return resultado
+
+    campos = [c.name for c in Metric.__table__.columns
+              if c.name not in ("id", "machine_id", "timestamp", "ml_score", "excluded_from_training")]
+    snaps_por_metrica: Dict[int, List[Any]] = {}
+    for p in db.query(ProcessSnapshot).filter(
+            ProcessSnapshot.metric_id.in_([m.id for m in leituras])).all():
+        snaps_por_metrica.setdefault(p.metric_id, []).append(p)
+
+    machine = Machine(
+        name=f"[BENCH] {resultado.label}", hostname=f"bench-real-{secrets.token_hex(2)}",
+        os_type=origem.os_type, os_version=origem.os_version, os_pretty=origem.os_pretty,
+        agent_token=secrets.token_urlsafe(24), owner_id=owner_id, is_active=True,
+        ai_privacy="no_ai", system_info=origem.system_info,
+    )
+    db.add(machine)
+    db.commit()
+    db.refresh(machine)
+
+    try:
+        for i, leitura in enumerate(leituras):
+            dados = {c: getattr(leitura, c) for c in campos}
+            procs = [{"name": p.name, "cpu_percent": p.cpu_percent, "mem_percent": p.mem_percent,
+                      "exe": p.exe, "signed": p.signed, "publisher": p.publisher,
+                      "username": p.username, "cmdline": p.cmdline}
+                     for p in snaps_por_metrica.get(leitura.id, [])]
+            # `aware`: a coluna é DateTime(timezone=True) e volta ingênua no
+            # SQLite, com fuso no PostgreSQL — sem normalizar, a comparação
+            # dentro dos detectores estoura em um dos dois bancos
+            criadas = _feed(db, machine, dados, procs, aware(leitura.timestamp), {})
+            # As primeiras leituras são o aquecimento e não entram na medição
+            if i >= WARMUP_STEPS:
+                resultado.steps += 1
+                for anomaly in criadas:
+                    if anomaly.anomaly_type not in resultado.detected:
+                        resultado.detected.append(anomaly.anomaly_type)
+    except Exception as e:  # noqa: BLE001
+        resultado.error = f"{type(e).__name__}: {e}"
+        db.rollback()
+    finally:
+        _drop_machine(db, machine.id)
+
+    return resultado

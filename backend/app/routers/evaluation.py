@@ -1,5 +1,6 @@
 """Avaliação das explicações — dados quantitativos para a monografia."""
 from datetime import timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -11,7 +12,7 @@ from app.models.anomaly import Anomaly
 from app.models.explanation import AIExplanation
 from app.models.machine import Machine
 from app.models.user import User
-from app.services import evaluation
+from app.services import benchmark, benchmark_store, evaluation
 
 router = APIRouter(prefix="/api/evaluation", tags=["evaluation"])
 
@@ -76,3 +77,47 @@ def summary(days: int = 30, db: Session = Depends(get_db), user: User = Depends(
             "avg_duration_ms": round(a["duration_sum"] / a["duration_count"]) if a["duration_count"] else None,
         }
     return {"period_days": days, "total_explanations": len(rows), "by_provider": result}
+
+
+@router.get("/benchmark")
+def latest_benchmark(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Última rodada do benchmark de detecção — a tabela de resultados do TCC."""
+    return benchmark_store.serialize(benchmark_store.latest(db, user.id))
+
+
+@router.post("/benchmark")
+def start_benchmark(real_machine_id: Optional[int] = None, db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """Dispara uma rodada em segundo plano.
+
+    São ~15 cenários com aquecimento de 110 leituras cada: longe demais para
+    uma requisição síncrona. O painel busca o resultado depois.
+    """
+    from app.services import jobs
+    jobs.submit(_run_benchmark, user.id, real_machine_id)
+    return {"started": True}
+
+
+def _run_benchmark(db: Session, user_id: int, real_machine_id: Optional[int]):
+    resultado = benchmark.run(db, user_id)
+    if real_machine_id:
+        machine = db.query(Machine).filter(
+            Machine.id == real_machine_id, Machine.owner_id == user_id).first()
+        if machine:
+            resultado.scenarios.append(
+                benchmark.run_real_scenario(db, machine.id, user_id))
+            resultado.metrics = benchmark.confusion(resultado.scenarios)
+    benchmark_store.save(db, user_id, resultado)
+
+
+@router.get("/benchmark/{run_id}/download")
+def download_benchmark(run_id: int, fmt: str = "md", db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    from fastapi.responses import PlainTextResponse
+    from app.models.benchmark import BenchmarkRun
+    run = db.query(BenchmarkRun).filter(BenchmarkRun.id == run_id, BenchmarkRun.user_id == user.id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Rodada não encontrada")
+    corpo = run.csv if fmt == "csv" else run.markdown
+    nome = f"benchmark-deteccao-{run_id}.{'csv' if fmt == 'csv' else 'md'}"
+    return PlainTextResponse(corpo or "", headers={"Content-Disposition": f'attachment; filename="{nome}"'})

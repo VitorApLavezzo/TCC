@@ -184,6 +184,11 @@ export const shareApi = {
 export const evaluationApi = {
   compare: (anomalyId: number) => api.post(`/evaluation/anomaly/${anomalyId}/compare`),
   summary: (days = 30) => api.get(`/evaluation/summary?days=${days}`),
+  benchmark: () => api.get(`/evaluation/benchmark`),
+  runBenchmark: (realMachineId?: number) =>
+    api.post(`/evaluation/benchmark${realMachineId ? `?real_machine_id=${realMachineId}` : ""}`),
+  benchmarkDownload: (runId: number, fmt: "md" | "csv") =>
+    api.get(`/evaluation/benchmark/${runId}/download?fmt=${fmt}`, { responseType: "text" }),
 };
 
 export const demoApi = {

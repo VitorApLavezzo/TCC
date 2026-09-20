@@ -5,6 +5,7 @@ import { PageHeader, Section, Panel } from "../components/ui/Layout";
 import { Button } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
+import { DetectionBenchmark } from "../components/research/DetectionBenchmark";
 
 /**
  * Página de pesquisa — os dados quantitativos que o TCC precisa sobre a
@@ -50,6 +51,8 @@ export function Research() {
           </select>
         }
       />
+
+      <DetectionBenchmark />
 
       <Section
         title="Qualidade das explicações"

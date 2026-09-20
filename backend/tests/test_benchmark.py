@@ -220,3 +220,97 @@ class TestRemocaoDeMaquinaLimpaOModelo:
         delete_machine_cascade(m.id, db)
         db.commit()
         assert not os.path.exists(caminho)
+
+
+class TestCenariosDeDadoReal:
+    """O falso positivo medido em leituras de uma máquina de verdade: o
+    gabarito aqui não foi escrito por quem está sendo avaliado."""
+
+    def _maquina_com_historico(self, db, leituras=200):
+        from datetime import timedelta
+        from app.core.security import get_password_hash
+        from app.core.timeutil import utcnow
+        from app.models.machine import Machine
+        from app.models.metric import Metric
+        from app.models.process import ProcessSnapshot
+        from app.models.user import User
+        u = User(email="real@t.com", username="real", hashed_password=get_password_hash("x"))
+        db.add(u)
+        db.flush()
+        m = Machine(name="PC real", hostname="real", agent_token="tok-real", owner_id=u.id, os_type="Linux")
+        db.add(m)
+        db.flush()
+        agora = utcnow()
+        for i in range(leituras):
+            met = Metric(machine_id=m.id, cpu_percent=12 + (i % 7), mem_percent=40 + (i % 5),
+                         disk_percent=55.0, net_bytes_recv=1.4e5, net_bytes_sent=2.0e5,
+                         net_connections=50 + (i % 10), cpu_count_logical=8,
+                         timestamp=agora - timedelta(minutes=(leituras - i) * 2))
+            db.add(met)
+            db.flush()
+            db.add(ProcessSnapshot(metric_id=met.id, pid=1, name="opera", cpu_percent=8.0, mem_percent=6.0,
+                                   mem_rss=1e9, num_threads=10, status="running",
+                                   exe="/usr/lib/opera/opera", signed="signed", publisher="opera-stable"))
+        db.commit()
+        return m
+
+    def test_replay_de_leituras_reais_vira_cenario(self, db):
+        from app.services import benchmark
+        origem = self._maquina_com_historico(db)
+        r = benchmark.run_real_scenario(db, origem.id, origem.owner_id, minutes=600)
+        assert r.error is None, r.error
+        assert r.family == benchmark.REAL
+        assert r.expected is None
+        assert r.steps > 0
+
+    def test_sem_leituras_suficientes_o_cenario_se_declara_erro(self, db):
+        """Melhor um cenário marcado como erro e fora da conta do que um
+        verdadeiro negativo de graça inflando a taxa de acerto."""
+        from app.services import benchmark
+        origem = self._maquina_com_historico(db, leituras=3)
+        r = benchmark.run_real_scenario(db, origem.id, origem.owner_id, minutes=120)
+        assert r.error is not None
+
+
+class TestSaida:
+    def test_comando_imprime_markdown(self):
+        """O comando escreve na saída padrão para você redirecionar aonde
+        quiser — sem caminho configurável e sem depender de qual pasta está
+        montada no contêiner."""
+        from app.benchmark import render
+        from app.services.benchmark import BenchmarkResult, ScenarioResult, confusion
+        linhas = [ScenarioResult(name="x", label="X", family="attack", expected="cpu_loop", detected=["cpu_loop"])]
+        r = BenchmarkResult(scenarios=linhas, metrics=confusion(linhas), duration_ms=10)
+        assert render(r, as_csv=False).startswith("# Benchmark")
+        assert render(r, as_csv=True).startswith("cenario,")
+
+
+class TestEndpoint:
+    def test_rodada_fica_gravada_e_pode_ser_lida(self, client, auth, db):
+        from app.models.benchmark import BenchmarkRun
+        from app.services.benchmark import BenchmarkResult, ScenarioResult, confusion
+        from app.services import benchmark_store
+        linhas = [ScenarioResult(name="x", label="X", family="normal", expected=None, detected=[])]
+        r = BenchmarkResult(scenarios=linhas, metrics=confusion(linhas), duration_ms=10)
+        user_id = client.get("/api/auth/me", headers=auth).json()["id"]
+        benchmark_store.save(db, user_id, r)
+
+        res = client.get("/api/evaluation/benchmark", headers=auth)
+        assert res.status_code == 200
+        assert res.json()["metrics"]["true_negatives"] == 1
+        assert db.query(BenchmarkRun).count() == 1
+
+    def test_sem_rodada_nenhuma_responde_vazio_e_nao_erro(self, client, auth):
+        res = client.get("/api/evaluation/benchmark", headers=auth)
+        assert res.status_code == 200
+        assert res.json() == {"run": None}
+
+    def test_download_devolve_markdown(self, client, auth, db):
+        from app.services.benchmark import BenchmarkResult, ScenarioResult, confusion
+        from app.services import benchmark_store
+        linhas = [ScenarioResult(name="x", label="X", family="normal", expected=None, detected=[])]
+        r = BenchmarkResult(scenarios=linhas, metrics=confusion(linhas), duration_ms=10)
+        user_id = client.get("/api/auth/me", headers=auth).json()["id"]
+        run = benchmark_store.save(db, user_id, r)
+        res = client.get(f"/api/evaluation/benchmark/{run.id}/download?fmt=md", headers=auth)
+        assert res.status_code == 200 and res.text.startswith("# Benchmark")
