@@ -314,3 +314,48 @@ class TestEndpoint:
         run = benchmark_store.save(db, user_id, r)
         res = client.get(f"/api/evaluation/benchmark/{run.id}/download?fmt=md", headers=auth)
         assert res.status_code == 200 and res.text.startswith("# Benchmark")
+
+
+class TestRobustez:
+    """Uma rodada interrompida (SIGKILL, contêiner reiniciado) não executa o
+    `finally` e deixa a máquina efêmera para trás. Aconteceu de verdade na
+    primeira rodada completa."""
+
+    def _dono(self, db):
+        from app.core.security import get_password_hash
+        from app.models.user import User
+        u = User(email="orf@t.com", username="orf", hashed_password=get_password_hash("x"))
+        db.add(u)
+        db.commit()
+        return u
+
+    def test_varre_maquinas_efemeras_orfas(self, db):
+        from app.models.machine import Machine
+        from app.services import benchmark
+        dono = self._dono(db)
+        orfa = Machine(name="[BENCH] rodada morta", hostname="bench-orfa",
+                       agent_token="tok-orfa", owner_id=dono.id)
+        db.add(orfa)
+        db.commit()
+        assert benchmark.sweep_orphans(db, dono.id) == 1
+        assert db.query(Machine).filter(Machine.name.like("[BENCH]%")).count() == 0
+
+    def test_nao_toca_nas_maquinas_de_verdade(self, db):
+        from app.models.machine import Machine
+        from app.services import benchmark
+        dono = self._dono(db)
+        real = Machine(name="PC do Vitor", hostname="real", agent_token="tok-viva", owner_id=dono.id)
+        db.add(real)
+        db.commit()
+        assert benchmark.sweep_orphans(db, dono.id) == 0
+        assert db.query(Machine).filter(Machine.id == real.id).first() is not None
+
+    def test_cenario_real_respeita_o_limite_de_leituras(self, db):
+        """Sem teto, uma janela larga vira milhares de leituras pelo pipeline —
+        foi o que derrubou a primeira rodada."""
+        from app.services import benchmark
+        from tests.test_benchmark import TestCenariosDeDadoReal
+        origem = TestCenariosDeDadoReal()._maquina_com_historico(db, leituras=300)
+        r = benchmark.run_real_scenario(db, origem.id, origem.owner_id, minutes=6000, limit=140)
+        assert r.error is None, r.error
+        assert r.steps == 140 - benchmark.WARMUP_STEPS

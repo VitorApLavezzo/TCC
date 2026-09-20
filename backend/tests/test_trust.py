@@ -258,3 +258,39 @@ class TestAbusoDeRecurso:
         ctx = DetectionContext(trust_levels=trust.evaluate_all(db, m.id, [proc]))
         r = detect_resource_abuse(met, [proc], [], db, ctx)
         assert r is not None and r.severity == "low"
+
+
+class TestConfiancaNoCaminhoDoModelo:
+    """O modelo estatístico marcava a varredura do antivírus como leitura fora
+    do padrão — o que ela é — e virava aviso. A camada de confiança só
+    alcançava os detectores comportamentais."""
+
+    def test_varredura_de_antivirus_nasce_com_severidade_baixa(self, db):
+        from app.services.anomaly_service import ml_severity
+        from app.services import trust
+        proc = _proc(name="avp.exe", exe="C:\\Program Files (x86)\\Kaspersky Lab\\KAV\\avp.exe",
+                     publisher="Kaspersky Lab JSC")
+        t = trust.evaluate(db, _machine(db).id, proc)
+        assert ml_severity("disk_activity", "high", t) == "low"
+
+    def test_programa_comum_nao_ganha_desconto(self, db):
+        """A regra é estreita de propósito: qualquer programa assinado
+        rebaixando o modelo abriria espaço para binário sequestrado."""
+        from app.services.anomaly_service import ml_severity
+        from app.services import trust
+        proc = _proc(name="chrome.exe", exe="C:\\Program Files\\Google\\Chrome\\chrome.exe",
+                     publisher="Google LLC")
+        t = trust.evaluate(db, _machine(db).id, proc)
+        assert ml_severity("network_spike", "high", t) == "high"
+
+    def test_aviso_de_seguranca_nunca_e_rebaixado(self, db):
+        from app.services.anomaly_service import ml_severity
+        from app.services import trust
+        proc = _proc(name="avp.exe", exe="C:\\Program Files (x86)\\Kaspersky Lab\\KAV\\avp.exe",
+                     publisher="Kaspersky Lab JSC")
+        t = trust.evaluate(db, _machine(db).id, proc)
+        assert ml_severity("malware_pattern", "critical", t) == "critical"
+
+    def test_sem_processo_responsavel_nada_muda(self, db):
+        from app.services.anomaly_service import ml_severity
+        assert ml_severity("network_spike", "medium", None) == "medium"

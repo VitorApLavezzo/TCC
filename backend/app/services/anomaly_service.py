@@ -20,7 +20,9 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.labels import LEARNING_EXEMPT, PERFORMANCE_TYPES, PROCESS_SPECIFIC_TYPES, SEVERITY_ORDER
+from app.core.labels import (
+    LEARNING_EXEMPT, PERFORMANCE_TYPES, PROCESS_SPECIFIC_TYPES, SECURITY_TYPES, SEVERITY_ORDER,
+)
 from app.core.timeutil import aware, local_time, tz_offset_minutes, utcnow
 from app.models.anomaly import Anomaly
 from app.models.explanation import AIExplanation
@@ -208,11 +210,13 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     if is_statistical and not candidates:
         contributions = ml_service.explain_contributions(machine.id, metric, offset)
         classification = ml_service.classify_anomaly(metric, db, contributions)
+        top = _find_top_process(metric, db)
         candidates.append(Candidate(
             anomaly_type=classification["anomaly_type"],
-            severity=classification["severity"],
+            severity=ml_severity(classification["anomaly_type"], classification["severity"],
+                                 ctx.trust(top) if top is not None else None),
             affected=classification["affected_metrics"],
-            responsible=_find_top_process(metric, db),
+            responsible=top.name if top is not None else None,
             details={"source": "isolation_forest", "score": score, "contributions": contributions},
             source="ml",
             score=score,
@@ -253,6 +257,30 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     )
 
 
+def ml_severity(anomaly_type: str, severity: str, trust_info) -> str:
+    """Rebaixa o aviso do modelo quando o desvio é um produto de segurança
+    fazendo exatamente o que promete.
+
+    Uma varredura de antivírus É uma leitura fora do padrão — o modelo está
+    certo. Só que "fora do padrão" e "problema" não são a mesma coisa, e
+    interromper alguém porque o antivírus está varrendo ensina a pessoa a
+    ignorar os avisos.
+
+    A regra é estreita de propósito: vale só para o nível 3 (produto de
+    segurança reconhecido, com assinatura conferida) e nunca para um aviso de
+    segurança. Qualquer programa assinado rebaixando o modelo abriria espaço
+    para um binário legítimo sequestrado passar em silêncio.
+
+    Rebaixado não é silenciado: `low` continua no painel e some da notificação
+    porque a severidade mínima padrão é `medium`.
+    """
+    if trust_info is None or not getattr(trust_info, "is_security_software", False):
+        return severity
+    if anomaly_type in SECURITY_TYPES:
+        return severity
+    return "low"
+
+
 def _find_top_process(metric: Metric, db: Session):
     from app.models.process import ProcessSnapshot
     top = (
@@ -261,4 +289,6 @@ def _find_top_process(metric: Metric, db: Session):
         .order_by(ProcessSnapshot.cpu_percent.desc())
         .first()
     )
-    return top.name if top else None
+    # Devolve a leitura inteira, não só o nome: a confiança é do executável
+    # (caminho, assinatura, fabricante), e o nome sozinho é o que um vírus imita
+    return top

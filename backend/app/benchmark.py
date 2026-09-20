@@ -32,13 +32,18 @@ def main(argv=None) -> int:
     parser.add_argument("--real-minutes", type=int, default=240,
                         help="janela de leituras reais a reproduzir (padrão: 240)")
     parser.add_argument("--save", action="store_true", help="grava a rodada para o painel")
+    parser.add_argument("--user", type=int, default=None,
+                        help="id do dono das máquinas efêmeras (padrão: o de menor id)")
+    parser.add_argument("--real-limit", type=int, default=None,
+                        help=f"teto de leituras reais reproduzidas (padrão: {benchmark.REAL_LIMIT})")
     args = parser.parse_args(argv)
 
     db = SessionLocal()
     try:
-        dono = db.query(User).order_by(User.id.asc()).first()
+        dono = (db.query(User).filter(User.id == args.user).first() if args.user
+                else db.query(User).order_by(User.id.asc()).first())
         if dono is None:
-            print("Nenhum usuário cadastrado: crie uma conta antes de rodar o benchmark.", file=sys.stderr)
+            print("Usuário não encontrado: crie uma conta ou informe --user.", file=sys.stderr)
             return 1
 
         resultado = benchmark.run(db, dono.id)
@@ -48,7 +53,8 @@ def main(argv=None) -> int:
                 print(f"Máquina {machine_id} não encontrada; cenário real ignorado.", file=sys.stderr)
                 continue
             resultado.scenarios.append(
-                benchmark.run_real_scenario(db, machine_id, origem.owner_id, minutes=args.real_minutes)
+                benchmark.run_real_scenario(db, machine_id, origem.owner_id, minutes=args.real_minutes,
+                                            limit=args.real_limit or benchmark.REAL_LIMIT)
             )
         resultado.metrics = benchmark.confusion(resultado.scenarios)
 

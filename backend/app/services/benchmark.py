@@ -410,6 +410,7 @@ def _drop_machine(db, machine_id: int) -> None:
 def run(db, owner_id: int, names: Optional[List[str]] = None) -> BenchmarkResult:
     import time
     inicio = time.monotonic()
+    sweep_orphans(db, owner_id)
     alvos = names or list(scenarios().keys())
     resultados = [run_scenario(db, nome, owner_id) for nome in alvos]
     return BenchmarkResult(
@@ -420,9 +421,14 @@ def run(db, owner_id: int, names: Optional[List[str]] = None) -> BenchmarkResult
 
 
 MIN_REAL_STEPS = 10
+# Teto de leituras reproduzidas num cenário real. Sem ele, uma janela larga
+# vira milhares de passagens pelo pipeline — a primeira rodada completa foi
+# morta no meio, deixando a máquina efêmera para trás.
+REAL_LIMIT = 600
 
 
-def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 240) -> ScenarioResult:
+def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 240,
+                      limit: int = REAL_LIMIT) -> ScenarioResult:
     """Reproduz leituras já gravadas de uma máquina de verdade.
 
     É o número mais forte do capítulo de resultados: aqui o gabarito não foi
@@ -455,9 +461,11 @@ def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 
     leituras = (
         db.query(Metric)
         .filter(Metric.machine_id == source_machine_id, Metric.timestamp >= corte)
-        .order_by(Metric.timestamp.asc())
+        .order_by(Metric.timestamp.desc())
+        .limit(limit)
         .all()
     )
+    leituras.reverse()  # mais antiga primeiro: o aquecimento vem antes da medição
     if len(leituras) < WARMUP_STEPS + MIN_REAL_STEPS:
         # Sem leituras para aquecer E medir, o cenário não pode virar um
         # verdadeiro negativo de graça: isso inflaria a taxa de acerto
@@ -506,3 +514,24 @@ def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 
         _drop_machine(db, machine.id)
 
     return resultado
+
+
+BENCH_PREFIX = "[BENCH]"
+
+
+def sweep_orphans(db, owner_id: int) -> int:
+    """Remove máquinas efêmeras deixadas por uma rodada interrompida.
+
+    O `finally` de `run_scenario` não roda quando o processo leva SIGKILL ou o
+    contêiner reinicia no meio — e aí a máquina fica no painel com leituras
+    fabricadas, indistinguível de uma real para quem olha a lista.
+    """
+    from app.models.machine import Machine
+    orfas = (
+        db.query(Machine)
+        .filter(Machine.owner_id == owner_id, Machine.name.like(f"{BENCH_PREFIX}%"))
+        .all()
+    )
+    for m in orfas:
+        _drop_machine(db, m.id)
+    return len(orfas)
