@@ -48,6 +48,8 @@ export function Anomalies() {
   const setMachineId = (id: number | null) => setMachineParam(id ? String(id) : "");
   const [resolving, setResolving] = useState<number | null>(null);
   const [selecionados, setSelecionados] = useState<number[]>([]);
+  const [saindo, setSaindo] = useState<number[]>([]);
+  const [concluido, setConcluido] = useState<number | null>(null);
   const [emLote, setEmLote] = useState(false);
 
   useEffect(() => {
@@ -143,7 +145,18 @@ export function Anomalies() {
     setResolving(a.id);
     try {
       await anomaliesApi.resolve(a.id, !a.is_resolved);
+      // Confirmação antes do sumiço: o botão vira ✓ e, quando o filtro é "só
+      // em aberto", o item recolhe a própria altura em vez de desaparecer de
+      // uma vez — sem isso, a lista salta sob o cursor e fica a dúvida de
+      // qual linha foi afetada.
+      setConcluido(a.id);
+      if (unresolvedOnly && !a.is_resolved) {
+        setSaindo((atual) => [...atual, a.id]);
+        await new Promise((r) => setTimeout(r, 320));
+      }
       await fetchAnomalies();
+      setSaindo((atual) => atual.filter((id) => id !== a.id));
+      setTimeout(() => setConcluido((id) => (id === a.id ? null : id)), 700);
       toast.success(a.is_resolved ? "Aviso reaberto." : "Aviso resolvido.");
     } catch (err) {
       toast.error(errorMessage(err, "Não foi possível mudar o estado deste aviso."), "Tente de novo em alguns segundos.");
@@ -334,7 +347,7 @@ export function Anomalies() {
           />
         )
       ) : (
-        <div className="space-y-4">
+        <div className="animate-fade space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="tnum text-xs text-fg-3">
               {filtered.length === anomalies.length
@@ -366,6 +379,7 @@ export function Anomalies() {
               <AnomalyEvent
                 key={a.id}
                 anomaly={a}
+                className={saindo.includes(a.id) ? "animate-collapse" : undefined}
                 machineName={machines.length > 1 ? machineName(a.machine_id) : undefined}
                 onOpen={() => navigate(`/anomalies/${a.id}`)}
                 action={
@@ -387,7 +401,7 @@ export function Anomalies() {
                       onClick={(e) => handleResolve(e, a)}
                       aria-label={a.is_resolved ? "Reabrir este aviso" : "Marcar este aviso como resolvido"}
                     >
-                      {a.is_resolved ? "Reabrir" : "Resolver"}
+                      {concluido === a.id ? "✓" : a.is_resolved ? "Reabrir" : "Resolver"}
                     </Button>
                   </div>
                 }

@@ -10,9 +10,47 @@ type Run = {
   status_label: string;
   detail: string | null;
   undo_until: string | null;
+  created_at: string | null;
   can_cancel: boolean;
   can_approve: boolean;
 };
+
+/**
+ * O tempo que resta antes da ação acontecer, visível.
+ *
+ * O texto dizia "executa em 2 min" e pedia confiança. A barra esvaziando
+ * mostra o tempo correndo: é o mesmo dado, num canal que não exige leitura —
+ * e é o que torna a automação aceitável para quem não é técnico.
+ */
+function Countdown({ run }: { run: Run }) {
+  const [agora, setAgora] = useState(Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setAgora(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (!run.undo_until || run.status !== "agendado") return null;
+  const fim = new Date(run.undo_until).getTime();
+  const inicio = run.created_at ? new Date(run.created_at).getTime() : fim - 120000;
+  const total = Math.max(1, fim - inicio);
+  const restante = Math.max(0, fim - agora);
+  const segundos = Math.ceil(restante / 1000);
+
+  return (
+    <div className="mt-2">
+      <div className="h-1 overflow-hidden rounded-full bg-sunken" role="presentation">
+        <div
+          className="h-full rounded-full bg-warn transition-[width] duration-1000 ease-linear"
+          style={{ width: `${(restante / total) * 100}%` }}
+        />
+      </div>
+      <p className="mt-1 tnum font-mono text-micro text-fg-3">
+        {segundos > 0 ? `${segundos}s para cancelar` : "executando..."}
+      </p>
+    </div>
+  );
+}
 
 /**
  * O freio da automação.
@@ -62,6 +100,7 @@ export function PendingRuns() {
           <div className="min-w-0">
             <p className="text-sm font-semibold text-fg">{run.status_label}</p>
             <p className="mt-0.5 text-xs text-fg-2">{run.detail}</p>
+            <Countdown run={run} />
           </div>
           <div className="flex flex-shrink-0 gap-2">
             {run.can_approve && (

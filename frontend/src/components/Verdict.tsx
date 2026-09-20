@@ -157,8 +157,9 @@ export function Verdict({
       <div className="grid gap-x-10 gap-y-6 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
         <div className="min-w-0">
           <span
+            key={tone}
             className={clsx(
-              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-micro font-semibold uppercase tracking-wide",
+              "animate-rise inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-micro font-semibold uppercase tracking-wide",
               CHIP_TONE[tone]
             )}
           >
@@ -166,7 +167,16 @@ export function Verdict({
             {CHIP_LABEL[tone]}
           </span>
 
-          <h2 className="mt-3 font-display text-[1.9rem] font-bold leading-[1.1] tracking-tight text-fg sm:text-[2.1rem]">
+          {/*
+            `key` na manchete: quando o veredito muda — de "Tudo normal" para
+            "Precisa da sua atenção agora" — o React troca o elemento e a
+            animação roda. É a informação mais importante da tela, e antes ela
+            mudava em silêncio, como se sempre tivesse estado ali.
+          */}
+          <h2
+            key={headline}
+            className="animate-rise mt-3 font-display text-[1.9rem] font-bold leading-[1.1] tracking-tight text-fg sm:text-[2.1rem]"
+          >
             {headline}
           </h2>
           <p className="mt-1.5 max-w-[60ch] text-sm leading-relaxed text-fg-2">

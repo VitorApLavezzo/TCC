@@ -1,4 +1,5 @@
 import { clsx } from "clsx";
+import { useCountUp } from "../../hooks/useCountUp";
 import { Level, Reading } from "../../lib/health";
 import { Explain } from "./Explain";
 import { Band, SignalTrace } from "./SignalTrace";
@@ -86,70 +87,9 @@ function Segments({ value, max, limit, crit }: { value: number; max: number; lim
 export function VitalStrip({ items }: { items: VitalItem[] }) {
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" aria-label="Sinais vitais">
-      {items.map((item) => {
-        const max = item.historyMax ?? 100;
-        const raw = parseFloat(item.value.replace(",", "."));
-        const value = Number.isFinite(raw) ? raw : 0;
-        return (
-          <article
-            key={item.label}
-            role="meter"
-            aria-valuemin={0}
-            aria-valuemax={max}
-            aria-valuenow={Number.isFinite(raw) ? raw : undefined}
-            aria-label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}${
-              item.bandLabel ? `. ${item.bandLabel}` : ""
-            }`}
-            className="flex min-w-0 flex-col gap-2.5 rounded-panel border border-hairline bg-surface px-4 pb-3.5 pt-3.5"
-          >
-            <header className="flex items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-fg">
-                {item.label}
-                {item.term && <Explain term={item.term} />}
-              </span>
-              <span className={clsx("flex-shrink-0 text-xs font-semibold", TONE[item.reading.level])}>
-                {item.reading.label}
-              </span>
-            </header>
-
-            <p className="tnum flex items-baseline gap-1 font-mono text-fg">
-              <b className="text-[2rem] font-medium leading-none tracking-tight min-[1500px]:text-[2.6rem]">
-                {item.value}
-              </b>
-              {item.unit && <span className="text-base text-fg-3">{item.unit}</span>}
-            </p>
-
-            <Segments value={value} max={max} limit={item.limit} crit={item.critAt} />
-
-            <div className="flex items-center justify-between gap-2 text-xs text-fg-2">
-              <span className="tnum truncate font-mono" title={item.detail}>
-                {item.detail ?? " "}
-              </span>
-              {item.limit != null && <span className="flex-shrink-0">limite {item.limit}%</span>}
-            </div>
-
-            <SignalTrace
-              values={item.history ?? []}
-              max={item.historyMax}
-              band={item.band}
-              level={item.reading.level}
-              breachTone={item.breachTone}
-              height={34}
-              live={item.live}
-              pulseKey={item.pulseKey}
-              label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}${
-                item.bandLabel ? `. ${item.bandLabel}` : ""
-              }`}
-            />
-
-            {item.bandLabel && (
-              <p className="tnum -mt-1 truncate text-micro text-fg-3" title={item.bandLabel}>
-                {item.bandLabel}
-              </p>
-            )}
-          </article>
-        );
-      })}
+      {items.map((item) => (
+        <Vital key={item.label} item={item} />
+      ))}
     </div>
   );
 }
@@ -198,3 +138,84 @@ export function Meter({
     </div>
   );
 }
+
+/**
+ * Um sinal vital.
+ *
+ * Componente próprio por causa do número animado: a transição precisa de
+ * estado, e estado não pode nascer dentro do `map`. O valor caminha até o
+ * novo em pouco mais de 400 ms, e as barras acompanham o mesmo número — quem
+ * olha percebe o tamanho do salto antes de ler o dígito.
+ */
+function Vital({ item }: { item: VitalItem }) {
+    const max = item.historyMax ?? 100;
+    const raw = parseFloat(item.value.replace(",", "."));
+    const value = Number.isFinite(raw) ? raw : 0;
+  const animado = useCountUp(value);
+  // Mesma quantidade de casas do texto original, com vírgula: "42,3" continua
+  // com uma casa enquanto caminha, senão o número treme de largura.
+  const casas = (item.value.split(/[.,]/)[1] ?? "").length;
+  const exibido = Number.isFinite(raw)
+    ? animado.toFixed(casas).replace(".", ",")
+    : item.value;
+  return (
+      <article
+        key={item.label}
+        role="meter"
+        aria-valuemin={0}
+        aria-valuemax={max}
+        aria-valuenow={Number.isFinite(raw) ? raw : undefined}
+        aria-label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}${
+          item.bandLabel ? `. ${item.bandLabel}` : ""
+        }`}
+        className="flex min-w-0 flex-col gap-2.5 rounded-panel border border-hairline bg-surface px-4 pb-3.5 pt-3.5"
+      >
+        <header className="flex items-center justify-between gap-2">
+          <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-fg">
+            {item.label}
+            {item.term && <Explain term={item.term} />}
+          </span>
+          <span className={clsx("flex-shrink-0 text-xs font-semibold", TONE[item.reading.level])}>
+            {item.reading.label}
+          </span>
+        </header>
+
+        <p className="tnum flex items-baseline gap-1 font-mono text-fg">
+          <b className="text-[2rem] font-medium leading-none tracking-tight min-[1500px]:text-[2.6rem]">
+            {exibido}
+          </b>
+          {item.unit && <span className="text-base text-fg-3">{item.unit}</span>}
+        </p>
+
+        <Segments value={animado} max={max} limit={item.limit} crit={item.critAt} />
+
+        <div className="flex items-center justify-between gap-2 text-xs text-fg-2">
+          <span className="tnum truncate font-mono" title={item.detail}>
+            {item.detail ?? " "}
+          </span>
+          {item.limit != null && <span className="flex-shrink-0">limite {item.limit}%</span>}
+        </div>
+
+        <SignalTrace
+          values={item.history ?? []}
+          max={item.historyMax}
+          band={item.band}
+          level={item.reading.level}
+          breachTone={item.breachTone}
+          height={34}
+          live={item.live}
+          pulseKey={item.pulseKey}
+          label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}${
+            item.bandLabel ? `. ${item.bandLabel}` : ""
+          }`}
+        />
+
+        {item.bandLabel && (
+          <p className="tnum -mt-1 truncate text-micro text-fg-3" title={item.bandLabel}>
+            {item.bandLabel}
+          </p>
+        )}
+      </article>
+  );
+}
+

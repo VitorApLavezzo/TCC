@@ -51,7 +51,7 @@ export function ModelHealth({ machineId }: { machineId: number }) {
   const mudaram = drift.per_feature.filter((f) => f.distance >= 0.1).slice(0, 3);
 
   return (
-    <Section title="O normal aprendido" description="Se o que o modelo aprendeu ainda descreve esta máquina">
+    <Section className="animate-fade" title="O normal aprendido" description="Se o que o modelo aprendeu ainda descreve esta máquina">
       <Panel className="p-4">
         <div className="flex items-baseline justify-between gap-4">
           <p className="flex items-center gap-2 font-display text-sm font-semibold text-fg">

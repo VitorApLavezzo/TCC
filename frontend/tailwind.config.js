@@ -86,12 +86,22 @@ export default {
         // Respiração do indicador "ao vivo": lenta e de baixa amplitude.
         breathe: { "0%,100%": { opacity: "1" }, "50%": { opacity: "0.45" } },
         rise: { from: { opacity: "0", transform: "translateY(4px)" }, to: { opacity: "1", transform: "none" } },
+        // Conteúdo tomando o lugar do esqueleto, sem o pulo da troca seca.
+        fade: { from: { opacity: "0" }, to: { opacity: "1" } },
+        // Item que sai da lista: recolhe a própria altura enquanto some, para
+        // a lista não dar um salto sob o cursor.
+        collapse: {
+          from: { opacity: "1", maxHeight: "12rem" },
+          to: { opacity: "0", maxHeight: "0", paddingTop: "0", paddingBottom: "0" },
+        },
       },
       animation: {
         draw: "draw 700ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards",
         ping1: "ping1 1100ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards",
         breathe: "breathe 3.2s ease-in-out infinite",
         rise: "rise 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both",
+        fade: "fade 160ms cubic-bezier(0.22, 0.61, 0.36, 1) both",
+        collapse: "collapse 320ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards",
       },
     },
   },

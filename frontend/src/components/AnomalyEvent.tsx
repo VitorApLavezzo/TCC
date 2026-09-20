@@ -25,6 +25,7 @@ export function AnomalyEvent({
   onOpen,
   action,
   showDate = true,
+  className,
 }: {
   anomaly: Anomaly;
   /** Só aparece quando a lista mistura máquinas. */
@@ -33,13 +34,15 @@ export function AnomalyEvent({
   /** Ação à direita, como resolver ou reabrir. */
   action?: ReactNode;
   showDate?: boolean;
+  /** Usado pela lista para recolher o item que acabou de ser resolvido. */
+  className?: string;
 }) {
   const at = new Date(anomaly.detected_at);
   const label = ANOMALY_TYPE_LABELS[anomaly.anomaly_type] || anomaly.anomaly_type;
   const resolved = anomaly.is_resolved;
 
   return (
-    <li className="flex items-stretch gap-3">
+    <li className={`flex items-stretch gap-3 overflow-hidden ${className ?? ""}`}>
       {/* Carimbo de tempo: dado medido, então na face da máquina. */}
       <div className="w-11 flex-shrink-0 pt-3 text-right sm:w-12">
         {/* `title` com data e hora completas: o relativo serve para ler rápido,

@@ -58,6 +58,7 @@ export function Timeline({ machineId }: { machineId: number }) {
 
   return (
     <Section
+      className="animate-fade"
       title="Linha do tempo"
       description="Avisos, mudanças no sistema, ações executadas e automações — na ordem em que aconteceram"
       actions={

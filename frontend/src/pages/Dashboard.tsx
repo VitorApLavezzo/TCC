@@ -376,7 +376,15 @@ export function Dashboard() {
           }
         />
 
-        {switching ? <VitalsSkeleton /> : lm && <VitalStrip items={vitals} />}
+        {switching ? (
+          <VitalsSkeleton />
+        ) : (
+          lm && (
+            <div className="animate-fade">
+              <VitalStrip items={vitals} />
+            </div>
+          )
+        )}
 
         {/* Automação esperando uma decisão: fica no alto porque a janela de
             cancelamento é curta e vence sozinha. */}

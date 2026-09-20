@@ -21,8 +21,19 @@ export function IncidentChain({ incident }: { incident: Incident }) {
   return (
     <div>
       <ol className="relative space-y-0">
+        {/*
+          Os elos aparecem em sequência, e não de uma vez: a ordem da animação
+          é a ordem causal — disco cheio, depois memória virtual, depois
+          lentidão. É a única animação do produto que carrega o argumento, não
+          só a estética. Quem pediu menos movimento no sistema recebe tudo de
+          uma vez, pela regra global de prefers-reduced-motion.
+        */}
         {nodes.map((node, i) => (
-          <li key={node.signal} className="relative flex gap-3.5 pb-5 last:pb-0">
+          <li
+            key={node.signal}
+            className="animate-rise relative flex gap-3.5 pb-5 last:pb-0"
+            style={{ animationDelay: `${i * 130}ms` }}
+          >
             <div className="relative flex w-4 flex-shrink-0 justify-center">
               <span
                 className={`mt-1 h-[9px] w-[9px] flex-shrink-0 rotate-45 ${

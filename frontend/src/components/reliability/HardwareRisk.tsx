@@ -57,6 +57,7 @@ export function HardwareRisk({ machineId }: { machineId: number }) {
 
   return (
     <Section
+      className="animate-fade"
       title="Saúde das peças"
       description={`Chance estimada de dar problema nos próximos ${risks[0].horizon_days} dias`}
     >
