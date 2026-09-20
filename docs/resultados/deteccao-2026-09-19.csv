@@ -1,0 +1,15 @@
+cenario,rotulo,familia,esperado,detectado,veredito
+minerador,Minerador de criptomoeda,attack,suspicious_process,suspicious_process; malware_pattern; cpu_loop,acerto
+binario_de_temp,Executável sem assinatura rodando da pasta Temp,attack,malware_pattern,malware_pattern; unknown_process,acerto
+antivirus_varrendo,Antivírus fazendo varredura completa,normal,,,acerto
+jogo_pesado,Jogo exigente em tela cheia,normal,,cpu_loop,falso positivo
+backup_noturno,Backup em nuvem durante a madrugada,normal,,,acerto
+compilacao,Compilação de projeto usando todos os núcleos,normal,,high_cpu; cpu_loop,falso positivo
+atualizacao_do_sistema,Windows Update instalando atualizações,normal,,,acerto
+cpu_loop,Programa travado no processador,attack,cpu_loop,unknown_process; cpu_loop,acerto
+memory_leak,Vazamento de memória,attack,memory_leak,memory_leak,acerto
+ransomware,Sequestro de dados (ransomware),attack,ransomware_canary,malware_pattern; ransomware_canary; unknown_process,acerto
+disk_filling,Disco enchendo rápido,attack,disk_forecast,disk_space_change,escapou
+masquerade,Vírus disfarçado de svchost.exe,attack,process_masquerading,process_masquerading; malware_pattern,acerto
+beaconing,Programa contatando servidor em intervalos,attack,beaconing,,escapou
+real_20,Uso real de vitor-550XED (600 min),real,,ddos_indicator; network_spike; cpu_loop; process_surge; high_cpu; disk_space_change; behavioral_change,falso positivo
