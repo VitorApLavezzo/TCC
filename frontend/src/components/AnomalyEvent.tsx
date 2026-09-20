@@ -42,7 +42,14 @@ export function AnomalyEvent({
     <li className="flex items-stretch gap-3">
       {/* Carimbo de tempo: dado medido, então na face da máquina. */}
       <div className="w-11 flex-shrink-0 pt-3 text-right sm:w-12">
-        <p className="tnum font-mono text-xs leading-none text-fg-2">{format(at, "HH:mm", { locale: ptBR })}</p>
+        {/* `title` com data e hora completas: o relativo serve para ler rápido,
+            e quem vai registrar a ocorrência num chamado precisa do exato. */}
+        <p
+          className="tnum font-mono text-xs leading-none text-fg-2"
+          title={format(at, "EEEE, d 'de' MMMM 'de' yyyy 'às' HH:mm:ss", { locale: ptBR })}
+        >
+          {format(at, "HH:mm", { locale: ptBR })}
+        </p>
         {showDate && (
           <p className="tnum mt-1 font-mono text-micro leading-none text-fg-3">
             {format(at, "dd/MM", { locale: ptBR })}

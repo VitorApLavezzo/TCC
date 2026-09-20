@@ -11,6 +11,8 @@ import { FreshnessTag } from "../components/FreshnessTag";
 import { StaleBanner } from "../components/StaleBanner";
 import { HistoryPanel } from "../components/dashboard/HistoryPanel";
 import { PendingRuns } from "../components/automation/PendingRuns";
+import { FleetOverview } from "../components/dashboard/FleetOverview";
+import { NextSteps } from "../components/dashboard/NextSteps";
 import { PageHeader, Panel, PanelLabel, DataList, DataRow } from "../components/ui/Layout";
 import { VitalStrip, VitalItem, Meter } from "../components/ui/VitalStrip";
 import { Explain } from "../components/ui/Explain";
@@ -305,6 +307,12 @@ export function Dashboard() {
   return (
     <div className="space-y-8">
       <StaleBanner onRetry={poll.refresh} />
+
+      {/* A frota primeiro: qual computador precisa de mim agora. Só aparece
+          com dois ou mais — com um, o painel abaixo já responde. */}
+      <FleetOverview onSelect={setSelectedMachine} />
+
+      <NextSteps />
 
       <PageHeader
         title="Painel"

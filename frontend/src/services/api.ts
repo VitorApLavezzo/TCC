@@ -117,6 +117,8 @@ export const anomaliesApi = {
   step: (id: number, step_index: number, status: string, extra = false) =>
     api.patch(`/anomalies/${id}/step`, { step_index, status, extra }),
   stats: (hours = 24) => api.get(`/anomalies/stats/summary?hours=${hours}`),
+  resolveBulk: (ids: number[], is_resolved = true) =>
+    api.post("/anomalies/resolve-bulk", { ids, is_resolved }),
   blackbox: (captureId: number) => api.get(`/anomalies/blackbox/${captureId}`),
 };
 
@@ -200,6 +202,11 @@ export const evaluationApi = {
 
 /** Deriva do modelo, risco de hardware e correlação de atualizações na frota. */
 export const reliabilityApi = {
+  /** Todos os computadores com veredito, vitais e o pior aviso em aberto. */
+  fleetOverview: () => api.get("/insights/fleet/overview"),
+  /** Avisos, mudanças, ações e automações de uma máquina, num eixo só. */
+  timeline: (machineId: number, days = 30) =>
+    api.get(`/insights/machine/${machineId}/timeline`, { params: { days } }),
   drift: (machineId: number, history = false) =>
     api.get(`/insights/machine/${machineId}/drift`, { params: { history } }),
   hardwareRisk: (machineId: number) => api.get(`/insights/machine/${machineId}/hardware-risk`),

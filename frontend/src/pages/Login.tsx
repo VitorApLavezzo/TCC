@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, FormEvent } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { authApi, errorMessage } from "../services/api";
+import { useT } from "../lib/i18n";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { Wordmark } from "../components/ui/SignalMark";
@@ -14,6 +15,8 @@ export function Login() {
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState("");
+  // Primeira tela de todas: é por aqui que a tradução começa a valer.
+  const tr = useT();
   const [loading, setLoading] = useState(false);
   const googleBtnRef = useRef<HTMLDivElement>(null);
 
@@ -157,7 +160,7 @@ export function Login() {
               <button
                 type="button"
                 onClick={() => setShowPass((v) => !v)}
-                aria-label={showPass ? "Ocultar a senha" : "Mostrar a senha"}
+                aria-label={showPass ? tr("auth.hidePassword", "Ocultar a senha") : tr("auth.showPassword", "Mostrar a senha")}
                 className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-control text-fg-3 hover:text-fg"
               >
                 {showPass ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
@@ -171,7 +174,7 @@ export function Login() {
             </p>
           )}
 
-          <Button type="submit" variant="primary" loading={loading} loadingLabel="Entrando..." className="h-9 w-full">
+          <Button type="submit" variant="primary" loading={loading} loadingLabel={tr("auth.signingIn", "Entrando...")} className="h-9 w-full">
             Entrar
           </Button>
 

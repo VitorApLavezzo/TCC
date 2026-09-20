@@ -326,3 +326,116 @@ def upgrade_advice(db: Session, machine: Machine, days: int = 90) -> Dict[str, A
 
     recs.sort(key=lambda r: r["impact_pct"], reverse=True)
     return {"ready": True, "period_days": days, "anomalies_considered": len(anomalies), "recommendations": recs}
+
+
+def overview(db: Session, user_id: int) -> List[Dict[str, Any]]:
+    """Uma linha por computador, com o que decide "qual precisa de mim agora".
+
+    Antes, o painel mostrava uma máquina por vez num seletor: com uma dúzia
+    delas, responder essa pergunta exigia abrir uma por uma. Aqui vem o
+    veredito, os três vitais e o aviso mais grave em aberto, numa consulta só.
+    """
+    from app.core.labels import ANOMALY_TYPE_LABELS, SEVERITY_ORDER
+    from app.models.anomaly import Anomaly
+    from app.models.machine import Machine
+    from app.models.metric import Metric
+
+    machines = (
+        db.query(Machine)
+        .filter(Machine.owner_id == user_id, Machine.is_demo == False)  # noqa: E712
+        .order_by(Machine.name.asc())
+        .all()
+    )
+    saida: List[Dict[str, Any]] = []
+    for machine in machines:
+        leitura = (
+            db.query(Metric)
+            .filter(Metric.machine_id == machine.id)
+            .order_by(Metric.timestamp.desc())
+            .first()
+        )
+        abertos = (
+            db.query(Anomaly)
+            .filter(Anomaly.machine_id == machine.id, Anomaly.is_resolved == False)  # noqa: E712
+            .order_by(Anomaly.detected_at.desc())
+            .limit(50)
+            .all()
+        )
+        pior = max(abertos, key=lambda a: SEVERITY_ORDER.get(a.severity or "low", 1), default=None)
+        saida.append({
+            "id": machine.id,
+            "name": machine.name,
+            "os": machine.os_pretty or machine.os_type,
+            "is_active": bool(machine.is_active),
+            "last_seen": machine.last_seen,
+            "cpu": leitura.cpu_percent if leitura else None,
+            "memory": leitura.mem_percent if leitura else None,
+            "disk": leitura.disk_percent if leitura else None,
+            "last_reading_at": leitura.timestamp if leitura else None,
+            "open_count": len(abertos),
+            "worst_severity": pior.severity if pior else None,
+            "worst_label": ANOMALY_TYPE_LABELS.get(pior.anomaly_type, pior.anomaly_type) if pior else None,
+            "worst_anomaly_id": pior.id if pior else None,
+        })
+    return saida
+
+
+def timeline(db: Session, machine_id: int, days: int = 30, limit: int = 120) -> List[Dict[str, Any]]:
+    """Tudo o que aconteceu nesta máquina num eixo só.
+
+    Avisos ficavam numa aba, mudanças em outra, ações executadas numa terceira
+    e automações numa quarta. A história real é uma só — "instalaram o
+    programa, ele começou a comer memória, você fechou, voltou ao normal" —
+    e ela só aparece quando os quatro estão na mesma linha do tempo.
+    """
+    from app.core.labels import ANOMALY_TYPE_LABELS
+    from app.models.anomaly import Anomaly
+    from app.models.command import AgentCommand
+    from app.models.inventory import ChangeEvent
+    from app.models.playbook import PlaybookRun
+    from app.services.commands import COMMANDS
+
+    desde = utcnow() - timedelta(days=days)
+    eventos: List[Dict[str, Any]] = []
+
+    for a in (db.query(Anomaly)
+              .filter(Anomaly.machine_id == machine_id, Anomaly.detected_at >= desde)
+              .order_by(Anomaly.detected_at.desc()).limit(limit).all()):
+        eventos.append({
+            "kind": "anomaly", "at": a.detected_at, "id": a.id,
+            "title": ANOMALY_TYPE_LABELS.get(a.anomaly_type, a.anomaly_type),
+            "detail": a.responsible_process, "severity": a.severity,
+            "resolved": bool(a.is_resolved), "link": f"/anomalies/{a.id}",
+        })
+
+    for c in (db.query(ChangeEvent)
+              .filter(ChangeEvent.machine_id == machine_id, ChangeEvent.detected_at >= desde)
+              .order_by(ChangeEvent.detected_at.desc()).limit(limit).all()):
+        eventos.append({
+            "kind": "change", "at": c.detected_at, "id": c.id,
+            "title": c.name, "detail": (c.impact or {}).get("sentence") or c.kind,
+            "severity": None, "resolved": None, "link": None,
+        })
+
+    for cmd in (db.query(AgentCommand)
+                .filter(AgentCommand.machine_id == machine_id, AgentCommand.created_at >= desde,
+                        AgentCommand.status.in_(["done", "failed"]))
+                .order_by(AgentCommand.created_at.desc()).limit(limit).all()):
+        eventos.append({
+            "kind": "action", "at": cmd.created_at, "id": cmd.id,
+            "title": COMMANDS.get(cmd.command, (cmd.command,))[0],
+            "detail": "concluída" if cmd.status == "done" else "falhou",
+            "severity": None, "resolved": cmd.status == "done", "link": None,
+        })
+
+    for run in (db.query(PlaybookRun)
+                .filter(PlaybookRun.machine_id == machine_id, PlaybookRun.created_at >= desde)
+                .order_by(PlaybookRun.created_at.desc()).limit(limit).all()):
+        eventos.append({
+            "kind": "playbook", "at": run.created_at, "id": run.id,
+            "title": "Automação", "detail": run.detail, "severity": None,
+            "resolved": run.status == "executado", "link": None,
+        })
+
+    eventos.sort(key=lambda e: aware(e["at"]) or utcnow(), reverse=True)
+    return eventos[:limit]

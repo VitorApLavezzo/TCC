@@ -442,3 +442,56 @@ class TestBenchmarkNaoDeixaSobra:
         assert resultado.error is not None          # o cenário falhou, e isso fica registrado
         assert resultado.verdict == "erro"          # sem contaminar as métricas da rodada
         assert db.query(Machine).filter(Machine.name.like("[BENCH]%")).count() == 0
+
+
+class TestAcoesEmLote:
+    def test_resolve_varios_e_ignora_o_que_nao_e_seu(self, client, auth, machine, db):
+        from app.models.anomaly import Anomaly
+        from app.models.user import User
+
+        meus = []
+        for _ in range(3):
+            a = Anomaly(machine_id=machine["id"], anomaly_type="high_cpu", severity="medium",
+                        detected_at=utcnow())
+            db.add(a)
+            meus.append(a)
+        # Máquina de outra conta: os avisos dela não podem ser tocados
+        outro = User(email="o@o.com", username="outro", hashed_password="x")
+        db.add(outro)
+        db.flush()
+        alheia = Machine(name="Alheia", hostname="h", agent_token="tok-alheio", owner_id=outro.id)
+        db.add(alheia)
+        db.flush()
+        dela = Anomaly(machine_id=alheia.id, anomaly_type="high_cpu", severity="medium",
+                       detected_at=utcnow())
+        db.add(dela)
+        db.commit()
+
+        ids = [a.id for a in meus] + [dela.id]
+        resposta = client.post("/api/anomalies/resolve-bulk", json={"ids": ids}, headers=auth)
+        assert resposta.status_code == 200
+        assert resposta.json()["changed"] == 3
+
+        db.expire_all()
+        assert all(db.query(Anomaly).filter(Anomaly.id == a.id).first().is_resolved for a in meus)
+        assert not db.query(Anomaly).filter(Anomaly.id == dela.id).first().is_resolved
+
+
+class TestVisaoDeFrota:
+    def test_overview_traz_vitais_e_pior_aviso(self, client, auth, machine, db):
+        from app.models.anomaly import Anomaly
+
+        db.add(Metric(machine_id=machine["id"], timestamp=utcnow(), cpu_percent=91.0, mem_percent=70.0,
+                      mem_used=1, mem_available=1, mem_total=2, disk_used=1, disk_free=1, disk_percent=55.0,
+                      disk_read_bytes=0, disk_write_bytes=0, net_bytes_sent=0, net_bytes_recv=0,
+                      net_connections=10, uptime_seconds=100, process_count=100))
+        db.add(Anomaly(machine_id=machine["id"], anomaly_type="high_cpu", severity="critical",
+                       detected_at=utcnow()))
+        db.commit()
+
+        dados = client.get("/api/insights/fleet/overview", headers=auth).json()["machines"]
+        assert len(dados) == 1
+        linha = dados[0]
+        assert linha["cpu"] == 91.0 and linha["disk"] == 55.0
+        assert linha["open_count"] == 1
+        assert linha["worst_severity"] == "critical"

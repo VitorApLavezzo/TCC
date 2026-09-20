@@ -94,3 +94,17 @@ def fleet_changes(days: int = Query(45, ge=7, le=180), db: Session = Depends(get
     """Atualizações que pioraram várias máquinas ao mesmo tempo."""
     from app.services import change_correlation
     return {"findings": change_correlation.analyze(db, user.id, days)}
+
+
+@router.get("/fleet/overview")
+def fleet_overview(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Todos os computadores da conta com veredito, vitais e o pior aviso aberto."""
+    return {"machines": fleet.overview(db, user.id)}
+
+
+@router.get("/machine/{machine_id}/timeline")
+def machine_timeline(machine_id: int, days: int = Query(30, ge=1, le=180),
+                     db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Avisos, mudanças, ações e automações desta máquina num eixo só."""
+    machine = _machine(db, machine_id, user)
+    return {"events": fleet.timeline(db, machine.id, days)}

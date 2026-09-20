@@ -94,7 +94,10 @@ export function AuditLedger() {
       )}
 
       {entries.length === 0 ? (
-        <p className="text-sm text-fg-3">Nada registrado ainda.</p>
+        <p className="max-w-prose text-sm leading-relaxed text-fg-2">
+          Nada lacrado ainda. O primeiro registro entra sozinho quando um aviso for criado ou uma ação
+          for executada num computador seu.
+        </p>
       ) : (
         <ul className="divide-y divide-hairline">
           {entries.map((e) => (

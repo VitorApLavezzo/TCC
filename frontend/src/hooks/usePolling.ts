@@ -61,8 +61,20 @@ export function usePolling(callback: () => Promise<void> | void, intervalMs: num
       return;
     }
     run();
-    const id = setInterval(run, intervalMs);
-    return () => clearInterval(id);
+    // Aba em segundo plano não precisa de dado novo: três laços de polling
+    // mais o WebSocket batendo no servidor enquanto ninguém olha gastam
+    // bateria do celular e fila do backend à toa. Ao voltar, busca na hora.
+    const id = setInterval(() => {
+      if (!document.hidden) run();
+    }, intervalMs);
+    const aoVoltar = () => {
+      if (!document.hidden) run();
+    };
+    document.addEventListener("visibilitychange", aoVoltar);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", aoVoltar);
+    };
   }, [run, intervalMs, enabled, tick]);
 
   const refresh = useCallback(() => setTick((t) => t + 1), []);

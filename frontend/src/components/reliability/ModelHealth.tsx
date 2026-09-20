@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { reliabilityApi } from "../../services/api";
 import { Section, Panel, StatusDot } from "../ui/Layout";
 import { Skeleton } from "../ui/Skeleton";
+import { LoadError } from "../ui/LoadError";
 
 type Feature = { key: string; label: string; distance: number; media_treino: number; media_recente: number };
 type Drift = {
@@ -27,19 +28,21 @@ const TONE: Record<string, "ok" | "warn" | "crit"> = { ok: "ok", warn: "warn", c
 export function ModelHealth({ machineId }: { machineId: number }) {
   const [drift, setDrift] = useState<Drift | null>(null);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState(false);
 
   useEffect(() => {
     let vivo = true;
     reliabilityApi
       .drift(machineId)
       .then((r) => vivo && setDrift(r.data?.current ?? null))
-      .catch(() => vivo && setDrift(null))
+      .catch(() => vivo && setErro(true))
       .finally(() => vivo && setLoading(false));
     return () => {
       vivo = false;
     };
   }, [machineId]);
 
+  if (erro) return <LoadError what="a saúde do modelo desta máquina" onRetry={() => window.location.reload()} />;
   if (loading) return <Skeleton className="h-24" />;
   // Sem medição ainda (histórico curto): a tela não precisa de uma caixa
   // dizendo que não sabe.

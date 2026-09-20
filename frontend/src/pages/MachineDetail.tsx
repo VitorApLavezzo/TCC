@@ -14,8 +14,15 @@ import { ptBR } from "date-fns/locale";
 import { ArrowLeft } from "lucide-react";
 import { ModelHealth } from "../components/reliability/ModelHealth";
 import { HardwareRisk } from "../components/reliability/HardwareRisk";
+import { Timeline } from "../components/reliability/Timeline";
+
+/** A história desta máquina: avisos, mudanças, ações e automações juntos. */
+function TimelineTab({ machineId }: { machineId: number }) {
+  return <Timeline machineId={machineId} />;
+}
 
 const TABS = [
+  { id: "linha", label: "Linha do tempo" },
   { id: "previsoes", label: "Previsões" },
   { id: "saude", label: "Saúde" },
   { id: "diario", label: "Diário" },
@@ -44,7 +51,7 @@ export function MachineDetail() {
   const machineId = Number(id);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const tab = params.get("aba") || "previsoes";
+  const tab = params.get("aba") || "linha";
   const [machine, setMachine] = useState<Machine | null>(null);
 
   useEffect(() => {
@@ -75,6 +82,7 @@ export function MachineDetail() {
         ))}
       </div>
 
+      {tab === "linha" && <TimelineTab machineId={machineId} />}
       {tab === "previsoes" && <ForecastTab machineId={machineId} />}
       {tab === "saude" && <HealthTab machineId={machineId} />}
       {tab === "diario" && <DiaryTab machineId={machineId} />}

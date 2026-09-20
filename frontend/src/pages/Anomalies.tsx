@@ -11,6 +11,7 @@ import { ListSkeleton } from "../components/ui/Skeleton";
 import { StaleBanner } from "../components/StaleBanner";
 import { useToast } from "../components/ui/Toast";
 import { pluralize, processName } from "../lib/format";
+import { useUrlState } from "../hooks/useUrlState";
 import { X } from "lucide-react";
 
 const PAGE_SIZE = 25;
@@ -34,13 +35,20 @@ export function Anomalies() {
   const toast = useToast();
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
-  const [machineId, setMachineId] = useState<number | null>(null);
-  const [severity, setSeverity] = useState("");
-  const [hours, setHours] = useState(72);
-  const [unresolvedOnly, setUnresolvedOnly] = useState(false);
-  const [query, setQuery] = useState("");
-  const [page, setPage] = useState(1);
+  // Filtros na URL, não no componente: recarregar mantém a visão, o endereço
+  // pode ser mandado para alguém e o botão Voltar desfaz o filtro em vez de
+  // sair da página.
+  const [machineParam, setMachineParam] = useUrlState<string>("computador", "");
+  const [severity, setSeverity] = useUrlState<string>("gravidade", "");
+  const [hours, setHours] = useUrlState<number>("periodo", 72);
+  const [unresolvedOnly, setUnresolvedOnly] = useUrlState<boolean>("abertos", false);
+  const [query, setQuery] = useUrlState<string>("busca", "");
+  const [page, setPage] = useUrlState<number>("pagina", 1);
+  const machineId = machineParam ? Number(machineParam) : null;
+  const setMachineId = (id: number | null) => setMachineParam(id ? String(id) : "");
   const [resolving, setResolving] = useState<number | null>(null);
+  const [selecionados, setSelecionados] = useState<number[]>([]);
+  const [emLote, setEmLote] = useState(false);
 
   useEffect(() => {
     machinesApi
@@ -66,9 +74,26 @@ export function Anomalies() {
 
   const poll = usePolling(fetchAnomalies, 30000);
 
+  // Voltar de um aviso devolvia a lista ao topo: com a página na URL, faltava
+  // só a altura da rolagem para a pessoa continuar de onde parou.
+  useEffect(() => {
+    const chave = "anomaliesScroll";
+    const salvo = sessionStorage.getItem(chave);
+    if (salvo) window.scrollTo(0, Number(salvo));
+    const guardar = () => sessionStorage.setItem(chave, String(window.scrollY));
+    window.addEventListener("pagehide", guardar);
+    return () => {
+      guardar();
+      window.removeEventListener("pagehide", guardar);
+    };
+  }, []);
+
   // Mudança de filtro volta à primeira página, senão a pessoa fica numa página
   // que já não existe no novo resultado.
-  useEffect(() => setPage(1), [machineId, hours, severity, unresolvedOnly, query]);
+  useEffect(() => {
+    setPage(1);
+    setSelecionados([]);
+  }, [machineId, hours, severity, unresolvedOnly, query]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -129,6 +154,39 @@ export function Anomalies() {
 
   const openCount = anomalies.filter((a) => !a.is_resolved).length;
 
+  const alternar = (id: number) =>
+    setSelecionados((atual) => (atual.includes(id) ? atual.filter((x) => x !== id) : [...atual, id]));
+
+  const selecionarPagina = () => {
+    const ids = pageItems.filter((a) => !a.is_resolved).map((a) => a.id);
+    setSelecionados((atual) => (ids.every((id) => atual.includes(id)) ? [] : ids));
+  };
+
+  // Em lote a confirmação vem depois, não antes: a ação é reversível, e
+  // perguntar "tem certeza?" a cada limpeza de lista é atrito puro.
+  const resolverLote = async (reabrir = false) => {
+    const ids = [...selecionados];
+    if (ids.length === 0) return;
+    setEmLote(true);
+    try {
+      await anomaliesApi.resolveBulk(ids, !reabrir);
+      await fetchAnomalies();
+      setSelecionados([]);
+      toast.undoable(
+        `${pluralize(ids.length, "aviso", "avisos")} ${reabrir ? "reaberto(s)" : "resolvido(s)"}.`,
+        "Desfazer",
+        async () => {
+          await anomaliesApi.resolveBulk(ids, reabrir);
+          fetchAnomalies();
+        }
+      );
+    } catch (err) {
+      toast.error(errorMessage(err, "Não foi possível mudar os avisos selecionados."));
+    } finally {
+      setEmLote(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <StaleBanner onRetry={poll.refresh} />
@@ -142,9 +200,31 @@ export function Anomalies() {
         }
       />
 
-      {/* Barra de filtros: uma linha só, controles do mesmo tamanho. */}
+      {selecionados.length > 0 && (
+        <div className="sticky top-16 z-20 flex flex-wrap items-center justify-between gap-3 rounded-panel border border-edge bg-raised px-4 py-2.5 lg:top-2">
+          <p className="text-sm text-fg">
+            {pluralize(selecionados.length, "aviso selecionado", "avisos selecionados")}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="primary" loading={emLote} onClick={() => resolverLote(false)}>
+              Marcar como resolvidos
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => resolverLote(true)}>
+              Reabrir
+            </Button>
+            <Button size="sm" variant="quiet" onClick={() => setSelecionados([])}>
+              Limpar seleção
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Barra de filtros: uma linha só, com rótulo em cima de cada controle —
+          quatro seletores lado a lado sem nome exigiam adivinhar pelo valor. */}
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1">
+            <span className="channel-label">Buscar</span>
           <input
             type="search"
             value={query}
@@ -153,6 +233,9 @@ export function Anomalies() {
             aria-label="Buscar avisos"
             className="h-8 min-w-[220px] flex-1 rounded-control border border-edge bg-surface px-2.5 text-sm text-fg placeholder:text-fg-3 focus:border-accent"
           />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="channel-label">Período</span>
           <select
             value={hours}
             onChange={(e) => setHours(Number(e.target.value))}
@@ -165,6 +248,9 @@ export function Anomalies() {
               </option>
             ))}
           </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="channel-label">Gravidade</span>
           <select
             value={severity}
             onChange={(e) => setSeverity(e.target.value)}
@@ -178,7 +264,10 @@ export function Anomalies() {
               </option>
             ))}
           </select>
+          </label>
           {machines.length > 1 && (
+            <label className="flex flex-col gap-1">
+              <span className="channel-label">Computador</span>
             <select
               value={machineId ?? ""}
               onChange={(e) => setMachineId(e.target.value ? Number(e.target.value) : null)}
@@ -192,6 +281,7 @@ export function Anomalies() {
                 </option>
               ))}
             </select>
+            </label>
           )}
           <label className="flex h-8 cursor-pointer items-center gap-2 px-1 text-sm text-fg-2">
             <input
@@ -245,12 +335,26 @@ export function Anomalies() {
         )
       ) : (
         <div className="space-y-4">
-          <p className="tnum text-xs text-fg-3">
-            {filtered.length === anomalies.length
-              ? pluralize(filtered.length, "aviso", "avisos")
-              : `${filtered.length} de ${anomalies.length} avisos`}
-            {totalPages > 1 && ` · página ${page} de ${totalPages}`}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="tnum text-xs text-fg-3">
+              {filtered.length === anomalies.length
+                ? pluralize(filtered.length, "aviso", "avisos")
+                : `${filtered.length} de ${anomalies.length} avisos`}
+              {totalPages > 1 && ` · página ${page} de ${totalPages}`}
+            </p>
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-fg-3 hover:text-fg-2">
+              <input
+                type="checkbox"
+                checked={
+                  pageItems.some((a) => !a.is_resolved) &&
+                  pageItems.filter((a) => !a.is_resolved).every((a) => selecionados.includes(a.id))
+                }
+                onChange={selecionarPagina}
+                className="h-3.5 w-3.5 rounded border-edge bg-surface accent-accent"
+              />
+              Selecionar os em aberto desta página
+            </label>
+          </div>
 
           {/*
             A mesma fita de eventos do painel: horário à esquerda, tique na
@@ -265,16 +369,27 @@ export function Anomalies() {
                 machineName={machines.length > 1 ? machineName(a.machine_id) : undefined}
                 onOpen={() => navigate(`/anomalies/${a.id}`)}
                 action={
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    loading={resolving === a.id}
-                    loadingLabel="..."
-                    onClick={(e) => handleResolve(e, a)}
-                    aria-label={a.is_resolved ? "Reabrir este aviso" : "Marcar este aviso como resolvido"}
-                  >
-                    {a.is_resolved ? "Reabrir" : "Resolver"}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <label className="flex cursor-pointer items-center p-1" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selecionados.includes(a.id)}
+                        onChange={() => alternar(a.id)}
+                        aria-label={`Selecionar o aviso de ${ANOMALY_TYPE_LABELS[a.anomaly_type] || a.anomaly_type}`}
+                        className="h-3.5 w-3.5 rounded border-edge bg-surface accent-accent"
+                      />
+                    </label>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      loading={resolving === a.id}
+                      loadingLabel="..."
+                      onClick={(e) => handleResolve(e, a)}
+                      aria-label={a.is_resolved ? "Reabrir este aviso" : "Marcar este aviso como resolvido"}
+                    >
+                      {a.is_resolved ? "Reabrir" : "Resolver"}
+                    </Button>
+                  </div>
                 }
               />
             ))}

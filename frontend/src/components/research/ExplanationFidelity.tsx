@@ -47,7 +47,7 @@ export function ExplanationFidelity({ days = 90 }: { days?: number }) {
         />
       ) : (
         <>
-          <div className="overflow-x-auto">
+          <div className="scroll-hint overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-hairline text-left text-micro uppercase tracking-wide text-fg-3">

@@ -11,6 +11,8 @@ interface Toast {
   message: string;
   /** O que a pessoa pode fazer a respeito. Erros sempre trazem um. */
   hint?: string;
+  /** Ação reversível: "Desfazer" no próprio aviso. */
+  undo?: { label: string; run: () => void };
 }
 
 interface Ctx {
@@ -18,6 +20,12 @@ interface Ctx {
   success: (message: string, hint?: string) => void;
   error: (message: string, hint?: string) => void;
   info: (message: string, hint?: string) => void;
+  /**
+   * Confirmação com volta. Substitui o diálogo modal onde a ação é
+   * reversível: em vez de perguntar antes ("tem certeza?"), faz e deixa
+   * desfazer — menos atrito, mesma rede de segurança.
+   */
+  undoable: (message: string, undoLabel: string, run: () => void) => void;
 }
 
 const ToastCtx = createContext<Ctx | null>(null);
@@ -42,14 +50,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setItems((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const toast = useCallback(
-    (kind: Kind, message: string, hint?: string) => {
+  const push = useCallback(
+    (kind: Kind, message: string, hint?: string, undo?: Toast["undo"]) => {
       const id = ++seq.current;
-      setItems((prev) => [...prev.slice(-2), { id, kind, message, hint }]);
+      setItems((prev) => [...prev.slice(-2), { id, kind, message, hint, undo }]);
       // Erros ficam mais tempo: costumam pedir leitura, não só ciência.
-      setTimeout(() => dismiss(id), kind === "error" ? 9000 : 5000);
+      // Com "desfazer", a janela é maior ainda: é o único momento em que a
+      // volta existe.
+      setTimeout(() => dismiss(id), undo ? 10000 : kind === "error" ? 9000 : 5000);
     },
     [dismiss]
+  );
+
+  const toast = useCallback(
+    (kind: Kind, message: string, hint?: string) => push(kind, message, hint),
+    [push]
   );
 
   const api = useMemo<Ctx>(
@@ -58,8 +73,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       success: (m, h) => toast("success", m, h),
       error: (m, h) => toast("error", m, h),
       info: (m, h) => toast("info", m, h),
+      undoable: (m, label, run) => push("success", m, undefined, { label, run }),
     }),
-    [toast]
+    [push, toast]
   );
 
   return (
@@ -80,6 +96,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-fg">{t.message}</p>
               {t.hint && <p className="mt-1 text-xs leading-relaxed text-fg-2">{t.hint}</p>}
+              {t.undo && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    t.undo?.run();
+                    dismiss(t.id);
+                  }}
+                  className="mt-1.5 rounded text-xs font-semibold text-accent underline-offset-2 hover:underline"
+                >
+                  {t.undo.label}
+                </button>
+              )}
             </div>
             <button
               type="button"

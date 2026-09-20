@@ -137,3 +137,66 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+@layer base {
+  /*
+   * Tamanho da letra e densidade, escolhidos na Conta.
+   *
+   * A escala mexe na raiz, e todo o produto usa rem: subir um degrau aumenta
+   * texto, alvos de toque e espaçamento juntos, sem quebrar o alinhamento —
+   * que é o que aconteceria aumentando só a fonte.
+   */
+  html[data-scale="grande"] {
+    font-size: 17.6px;
+  }
+  html[data-scale="maior"] {
+    font-size: 19.2px;
+  }
+  html[data-density="confortavel"] body {
+    line-height: 1.65;
+  }
+  html[data-density="confortavel"] .tnum {
+    letter-spacing: 0.01em;
+  }
+
+  /*
+   * Rolagem horizontal com pista: uma tabela cortada na borda do celular
+   * parece uma tabela que termina ali. O degradê à direita diz que continua.
+   */
+  .scroll-hint {
+    background:
+      linear-gradient(to right, rgb(var(--surface)), transparent) left / 24px 100% no-repeat,
+      linear-gradient(to left, rgb(var(--surface)), transparent) right / 24px 100% no-repeat;
+    background-attachment: local, local;
+  }
+
+  /*
+   * Impressão: um aviso vira documento entregável (chamado, laudo, anexo).
+   * Some tudo que só serve para interagir e o fundo escuro vira papel branco.
+   */
+  @media print {
+    :root {
+      --canvas: 255 255 255;
+      --surface: 255 255 255;
+      --raised: 255 255 255;
+      --fg: 0 0 0;
+      --fg-2: 40 40 40;
+      --fg-3: 90 90 90;
+    }
+    nav, aside, header, button, .no-print {
+      display: none !important;
+    }
+    main {
+      padding: 0 !important;
+    }
+    a[href]::after {
+      content: "";
+    }
+    details {
+      display: block !important;
+    }
+    details > summary {
+      display: none !important;
+    }
+  }
+}

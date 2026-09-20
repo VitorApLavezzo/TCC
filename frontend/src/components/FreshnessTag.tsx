@@ -38,9 +38,13 @@ export function FreshnessTag({
     return <Tag tone="idle">Aguardando a primeira leitura</Tag>;
   }
 
+  // Horário exato no title: "há 2 min" é o que se lê, mas a hora cheia é o
+  // que se anota.
+  const exato = lastMetricAt ? new Date(lastMetricAt).toLocaleString("pt-BR") : undefined;
+
   if (age < STALE_AFTER_MS) {
     return (
-      <Tag tone="ok" breathing={wsStatus === "open"}>
+      <Tag tone="ok" breathing={wsStatus === "open"} title={exato}>
         {wsStatus === "open" ? (
           <>
             Ao vivo
@@ -54,7 +58,7 @@ export function FreshnessTag({
   }
 
   return (
-    <Tag tone="warn">
+    <Tag tone="warn" title={exato}>
       Sem leitura {timeAgo(lastMetricAt, now)}
       <Explain text="Este computador parou de enviar dados. Pode estar desligado, sem internet, ou o agente foi encerrado." />
     </Tag>
@@ -70,13 +74,16 @@ function Tag({
   children,
   tone,
   breathing,
+  title,
 }: {
   children: React.ReactNode;
   tone: "ok" | "warn" | "idle";
   breathing?: boolean;
+  /** Horário exato da leitura, para quem precisa anotar. */
+  title?: string;
 }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-fg-2">
+    <span title={title} className="inline-flex items-center gap-1.5 text-xs text-fg-2">
       {breathing ? <LiveDot tone="ok" breathing /> : <StatusDot tone={tone} />}
       {children}
     </span>

@@ -3,6 +3,7 @@ import { reliabilityApi } from "../../services/api";
 import { Section, Panel, StatusDot } from "../ui/Layout";
 import { Disclosure } from "../ui/Disclosure";
 import { Skeleton } from "../ui/Skeleton";
+import { LoadError } from "../ui/LoadError";
 
 type Factor = { peso: number; titulo: string; detalhe: string };
 type Risk = {
@@ -35,19 +36,21 @@ const TONE: Record<string, "ok" | "warn" | "crit"> = {
 export function HardwareRisk({ machineId }: { machineId: number }) {
   const [risks, setRisks] = useState<Risk[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState(false);
 
   useEffect(() => {
     let vivo = true;
     reliabilityApi
       .hardwareRisk(machineId)
       .then((r) => vivo && setRisks(r.data?.risks ?? []))
-      .catch(() => vivo && setRisks([]))
+      .catch(() => vivo && setErro(true))
       .finally(() => vivo && setLoading(false));
     return () => {
       vivo = false;
     };
   }, [machineId]);
 
+  if (erro) return <LoadError what="o risco de falha das peças" onRetry={() => window.location.reload()} />;
   if (loading) return <Skeleton className="h-24" />;
   // Sem SMART nem bateria (uma máquina virtual, por exemplo) não há o que dizer.
   if (!risks || risks.length === 0) return null;

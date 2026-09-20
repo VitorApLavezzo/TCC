@@ -377,7 +377,18 @@ export function AnomalyDetail() {
               Gere um link temporário e somente leitura com tudo deste aviso — números, explicação, o que já foi
               tentado — para mandar a quem vai te ajudar. Quem receber não precisa de conta.
             </p>
-            <ShareButton anomalyId={anomaly.id} />
+            <div className="flex flex-wrap gap-2">
+              <ShareButton anomalyId={anomaly.id} />
+              {/*
+                Imprimir resolve o caso em que o link não serve: anexar a um
+                chamado, entregar impresso, guardar um PDF que não depende do
+                servidor estar no ar. O CSS de impressão já abre os blocos
+                recolhidos e tira menu e botões da folha.
+              */}
+              <Button variant="quiet" onClick={() => window.print()}>
+                Imprimir ou salvar em PDF
+              </Button>
+            </div>
           </div>
         </Disclosure>
       </div>

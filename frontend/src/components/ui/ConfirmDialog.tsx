@@ -23,6 +23,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [request, setRequest] = useState<Request | null>(null);
   const resolverRef = useRef<Resolver | null>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const confirm = useCallback((req: Request) => {
     setRequest(req);
@@ -38,13 +39,39 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Foco inicial no "Cancelar" e Esc cancela: numa ação destrutiva o caminho
-  // seguro precisa ser o padrão.
+  // seguro precisa ser o padrão. O Tab fica preso dentro do diálogo e o foco
+  // volta para o botão que o abriu quando ele fecha — sem isso, quem navega
+  // por teclado sai para a página atrás, que está inerte, e se perde.
   useEffect(() => {
     if (!request) return;
+    const anterior = document.activeElement as HTMLElement | null;
     cancelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && settle(false);
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        settle(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const foco = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (!foco || foco.length === 0) return;
+      const primeiro = foco[0];
+      const ultimo = foco[foco.length - 1];
+      if (e.shiftKey && document.activeElement === primeiro) {
+        e.preventDefault();
+        ultimo.focus();
+      } else if (!e.shiftKey && document.activeElement === ultimo) {
+        e.preventDefault();
+        primeiro.focus();
+      }
+    };
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      anterior?.focus?.();
+    };
   }, [request, settle]);
 
   return (
@@ -56,6 +83,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           onMouseDown={(e) => e.target === e.currentTarget && settle(false)}
         >
           <div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="confirm-title"

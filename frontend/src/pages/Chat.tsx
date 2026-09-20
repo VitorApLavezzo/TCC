@@ -147,17 +147,54 @@ export function Chat() {
           e.preventDefault();
           send(input);
         }}
-        className="mt-3 flex items-center gap-2 border-t border-hairline pt-3"
+        className="mt-3 border-t border-hairline pt-3"
       >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Escreva sua pergunta…"
-          className="h-10 flex-1 rounded-control border border-edge bg-surface px-3 text-sm text-fg placeholder:text-fg-3 focus:border-accent"
-        />
-        <Button variant="primary" type="submit" disabled={!input.trim() || sending} icon={<Send size={14} aria-hidden="true" />}>
-          Enviar
-        </Button>
+        {/*
+          As sugestões ficavam só na tela vazia e sumiam depois da primeira
+          resposta — justo quando a pessoa ainda não sabe o que mais dá para
+          perguntar. Aqui elas continuam disponíveis, discretas.
+        */}
+        {messages.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {suggestions.slice(0, 3).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => send(s)}
+                disabled={sending}
+                className="rounded-full border border-hairline px-2.5 py-1 text-micro text-fg-3 transition-colors hover:border-edge hover:text-fg-2"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex items-end gap-2">
+          {/*
+            Campo que cresce até cinco linhas: perguntar "por que o computador
+            fica lento toda segunda de manhã depois que instalei o X?" numa
+            caixa de uma linha é escrever às cegas. Enter envia, Shift+Enter
+            quebra a linha — a convenção que todo aplicativo de conversa usa.
+          */}
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send(input);
+              }
+            }}
+            rows={1}
+            placeholder="Escreva sua pergunta…  (Enter envia, Shift+Enter quebra a linha)"
+            aria-label="Sua pergunta"
+            className="max-h-32 min-h-[40px] flex-1 resize-none rounded-control border border-edge bg-surface px-3 py-2 text-sm leading-relaxed text-fg placeholder:text-fg-3 focus:border-accent"
+            style={{ height: `${Math.min(128, 40 + (input.match(/\n/g)?.length ?? 0) * 20)}px` }}
+          />
+          <Button variant="primary" type="submit" disabled={!input.trim() || sending} icon={<Send size={14} aria-hidden="true" />}>
+            Enviar
+          </Button>
+        </div>
       </form>
     </div>
   );
