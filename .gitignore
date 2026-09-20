@@ -17,6 +17,9 @@ node_modules/
 dist/
 .vite/
 
+# Documentacao e resultados do TCC (ficam so na maquina)
+docs/
+
 # Logs
 *.log
 
