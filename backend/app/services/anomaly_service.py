@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core.labels import (
-    LEARNING_EXEMPT, PERFORMANCE_TYPES, PROCESS_SPECIFIC_TYPES, SECURITY_TYPES, SEVERITY_ORDER,
+    LEARNING_EXEMPT, PERFORMANCE_TYPES, SECURITY_TYPES, SEVERITY_ORDER,
 )
 from app.core.timeutil import aware, local_time, tz_offset_minutes, utcnow
 from app.models.anomaly import Anomaly
@@ -91,19 +91,78 @@ class Candidate:
     cooldown_minutes: int = ANOMALY_COOLDOWN_MINUTES
 
 
-def _recent_anomaly_exists(machine_id: int, anomaly_type: str, db: Session,
-                           process: Optional[str] = None, minutes: int = ANOMALY_COOLDOWN_MINUTES) -> bool:
-    """Evita criar anomalia duplicada do mesmo tipo (e do mesmo programa) em sequência."""
+# Repetir tanto assim dentro da janela deixa de ser repetição e vira o
+# acontecimento: sobe um nível e avisa, uma vez.
+ESCALATION_OCCURRENCES = 10
+
+
+def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
+                    minutes: int = ANOMALY_COOLDOWN_MINUTES) -> Optional[Anomaly]:
+    """O aviso vivo deste tipo nesta máquina, para somar a repetição nele.
+
+    A chave é `(máquina, tipo)` — não `(máquina, tipo, programa)`, como era. A
+    regra antiga dizia "dois programas desconhecidos diferentes são dois
+    avisos, não um repetido": certa na intenção, errada no efeito. Como o
+    detector devolve o primeiro programa que casa e para, cada coleta acusava
+    um programa diferente e nenhuma caía no intervalo entre repetidos — eram
+    vinte linhas de "Processo Desconhecido" em três minutos. O programa não se
+    perde: vira item de `affected_metrics["programas"]`.
+    """
     cutoff = utcnow() - timedelta(minutes=minutes)
-    query = db.query(Anomaly).filter(
-        Anomaly.machine_id == machine_id,
-        Anomaly.anomaly_type == anomaly_type,
-        Anomaly.detected_at >= cutoff,
-        Anomaly.is_resolved == False,  # noqa: E712
+    return (
+        db.query(Anomaly)
+        .filter(
+            Anomaly.machine_id == machine_id,
+            Anomaly.anomaly_type == anomaly_type,
+            Anomaly.detected_at >= cutoff,
+            Anomaly.is_resolved == False,  # noqa: E712
+        )
+        .order_by(Anomaly.detected_at.desc())
+        .first()
     )
-    if process and anomaly_type in PROCESS_SPECIFIC_TYPES:
-        query = query.filter(Anomaly.responsible_process == process)
-    return query.first() is not None
+
+
+def absorb(db: Session, existing: Anomaly, c: Candidate, now) -> Anomaly:
+    """Soma a repetição no aviso que já existe, em vez de criar outro.
+
+    `detected_at` não muda: o aviso continua datado de quando o problema
+    começou, e `last_seen_at` guarda a ocorrência mais recente.
+    """
+    existing.occurrences = (existing.occurrences or 1) + 1
+    existing.last_seen_at = now
+
+    affected = dict(existing.affected_metrics or {})
+    programas = list(affected.get("programas") or [])
+    for nome in (existing.responsible_process, c.responsible):
+        if nome and nome not in programas:
+            programas.append(nome)
+    affected["programas"] = programas
+
+    # A severidade do conjunto é a maior vista: um aviso crítico entrando na
+    # agregação puxa para cima em vez de se diluir entre os brandos.
+    if SEVERITY_ORDER.get(c.severity, 0) > SEVERITY_ORDER.get(existing.severity, 0):
+        existing.severity = c.severity
+
+    escalou = False
+    if existing.occurrences >= ESCALATION_OCCURRENCES and not affected.get("_escalado"):
+        existing.severity = _PROMOTE.get(existing.severity, existing.severity)
+        affected["_escalado"] = True
+        escalou = True
+
+    # Dicionário novo, não mutação: o SQLAlchemy não enxerga alteração dentro
+    # de uma coluna JSON existente e a gravação se perderia em silêncio.
+    existing.affected_metrics = affected
+    db.commit()
+
+    if escalou:
+        # A explicação da IA não é refeita a cada ocorrência — seriam dezenas
+        # de chamadas ao modelo por um texto que ninguém lê duas vezes. Só aqui.
+        try:
+            from app.services import notifications
+            notifications.on_anomaly(db, existing)
+        except Exception as e:
+            print(f"[AnomalyService] Escalada do aviso #{existing.id} não notificada: {e}")
+    return existing
 
 
 def focus_mode_active(machine: Machine, now=None) -> bool:
@@ -111,17 +170,20 @@ def focus_mode_active(machine: Machine, now=None) -> bool:
     return bool(until and until > (now or utcnow()))
 
 
-def filter_reason(db: Session, machine: Machine, c: Candidate, now, local_hour: int) -> Optional[str]:
-    """Por que este candidato não deve virar aviso — ou None se deve."""
+def filter_reason(db: Session, machine: Machine, c: Candidate, now,
+                  local_hour: int) -> Tuple[Optional[str], Optional[Anomaly]]:
+    """Por que este candidato não deve virar aviso novo, e em qual aviso vivo
+    ele deve ser somado — (None, None) quando deve nascer sozinho."""
     if c.anomaly_type in PERFORMANCE_TYPES and focus_mode_active(machine, now):
-        return "modo atividade pesada"
+        return "modo atividade pesada", None
     rule = feedback.matching_rule(db, machine.id, c.anomaly_type, c.responsible, local_hour)
     if rule:
         rule.hits = (rule.hits or 0) + 1
-        return f"regra #{rule.id}"
-    if _recent_anomaly_exists(machine.id, c.anomaly_type, db, c.responsible, c.cooldown_minutes):
-        return "aviso igual recente"
-    return None
+        return f"regra #{rule.id}", None
+    existing = _recent_anomaly(machine.id, c.anomaly_type, db, c.cooldown_minutes)
+    if existing is not None:
+        return "aviso igual recente", existing
+    return None, None
 
 
 def _normalize_process_name(name: Optional[str]) -> Optional[str]:
@@ -147,7 +209,9 @@ def persist_candidate(
     c.responsible = _normalize_process_name(c.responsible)
     if not skip_filters:
         hour = local_time(now, tz_offset_minutes(machine)).hour
-        reason = filter_reason(db, machine, c, now, hour)
+        reason, existing = filter_reason(db, machine, c, now, hour)
+        if existing is not None:
+            return absorb(db, existing, c, now)
         if reason:
             db.commit()
             return None
@@ -321,8 +385,12 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     allowed: List[Candidate] = []
     related: List[Dict[str, Any]] = []
     for c in candidates:
-        reason = filter_reason(db, machine, c, now, local_hour)
-        if reason:
+        reason, existing = filter_reason(db, machine, c, now, local_hour)
+        if existing is not None:
+            absorb(db, existing, c, now)
+            related.append({"type": c.anomaly_type, "severity": c.severity, "process": c.responsible,
+                            "suppressed": "somado ao aviso aberto"})
+        elif reason:
             related.append({"type": c.anomaly_type, "severity": c.severity, "process": c.responsible,
                             "suppressed": reason})
         else:
