@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # comparado com score_samples, que fica perto de -0.45 em leituras normais —
     # na prática toda leitura era "anômala".
     ML_ALERT_PERCENTILE: float = 0.5
+    # Quanto do caminho até o limite de alerta a leitura anterior precisa ter
+    # andado para confirmar a atual. 1,0 exigiria duas leituras de alerta pleno
+    # (mata a revocação); 0,0 volta ao comportamento antigo de comparar com zero.
+    ML_CONFIRM_FACTOR: float = 0.5
     MIN_TRAINING_SAMPLES: int = 100
     # 3% de contaminação: menos alarmes falsos que os 5% originais
     ISOLATION_FOREST_CONTAMINATION: float = 0.03

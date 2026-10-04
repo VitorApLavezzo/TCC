@@ -252,6 +252,33 @@ def predict_anomaly(
     return score < threshold, score
 
 
+def alert_threshold(machine_id: int, sensitivity: float = 1.0) -> Optional[float]:
+    """Limite de alerta desta máquina, com a sensibilidade já aplicada.
+
+    O mesmo cálculo que `predict_anomaly` faz por dentro, exposto para quem
+    precisa da régua: a confirmação de duas leituras e a confiança pela margem.
+    `_load_bundle` tem cache em memória, então não custa uma leitura de disco.
+    """
+    bundle = _load_bundle(machine_id)
+    if bundle is None:
+        return None
+    return bundle["threshold"] * max(sensitivity, 0.5)
+
+
+def confidence_from_score(score: Optional[float], threshold: Optional[float]) -> Optional[float]:
+    """Quanto a nota passou do limite: 0 encostou, 1 estourou.
+
+    É isto que faz a gravidade do modelo responder ao tamanho do desvio. Antes
+    a severidade saía de limiar fixo (CPU > 90 -> alta) e uma leitura que
+    encostou no limite valia o mesmo que uma que o estourou.
+
+    Sem limite útil não há régua — devolve None, e quem recebe não rebaixa.
+    """
+    if score is None or threshold is None or threshold == 0:
+        return None
+    return max(0.0, min(1.0, (threshold - score) / abs(threshold)))
+
+
 def explain_contributions(machine_id: int, metric, offset_minutes: Optional[int] = None) -> List[Dict[str, Any]]:
     """Quanto cada grupo de medidas pesou para a leitura parecer estranha.
 

@@ -254,17 +254,22 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     findings = analyze_behavior(metric, db, ctx) if _active_layer != "ml" else []
 
     # 2. Isolation Forest (desvio estatístico)
+    ml_threshold = ml_service.alert_threshold(machine.id, sensitivity.get("ml", 1.0))
     is_statistical, score = ml_service.predict_anomaly(machine.id, metric, offset, sensitivity.get("ml", 1.0))
     metric.ml_score = score
     if is_statistical:
-        # Uma leitura isolada fora do padrão é ruído; duas seguidas são sinal
+        # Uma leitura isolada fora do padrão é ruído; duas seguidas são sinal.
+        # A régua da anterior é o limite desta máquina, não o zero: zero é a
+        # fronteira do `contamination`, por onde passam ~3% das leituras
+        # normais — frouxo demais para confirmar o que ele deveria confirmar.
+        confirma_abaixo_de = (ml_threshold or 0.0) * settings.ML_CONFIRM_FACTOR
         previous = (
             db.query(Metric.ml_score)
             .filter(Metric.machine_id == machine.id, Metric.id != metric.id)
             .order_by(Metric.timestamp.desc())
             .first()
         )
-        is_statistical = bool(previous and previous[0] is not None and previous[0] < 0)
+        is_statistical = bool(previous and previous[0] is not None and previous[0] < confirma_abaixo_de)
     if _active_layer == "regras":
         is_statistical = False
     db.commit()
@@ -291,16 +296,22 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     if is_statistical and not candidates:
         contributions = ml_service.explain_contributions(machine.id, metric, offset)
         classification = ml_service.classify_anomaly(metric, db, contributions)
-        top = _find_top_process(metric, db)
+        ml_conf = ml_service.confidence_from_score(score, ml_threshold)
+        top = _find_top_process(metric, db, classification["anomaly_type"])
+        bruta = ml_severity(classification["anomaly_type"], classification["severity"],
+                            ctx.trust(top) if top is not None else None)
         candidates.append(Candidate(
             anomaly_type=classification["anomaly_type"],
-            severity=ml_severity(classification["anomaly_type"], classification["severity"],
-                                 ctx.trust(top) if top is not None else None),
+            # Duas razões podem rebaixar o mesmo aviso — produto de segurança
+            # fazendo o que promete, e desvio que mal passou do limite. As duas
+            # agem, e o piso é `low`.
+            severity=apply_confidence(bruta, ml_conf),
             affected=classification["affected_metrics"],
             responsible=top.name if top is not None else None,
             details={"source": "isolation_forest", "score": score, "contributions": contributions},
             source="ml",
             score=score,
+            confidence=ml_conf,
         ))
 
     if not candidates:
@@ -362,14 +373,34 @@ def ml_severity(anomaly_type: str, severity: str, trust_info) -> str:
     return "low"
 
 
-def _find_top_process(metric: Metric, db: Session):
+# De qual medida do processo sai o culpado, por tipo de aviso. Tipo que não
+# está aqui não tem culpado identificável: `ProcessSnapshot` guarda CPU e
+# memória por processo, mas não E/S de disco nem conexões de rede. Acusar o
+# maior consumidor de CPU por um desvio de disco produzia "Atividade de Disco
+# Fora do Padrão — responsável: chrome.exe", que ensina a pessoa a desconfiar
+# do sistema inteiro. Ficar calado é a resposta honesta.
+BLAME_FIELD = {
+    "high_cpu": "cpu_percent",
+    "cpu_loop": "cpu_percent",
+    "resource_exhaustion": "cpu_percent",
+    "high_memory": "mem_percent",
+    "memory_leak": "mem_percent",
+}
+
+
+def _find_top_process(metric: Metric, db: Session, anomaly_type: Optional[str] = None):
+    """O processo que explica este aviso, ou None quando não dá para saber.
+
+    Devolve a leitura inteira, não só o nome: a confiança é do executável
+    (caminho, assinatura, fabricante), e o nome sozinho é o que um vírus imita.
+    """
     from app.models.process import ProcessSnapshot
-    top = (
+    field = BLAME_FIELD.get(anomaly_type or "")
+    if field is None:
+        return None
+    return (
         db.query(ProcessSnapshot)
         .filter(ProcessSnapshot.metric_id == metric.id)
-        .order_by(ProcessSnapshot.cpu_percent.desc())
+        .order_by(getattr(ProcessSnapshot, field).desc())
         .first()
     )
-    # Devolve a leitura inteira, não só o nome: a confiança é do executável
-    # (caminho, assinatura, fabricante), e o nome sozinho é o que um vírus imita
-    return top
