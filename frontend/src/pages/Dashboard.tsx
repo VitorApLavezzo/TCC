@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { anomaliesApi, metricsApi, machinesApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
+import { stillLearning } from "../lib/learning";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { Machine, Metric, Anomaly, LearningStatus, LearnedBaseline } from "../types";
 import { Verdict } from "../components/Verdict";
@@ -24,6 +25,10 @@ import { VitalsSkeleton, Skeleton } from "../components/ui/Skeleton";
 import { health, toneOf, worstLevel, bandFor, THRESHOLDS, Level } from "../lib/health";
 import { bytesPerSec, formatUptime, gigabytes, pluralize } from "../lib/format";
 import { useStatus } from "../context/StatusContext";
+
+// A coleta vai de 10 a 60 s; abaixo disso a busca seria mais frequente que o
+// dado que ela busca.
+const LEARNING_POLL_MS = 20000;
 
 const MAX_CHART_POINTS = 60;
 
@@ -84,12 +89,26 @@ export function Dashboard() {
     };
   }, [selectedMachine]);
 
+  // Quanto falta de aprendizado é todo derivado no servidor: leituras que
+  // faltam, horas que faltam, se cada régua já fechou. O cliente não tem como
+  // recalcular — tentar era o que deixava os números parados até um F5, e pior:
+  // `collected` subia sozinho enquanto "faltam N leituras" ficava congelado, de
+  // modo que a tela chegava a se contradizer. Busca de novo enquanto durar, e
+  // o `enabled` desliga sozinho quando a máquina se forma: nada de tráfego por
+  // um dado que não muda mais.
+  const refreshLearning = useCallback(async () => {
+    if (!selectedMachine) return;
+    const res = await metricsApi.learning(selectedMachine).catch(() => null);
+    if (res) setLearning(res.data);
+  }, [selectedMachine]);
+
+  usePolling(refreshLearning, LEARNING_POLL_MS, !!selectedMachine && stillLearning(learning));
+
   const wsStatus = useWebSocket(selectedMachine ? `/ws/machine/${selectedMachine}` : null, (msg) => {
     if (msg.type === "metric") {
       const m = msg.data as Metric;
       setLatestMetric(m);
       setMetrics((prev) => [...prev, m].slice(-MAX_CHART_POINTS));
-      setLearning((prev) => (prev ? { ...prev, collected: prev.collected + 1 } : prev));
     }
     if (msg.type === "anomaly") {
       anomaliesApi
@@ -262,7 +281,7 @@ export function Dashboard() {
         <p className="text-sm text-fg-2">
           Nenhum aviso nas últimas 24 horas.{" "}
           <span className="text-fg-3">
-            {learning && (learning.learning ?? !learning.ml_ready)
+            {stillLearning(learning)
               ? "A detecção ainda está aprendendo o normal deste computador."
               : "O sistema continua verificando."}
           </span>

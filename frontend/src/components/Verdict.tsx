@@ -4,6 +4,7 @@ import { Check } from "lucide-react";
 import { Level } from "../lib/health";
 import { Anomaly, ANOMALY_TYPE_LABELS, LearningStatus } from "../types";
 import { pluralize } from "../lib/format";
+import { stillLearning } from "../lib/learning";
 import { TextButton } from "./ui/Button";
 import { Explain } from "./ui/Explain";
 import { StatusDot } from "./ui/Layout";
@@ -231,7 +232,7 @@ export function Verdict({
             </div>
           </div>
 
-          {learning && (learning.learning ?? !learning.ml_ready) && (
+          {learning && stillLearning(learning) && (
             <div className="border-t border-hairline pt-3.5 text-xs">
               {/*
                 Parágrafo comum, não flex: com `flex flex-wrap` o texto inteiro
