@@ -47,11 +47,13 @@ class TestQuandoTerminaOAprendizado:
         m = _machine(db)
         assert learning.is_learning(db, m) is True
 
-    def test_cem_leituras_em_uma_hora_ainda_e_aprendizado(self, db):
-        """Intervalo de 10s fecha 100 leituras em 17 min — não viu nada ainda."""
+    def test_muitas_leituras_em_pouco_tempo_ainda_e_aprendizado(self, db):
+        """A régua de tempo existe para isto: no intervalo acelerado de 10 s,
+        100 leituras fecham em 17 minutos, e 17 minutos não são o normal de
+        ninguém. As leituras já bastam; a hora de relógio não."""
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 120, span_horas=1)
+        _leituras(db, m.id, 150, span_horas=0.3)
         assert learning.is_learning(db, m) is True
 
     def test_oito_horas_com_poucas_leituras_ainda_e_aprendizado(self, db):
@@ -60,10 +62,10 @@ class TestQuandoTerminaOAprendizado:
         _leituras(db, m.id, 12, span_horas=8)
         assert learning.is_learning(db, m) is True
 
-    def test_cem_leituras_e_seis_horas_encerram_o_aprendizado(self, db):
+    def test_leituras_e_tempo_completos_encerram_o_aprendizado(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 150, span_horas=7)
+        _leituras(db, m.id, 150, span_horas=2)
         assert learning.is_learning(db, m) is False
 
     def test_conta_da_primeira_leitura_e_nao_do_cadastro(self, db):
@@ -73,7 +75,7 @@ class TestQuandoTerminaOAprendizado:
         m = _machine(db)
         m.created_at = utcnow() - timedelta(days=3)
         db.commit()
-        _leituras(db, m.id, 150, span_horas=1)
+        _leituras(db, m.id, 150, span_horas=0.3)
         assert learning.is_learning(db, m) is True
 
     def test_maquina_de_demonstracao_nunca_esta_aprendendo(self, db):
@@ -182,7 +184,8 @@ class TestComoOProgressoEDito:
         m = _machine(db)
         _leituras(db, m.id, 186, span_horas=0.28)
         frase = learning.status(db, m).phrase
-        assert "6h" in frase and "falta" in frase
+        assert "falta" in frase and "min" in frase
+        assert "leituras" not in frase
 
     def test_diz_quantas_leituras_faltam_quando_o_tempo_ja_basta(self, db):
         from app.services import learning
@@ -195,21 +198,21 @@ class TestComoOProgressoEDito:
     def test_menciona_os_dois_quando_os_dois_faltam(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 40, span_horas=2)
+        _leituras(db, m.id, 40, span_horas=0.5)
         frase = learning.status(db, m).phrase
-        assert "60 leituras" in frase and "4h" in frase
+        assert "60 leituras" in frase and "30 min" in frase
 
     def test_menos_de_uma_hora_aparece_em_minutos(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 200, span_horas=5.5)
+        _leituras(db, m.id, 200, span_horas=0.9)
         frase = learning.status(db, m).phrase
         assert "min" in frase and "0h" not in frase
 
     def test_maquina_formada_nao_tem_frase(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 150, span_horas=7)
+        _leituras(db, m.id, 150, span_horas=2)
         assert learning.status(db, m).phrase == ""
 
 
@@ -224,7 +227,7 @@ class TestCriteriosSeparados:
         d = learning.status(db, m).as_dict()
         assert d["samples_done"] is True
         assert d["hours_done"] is False
-        assert d["remaining_hours_label"] == "6h"
+        assert d["remaining_hours_label"] == "45 min"
 
     def test_tempo_completo_e_leituras_pendentes(self, db):
         from app.services import learning
@@ -238,5 +241,5 @@ class TestCriteriosSeparados:
     def test_rotulo_de_tempo_em_minutos_perto_do_fim(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 200, span_horas=5.6)
+        _leituras(db, m.id, 200, span_horas=0.9)
         assert "min" in learning.status(db, m).as_dict()["remaining_hours_label"]

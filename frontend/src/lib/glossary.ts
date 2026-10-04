@@ -34,7 +34,7 @@ export const GLOSSARY: Record<string, string> = {
   score:
     "O quanto esta leitura fugiu do comportamento habitual desta máquina, medido pelo modelo estatístico. Quanto mais negativo, mais fora do padrão.",
   aprendizado:
-    "Nas primeiras horas o sistema está conhecendo o que é normal neste computador: ele espera 100 leituras e 6 horas acompanhando. Até lá, tudo que encontrar fica registrado aqui sem virar aviso — porque numa máquina recém-instalada todo programa parece novo, inclusive os que sempre estiveram nela. A exceção são os sinais que não dependem de histórico, como um programa disfarçado de arquivo do sistema ou um arquivo-isca mexido: esses interrompem você desde o primeiro minuto.",
+    "Nas primeiras horas o sistema está conhecendo o que é normal neste computador: ele espera 100 leituras e 1 hora acompanhando. Até lá, tudo que encontrar fica registrado aqui sem virar aviso — porque numa máquina recém-instalada todo programa parece novo, inclusive os que sempre estiveram nela. A exceção são os sinais que não dependem de histórico, como um programa disfarçado de arquivo do sistema ou um arquivo-isca mexido: esses interrompem você desde o primeiro minuto.",
   ao_vivo:
     "O computador está enviando leituras neste momento, a cada 30 segundos, por conexão direta com o servidor.",
   agent_token:

@@ -14,9 +14,23 @@ a usar a mesma régua.
 Duas contas, e vale a mais lenta:
 
 - **100 leituras**, o mesmo `MIN_TRAINING_SAMPLES` do modelo, para haver dados.
-- **6 horas de relógio**, porque a coleta é adaptativa: a 10 s por leitura,
-  100 leituras são 17 minutos, e 17 minutos de uma tarde não são o normal de
-  ninguém.
+- **1 hora de relógio**, porque a coleta é adaptativa e o número de leituras
+  sozinho não diz quanto tempo passou: no intervalo acelerado de 10 s (usado
+  quando algo já saiu do normal), 100 leituras fecham em 17 minutos, e 17
+  minutos não são o normal de ninguém.
+
+A hora foi escolhida para emparelhar com a outra régua, não para ser folgada.
+No intervalo de repouso, que é de 30 s, 100 leituras levam cerca de 50 minutos
+— então as duas contas terminam juntas e "vale a mais lenta" de fato decide
+alguma coisa. Era o que faltava quando a régua de tempo eram 6 horas: o
+relógio ganhava sempre e o critério de 100 leituras nunca decidia nada.
+
+O preço é conhecido: o modelo usa hora do dia e dia da semana como atributos,
+e com uma hora de histórico ele viu uma faixa horária só. Nos primeiros dias,
+usar a máquina em outro horário desvia a leitura só por causa disso. Dois
+amortecedores: desvio dominado por horário já nasce em severidade baixa e não
+interrompe ninguém, e o modelo retreina a cada 30 coletas sobre uma janela de
+5000 leituras, então em um ou dois dias já viu o ciclo inteiro.
 
 A contagem começa na primeira leitura recebida, não no cadastro da máquina:
 quem cadastra na sexta e liga o computador na segunda não pode "se formar"
@@ -35,11 +49,11 @@ from app.models.machine import Machine
 from app.models.metric import Metric
 
 NEEDED_SAMPLES = settings.MIN_TRAINING_SAMPLES
-NEEDED_HOURS = 6
+NEEDED_HOURS = 1
 
 
 def _tempo_humano(horas: float) -> str:
-    """Tempo do jeito que uma pessoa fala: "40 min", "6h" — nunca "0h"."""
+    """Tempo do jeito que uma pessoa fala: "40 min", "1h" — nunca "0h"."""
     minutos = max(math.ceil(horas * 60), 1)
     if minutos < 60:
         return f"{5 * math.ceil(minutos / 5)} min"
@@ -68,7 +82,7 @@ class LearningStatus:
 
     @property
     def remaining_hours_label(self) -> str:
-        """"6h", "40 min" — um só lugar formata tempo, para a frase da
+        """"1h", "40 min" — um só lugar formata tempo, para a frase da
         notificação e a da tela nunca divergirem."""
         return _tempo_humano(self.remaining_hours) if self.remaining_hours else ""
 
