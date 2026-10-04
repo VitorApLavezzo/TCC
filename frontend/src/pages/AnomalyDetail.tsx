@@ -241,11 +241,12 @@ export function AnomalyDetail() {
         sem ter interrompido ninguém. Nunca mostra o número cru — "0,25" não
         significa nada para quem lê.
       */}
-      {anomaly.confidence != null && anomaly.confidence < 0.5 && (
+      {anomaly.weak_signal && (
         <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">
-          Sinal fraco: os indícios existem, mas são poucos para ter certeza. Por isso este
-          aviso ficou registrado sem notificar você. Se acontecer de novo e com mais força,
-          o sistema avisa.
+          Sinal fraco: os indícios existem, mas são poucos para ter certeza.
+          {anomaly.severity === "low"
+            ? " Por isso este aviso ficou registrado sem notificar você. Se acontecer de novo e com mais força, o sistema avisa."
+            : " A gravidade abaixo já leva isso em conta."}
         </p>
       )}
 

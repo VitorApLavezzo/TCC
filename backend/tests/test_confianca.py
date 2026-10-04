@@ -178,3 +178,72 @@ class TestCandidatoDoModelo:
         assert a is not None and a.anomaly_type == "high_cpu"
         assert a.confidence == 1.0
         assert a.severity == "high"
+
+
+class TestReputacaoSobreviveAoCulpadoAusente:
+    """Não acusar ninguém num desvio de disco é correto. Mas a reputação do
+    executável que está trabalhando continua sendo informação: é dela que sai
+    o rebaixamento de uma varredura de antivírus, da rodada anterior de falsos
+    positivos. Separar "quem culpar" de "em quem confiar" é o que mantém as
+    duas coisas de pé ao mesmo tempo."""
+
+    def test_varredura_de_antivirus_em_desvio_de_disco_continua_rebaixada(
+            self, client, machine, db, monkeypatch):
+        from app.models.machine import Machine
+        from app.models.metric import Metric
+        from app.models.process import ProcessSnapshot
+        from app.services import ml_service
+        from app.services.anomaly_service import process_metric
+
+        m = db.query(Machine).filter(Machine.id == machine["id"]).first()
+        db.add(Metric(machine_id=m.id, cpu_percent=20, mem_percent=40, ml_score=-0.15))
+        db.commit()
+        atual = Metric(machine_id=m.id, cpu_percent=72, mem_percent=40, disk_read_bytes=9e7)
+        db.add(atual)
+        db.flush()
+        db.add(ProcessSnapshot(
+            metric_id=atual.id, name="avp.exe", cpu_percent=68.0, mem_percent=5.0,
+            exe="C:\\Program Files (x86)\\Kaspersky Lab\\KAV\\avp.exe",
+            signed="signed", publisher="Kaspersky Lab JSC", username="SYSTEM"))
+        db.commit()
+
+        monkeypatch.setattr(ml_service, "predict_anomaly", lambda *a, **k: (True, -0.9))
+        monkeypatch.setattr(ml_service, "alert_threshold", lambda *a, **k: -0.2)
+        monkeypatch.setattr(ml_service, "train_model", lambda *a, **k: False)
+        monkeypatch.setattr(ml_service, "explain_contributions", lambda *a, **k: [])
+        monkeypatch.setattr(ml_service, "classify_anomaly", lambda *a, **k: {
+            "anomaly_type": "disk_activity", "severity": "medium", "affected_metrics": {}})
+
+        a = process_metric(atual, m, db)
+        assert a is not None and a.anomaly_type == "disk_activity"
+        # Desvio de disco não nomeia culpado...
+        assert a.responsible_process is None
+        # ...mas o antivírus reconhecido continua segurando o aviso no painel
+        assert a.severity == "low"
+
+
+class TestSinalFracoNaApi:
+    """A tela não pode repetir o corte de confiança por conta própria: se a
+    constante for ajustada no servidor, a etiqueta passa a mentir. Quem decide
+    é o servidor, e manda a resposta pronta."""
+
+    def _saida(self, **campos):
+        from app.schemas.anomaly import AnomalyOut
+        from datetime import datetime, timezone
+        base = dict(id=1, machine_id=1, metric_id=None, detected_at=datetime.now(timezone.utc),
+                    anomaly_type="malware_pattern", severity="low", anomaly_score=None,
+                    affected_metrics={}, responsible_process=None, is_resolved=False,
+                    resolved_at=None, explanation=None)
+        base.update(campos)
+        return AnomalyOut(**base)
+
+    def test_confianca_fraca_marca_sinal_fraco(self):
+        assert self._saida(confidence=0.25).weak_signal is True
+
+    def test_confianca_forte_nao_marca(self):
+        assert self._saida(confidence=0.9).weak_signal is False
+
+    def test_sem_confianca_nao_marca(self):
+        """Arquivo-isca e comando suspeito não têm confiança calculada: não são
+        sinal fraco, são evidência que não depende de histórico."""
+        assert self._saida(confidence=None).weak_signal is False

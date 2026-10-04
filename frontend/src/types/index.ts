@@ -189,6 +189,8 @@ export interface Anomaly {
   /** Quão sustentada é a evidência, de 0 a 1. Ausente quando não se aplica —
    *  avisos que não vêm de detector que calcula confiança. */
   confidence?: number | null;
+  /** O servidor já decidiu se a evidência é fraca — a tela não repete o corte. */
+  weak_signal?: boolean;
   /** Quantas vezes este mesmo aviso se repetiu antes de ser resolvido. */
   occurrences?: number;
   last_seen_at?: string | null;

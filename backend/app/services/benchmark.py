@@ -294,12 +294,16 @@ def _binario_de_temp(k: int, metric: Dict, procs: List[Dict]) -> None:
 
 def _pico_isolado(k: int, metric: Dict, procs: List[Dict]) -> None:
     """Uma única leitura fora do padrão no meio de leituras normais — o sintoma
-    relatado: alarma e some na coleta seguinte."""
+    relatado: alarma e some na coleta seguinte.
+
+    Os demais passos ficam intocados de propósito. A primeira versão deste
+    cenário fixava a CPU em 22-24% nos passos normais, que é a borda superior
+    do que o aquecimento ensinou (14 ± 9): o modelo achava estranha a leitura
+    inteira, não o pico, e o cenário media outra coisa.
+    """
     if k == 3:
         metric["cpu_percent"] = 96.0
         metric["net_bytes_sent"] = 4e6
-    else:
-        metric["cpu_percent"] = 22 + (k % 3)
 
 
 def _instalacao_de_programas(k: int, metric: Dict, procs: List[Dict]) -> None:

@@ -55,6 +55,10 @@ class AnomalyOut(BaseModel):
     severity: str
     anomaly_score: Optional[float]
     confidence: Optional[float] = None
+    # Quem decide o que é "fraco" é o servidor, e manda a resposta pronta: a
+    # tela repetir o corte por conta própria faria a etiqueta mentir assim que
+    # a constante fosse ajustada.
+    weak_signal: bool = False
     occurrences: int = 1
     last_seen_at: Optional[datetime] = None
     affected_metrics: Optional[Any]
@@ -78,6 +82,12 @@ class AnomalyOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @model_validator(mode="after")
+    def _marca_sinal_fraco(self):
+        from app.services.anomaly_service import WEAK_CONFIDENCE
+        self.weak_signal = self.confidence is not None and self.confidence < WEAK_CONFIDENCE
+        return self
 
 
 class AnomalyResolve(BaseModel):

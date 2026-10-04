@@ -113,7 +113,7 @@ ESCALATION_OCCURRENCES = 10
 
 
 def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
-                    minutes: int = ANOMALY_COOLDOWN_MINUTES) -> Optional[Anomaly]:
+                    minutes: int = ANOMALY_COOLDOWN_MINUTES, now=None) -> Optional[Anomaly]:
     """O aviso vivo deste tipo nesta máquina, para somar a repetição nele.
 
     A chave é `(máquina, tipo)` — não `(máquina, tipo, programa)`, como era. A
@@ -123,8 +123,14 @@ def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
     um programa diferente e nenhuma caía no intervalo entre repetidos — eram
     vinte linhas de "Processo Desconhecido" em três minutos. O programa não se
     perde: vira item de `affected_metrics["programas"]`.
+
+    A janela conta a partir da hora da leitura (`now`), não do relógio da
+    parede: a demonstração e o benchmark reproduzem horas em segundos e datam
+    os avisos no passado. Com `utcnow()` fixo aqui, a janela nunca casava
+    nesses caminhos e cada repetição virava um aviso novo — exatamente o
+    defeito que esta agregação existe para corrigir.
     """
-    cutoff = utcnow() - timedelta(minutes=minutes)
+    cutoff = (now or utcnow()) - timedelta(minutes=minutes)
     return (
         db.query(Anomaly)
         .filter(
@@ -138,46 +144,66 @@ def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
     )
 
 
-def absorb(db: Session, existing: Anomaly, c: Candidate, now) -> Anomaly:
+# Quantas ocorrências ficam guardadas com detalhe. O suficiente para a pessoa
+# ver o que entrou no agregado sem transformar a coluna JSON num depósito.
+OCCURRENCE_HISTORY = 10
+
+
+def absorb(db: Session, machine: Machine, existing: Anomaly, c: Candidate, now) -> Anomaly:
     """Soma a repetição no aviso que já existe, em vez de criar outro.
 
     `detected_at` não muda: o aviso continua datado de quando o problema
     começou, e `last_seen_at` guarda a ocorrência mais recente.
     """
+    nome = _normalize_process_name(c.responsible)
     existing.occurrences = (existing.occurrences or 1) + 1
     existing.last_seen_at = now
 
     affected = dict(existing.affected_metrics or {})
     programas = list(affected.get("programas") or [])
-    for nome in (existing.responsible_process, c.responsible):
-        if nome and nome not in programas:
-            programas.append(nome)
+    for candidato in (existing.responsible_process, nome):
+        if candidato and candidato not in programas:
+            programas.append(candidato)
     affected["programas"] = programas
 
+    # A evidência da ocorrência absorvida não pode se perder: era aqui que o
+    # destino do servidor de comando, o caminho do executável e a assinatura
+    # do segundo programa iam para o lixo, sobrando só o nome dele numa lista.
+    ocorrencias = list(affected.get("ocorrencias") or [])
+    ocorrencias.append({
+        "programa": nome,
+        "gravidade": c.severity,
+        "em": now.isoformat() if hasattr(now, "isoformat") else str(now),
+        "detalhe": c.details or c.affected or None,
+    })
+    affected["ocorrencias"] = ocorrencias[-OCCURRENCE_HISTORY:]
+
+    antes = existing.severity
     # A severidade do conjunto é a maior vista: um aviso crítico entrando na
-    # agregação puxa para cima em vez de se diluir entre os brandos.
+    # agregação puxa para cima em vez de se diluir entre os brandos. A
+    # confiança acompanha, senão a linha fica "crítica" com a certeza frouxa
+    # da primeira ocorrência.
     if SEVERITY_ORDER.get(c.severity, 0) > SEVERITY_ORDER.get(existing.severity, 0):
         existing.severity = c.severity
+        existing.confidence = c.confidence
 
-    escalou = False
-    if existing.occurrences >= ESCALATION_OCCURRENCES and not affected.get("_escalado"):
+    # Igualdade, não "maior ou igual": o contador sobe de um em um, então a
+    # promoção acontece exatamente uma vez. A 11ª e a 20ª ocorrência não
+    # promovem de novo, e não é preciso guardar marca nenhuma no JSON — que é
+    # o que antes vazava para a tela como uma linha "escalado: true".
+    if existing.occurrences == ESCALATION_OCCURRENCES:
         existing.severity = _PROMOTE.get(existing.severity, existing.severity)
-        affected["_escalado"] = True
-        escalou = True
 
     # Dicionário novo, não mutação: o SQLAlchemy não enxerga alteração dentro
     # de uma coluna JSON existente e a gravação se perderia em silêncio.
     existing.affected_metrics = affected
     db.commit()
 
-    if escalou:
-        # A explicação da IA não é refeita a cada ocorrência — seriam dezenas
-        # de chamadas ao modelo por um texto que ninguém lê duas vezes. Só aqui.
-        try:
-            from app.services import notifications
-            notifications.on_anomaly(db, existing)
-        except Exception as e:
-            print(f"[AnomalyService] Escalada do aviso #{existing.id} não notificada: {e}")
+    # Só quando ficou mais grave. A explicação da IA não é refeita a cada
+    # ocorrência — seriam dezenas de chamadas ao modelo por um texto que
+    # ninguém lê duas vezes.
+    if SEVERITY_ORDER.get(existing.severity, 0) > SEVERITY_ORDER.get(antes, 0):
+        _announce(db, machine, existing, motivo="agravado")
     return existing
 
 
@@ -196,10 +222,61 @@ def filter_reason(db: Session, machine: Machine, c: Candidate, now,
     if rule:
         rule.hits = (rule.hits or 0) + 1
         return f"regra #{rule.id}", None
-    existing = _recent_anomaly(machine.id, c.anomaly_type, db, c.cooldown_minutes)
+    existing = _recent_anomaly(machine.id, c.anomaly_type, db, c.cooldown_minutes, now)
     if existing is not None:
         return "aviso igual recente", existing
     return None, None
+
+
+def _announce(db: Session, machine: Machine, anomaly: Anomaly, motivo: str) -> None:
+    """O que acontece quando um aviso nasce — ou fica mais grave.
+
+    Um aviso que sobe de gravidade dentro de uma agregação precisa exatamente
+    do mesmo tratamento de um que acabou de nascer: avisar a pessoa, lacrar no
+    livro e deixar a automação decidir. Enquanto isso vivia solto no fim de
+    `persist_candidate`, o `absorb` subia a gravidade no banco e ninguém ficava
+    sabendo — um indício de servidor de comando entrando atrás de um aviso
+    brando do mesmo tipo desaparecia dentro de um contador.
+    """
+    try:
+        from app.services import notifications
+        notifications.on_anomaly(db, anomaly)
+    except Exception as e:
+        print(f"[AnomalyService] Notificação não criada para #{anomaly.id}: {e}")
+
+    # Lacra o aviso no livro encadeado: é o que permite provar depois que o
+    # registro não foi criado nem editado a posteriori. A gravidade agravada
+    # entra como lançamento novo — sem isso o livro guardaria "média" para
+    # sempre numa linha que hoje lê "crítica", e a promessa do livro seria falsa.
+    try:
+        from app.services import integrity
+        if integrity.is_auditable(machine):
+            integrity.append(
+                db,
+                kind="anomaly",
+                ref_id=anomaly.id,
+                machine_id=machine.id,
+                user_id=machine.owner_id,
+                payload={
+                    "tipo": anomaly.anomaly_type,
+                    "gravidade": anomaly.severity,
+                    "programa": anomaly.responsible_process,
+                    "origem": anomaly.source,
+                    "detectado_em": anomaly.detected_at,
+                    "motivo": motivo,
+                    "ocorrencias": anomaly.occurrences or 1,
+                },
+            )
+    except Exception as e:
+        print(f"[Livro] Registro do aviso #{anomaly.id} falhou: {e}")
+
+    # Uma regra de automação pode existir para este aviso: quem decide se age,
+    # se pede confirmação ou se só sugere é o playbooks.
+    try:
+        from app.services import playbooks
+        playbooks.on_anomaly(db, machine, anomaly)
+    except Exception as e:
+        print(f"[Playbooks] Avaliação do aviso #{anomaly.id} falhou: {e}")
 
 
 def _normalize_process_name(name: Optional[str]) -> Optional[str]:
@@ -227,7 +304,7 @@ def persist_candidate(
         hour = local_time(now, tz_offset_minutes(machine)).hour
         reason, existing = filter_reason(db, machine, c, now, hour)
         if existing is not None:
-            return absorb(db, existing, c, now)
+            return absorb(db, machine, existing, c, now)
         if reason:
             db.commit()
             return None
@@ -278,42 +355,7 @@ def persist_candidate(
     from app.services.explanation_queue import request_explanation
     request_explanation(anomaly.id, anomaly.metric_id, machine.id)
 
-    try:
-        from app.services import notifications
-        notifications.on_anomaly(db, anomaly)
-    except Exception as e:
-        print(f"[AnomalyService] Notificação não criada para #{anomaly.id}: {e}")
-
-    # Lacra o aviso no livro encadeado: é o que permite provar depois que o
-    # registro não foi criado nem editado a posteriori.
-    try:
-        from app.services import integrity
-        if integrity.is_auditable(machine):
-            integrity.append(
-                db,
-                kind="anomaly",
-                ref_id=anomaly.id,
-                machine_id=machine.id,
-                user_id=machine.owner_id,
-                payload={
-                    "tipo": anomaly.anomaly_type,
-                    "gravidade": anomaly.severity,
-                    "programa": anomaly.responsible_process,
-                    "origem": anomaly.source,
-                    "detectado_em": anomaly.detected_at,
-                },
-            )
-    except Exception as e:
-        print(f"[Livro] Registro do aviso #{anomaly.id} falhou: {e}")
-
-    # Uma regra de automação pode existir para este aviso: quem decide se age,
-    # se pede confirmação ou se só sugere é o playbooks.
-    try:
-        from app.services import playbooks
-        playbooks.on_anomaly(db, machine, anomaly)
-    except Exception as e:
-        print(f"[Playbooks] Avaliação do aviso #{anomaly.id} falhou: {e}")
-
+    _announce(db, machine, anomaly, motivo="criado")
     return anomaly
 
 
@@ -378,8 +420,14 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
         classification = ml_service.classify_anomaly(metric, db, contributions)
         ml_conf = ml_service.confidence_from_score(score, ml_threshold)
         top = _find_top_process(metric, db, classification["anomaly_type"])
+        # Quem culpar e em quem confiar são perguntas diferentes. Num desvio de
+        # disco não há culpado a nomear, mas o programa que está trabalhando
+        # continua tendo reputação — e é dela que sai o rebaixamento de uma
+        # varredura de antivírus. Ligar as duas coisas desfazia, em silêncio, o
+        # que a rodada anterior de falsos positivos tinha resolvido.
+        reputado = top if top is not None else _find_top_process(metric, db, "high_cpu")
         bruta = ml_severity(classification["anomaly_type"], classification["severity"],
-                            ctx.trust(top) if top is not None else None)
+                            ctx.trust(reputado) if reputado is not None else None)
         candidates.append(Candidate(
             anomaly_type=classification["anomaly_type"],
             # Duas razões podem rebaixar o mesmo aviso — produto de segurança
@@ -403,7 +451,7 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     for c in candidates:
         reason, existing = filter_reason(db, machine, c, now, local_hour)
         if existing is not None:
-            absorb(db, existing, c, now)
+            absorb(db, machine, existing, c, now)
             related.append({"type": c.anomaly_type, "severity": c.severity, "process": c.responsible,
                             "suppressed": "somado ao aviso aberto"})
         elif reason:
@@ -482,9 +530,12 @@ def _find_top_process(metric: Metric, db: Session, anomaly_type: Optional[str] =
     field = BLAME_FIELD.get(anomaly_type or "")
     if field is None:
         return None
+    # `nulls_last`: no PostgreSQL, `DESC` põe NULL na frente — uma leitura
+    # antiga sem esta medida seria devolvida como "a maior". O SQLite dos
+    # testes faz o contrário e esconderia isso até chegar em produção.
     return (
         db.query(ProcessSnapshot)
         .filter(ProcessSnapshot.metric_id == metric.id)
-        .order_by(getattr(ProcessSnapshot, field).desc())
+        .order_by(getattr(ProcessSnapshot, field).desc().nulls_last())
         .first()
     )
