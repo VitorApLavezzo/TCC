@@ -33,6 +33,29 @@ from app.services.behavior_analyzer import DetectionContext, analyze_behavior
 
 ANOMALY_COOLDOWN_MINUTES = 30
 
+# Abaixo disto a evidência é fraca: o aviso desce um nível de gravidade. Como o
+# mínimo padrão de notificação é `medium`, um `medium` fraco vira `low` — fica
+# no painel e para de interromper, sem política nova. Ajustável pelo benchmark.
+WEAK_CONFIDENCE = 0.5
+
+_DEMOTE = {"critical": "high", "high": "medium", "medium": "low", "low": "low"}
+_PROMOTE = {"low": "medium", "medium": "high", "high": "critical", "critical": "critical"}
+
+
+def apply_confidence(severity: str, confidence: Optional[float]) -> str:
+    """Evidência fraca desce um nível.
+
+    `confidence is None` significa "não aplicável", não "zero": é o caso de
+    tudo que nasce fora dos detectores comportamentais — arquivo-isca, comando
+    suspeito, previsão, tendência, frota. Nunca rebaixa, e é isso que mantém de
+    pé o princípio de que detector de segurança não é dessensibilizado, sem
+    precisar de lista de exceções.
+    """
+    if confidence is None or confidence >= WEAK_CONFIDENCE:
+        return severity
+    return _DEMOTE.get(severity, severity)
+
+
 # Qual camada de detecção está ativa. Em operação é sempre "ambas"; os outros
 # valores existem para o estudo de ablação (ml_eval.py), que roda o mesmo
 # conjunto de cenários com uma camada de cada vez para responder, com número,
@@ -64,6 +87,7 @@ class Candidate:
     details: Optional[Dict[str, Any]] = None
     source: str = "behavior"
     score: Optional[float] = None
+    confidence: Optional[float] = None
     cooldown_minutes: int = ANOMALY_COOLDOWN_MINUTES
 
 
@@ -147,6 +171,9 @@ def persist_candidate(
         anomaly_type=c.anomaly_type,
         severity=c.severity,
         anomaly_score=c.score,
+        confidence=c.confidence,
+        occurrences=1,
+        last_seen_at=now,
         affected_metrics=affected,
         responsible_process=c.responsible,
         source=c.source,
@@ -250,12 +277,13 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     candidates: List[Candidate] = [
         Candidate(
             anomaly_type=f.anomaly_type,
-            severity=f.severity,
+            severity=apply_confidence(f.severity, f.confidence),
             affected=f.affected_metrics,
             responsible=f.responsible_process,
             details=f.behavior_details,
             source="behavior",
             score=score,
+            confidence=f.confidence,
         )
         for f in findings
     ]

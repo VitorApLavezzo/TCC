@@ -15,6 +15,13 @@ class Anomaly(Base):
     anomaly_type = Column(String, nullable=False)
     severity = Column(String, default="medium")  # low, medium, high, critical
     anomaly_score = Column(Float)
+    # Quão sustentada é a evidência, de 0 a 1. None = não aplicável: o aviso
+    # não veio de detector que calcula confiança, e por isso nunca é rebaixado.
+    confidence = Column(Float)
+    # Repetições somadas neste mesmo aviso, e quando foi a última delas.
+    # `detected_at` continua marcando quando o problema começou.
+    occurrences = Column(Integer, default=1, server_default="1")
+    last_seen_at = Column(DateTime(timezone=True))
     affected_metrics = Column(JSON)
     responsible_process = Column(String)
     is_resolved = Column(Boolean, default=False)
