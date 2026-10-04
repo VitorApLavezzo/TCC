@@ -186,6 +186,12 @@ export interface Anomaly {
   /** Detectada enquanto o sistema ainda aprendia o normal da máquina: fica no
    *  painel, mas não gerou notificação. */
   during_learning?: boolean;
+  /** Quão sustentada é a evidência, de 0 a 1. Ausente quando não se aplica —
+   *  avisos que não vêm de detector que calcula confiança. */
+  confidence?: number | null;
+  /** Quantas vezes este mesmo aviso se repetiu antes de ser resolvido. */
+  occurrences?: number;
+  last_seen_at?: string | null;
 }
 
 export interface IncidentChainNode {

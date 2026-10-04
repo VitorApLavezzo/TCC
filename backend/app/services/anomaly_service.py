@@ -42,6 +42,20 @@ _DEMOTE = {"critical": "high", "high": "medium", "medium": "low", "low": "low"}
 _PROMOTE = {"low": "medium", "medium": "high", "high": "critical", "critical": "critical"}
 
 
+# Se a confiança rebaixa ou não. Em operação é sempre True; o False existe para
+# o estudo de ablação rodar os mesmos cenários com e sem a camada e dizer, com
+# número, o que ela acrescenta. Desligar em produção degrada a precisão de
+# propósito — por isso fica aqui, explícito, e não escondido numa flag.
+_confidence_on = True
+
+
+def set_confidence_mode(on: bool) -> bool:
+    """Liga/desliga o rebaixamento por confiança e devolve o valor anterior."""
+    global _confidence_on
+    anterior, _confidence_on = _confidence_on, bool(on)
+    return anterior
+
+
 def apply_confidence(severity: str, confidence: Optional[float]) -> str:
     """Evidência fraca desce um nível.
 
@@ -51,6 +65,8 @@ def apply_confidence(severity: str, confidence: Optional[float]) -> str:
     pé o princípio de que detector de segurança não é dessensibilizado, sem
     precisar de lista de exceções.
     """
+    if not _confidence_on:
+        return severity
     if confidence is None or confidence >= WEAK_CONFIDENCE:
         return severity
     return _DEMOTE.get(severity, severity)

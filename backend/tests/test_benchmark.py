@@ -440,3 +440,22 @@ class TestDuasTaxas:
         o sistema não deveria ter produzido."""
         r = self._res("normal", ["high_cpu"], [])
         assert r.verdict == "falso positivo"
+
+
+def test_cenarios_novos_registrados():
+    from app.services.benchmark import NORMAL, scenarios
+    todos = scenarios()
+    for nome in ("pico_isolado", "instalacao_de_programas"):
+        assert nome in todos
+        assert todos[nome]["family"] == NORMAL
+        assert todos[nome]["expect"] is None
+
+
+def test_chave_de_ablacao_restaura_o_valor_anterior():
+    from app.services.anomaly_service import apply_confidence, set_confidence_mode
+    anterior = set_confidence_mode(False)
+    try:
+        assert apply_confidence("medium", 0.1) == "medium"  # desligada, não rebaixa
+    finally:
+        set_confidence_mode(anterior)
+    assert apply_confidence("medium", 0.1) == "low"

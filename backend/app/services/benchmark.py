@@ -292,6 +292,29 @@ def _binario_de_temp(k: int, metric: Dict, procs: List[Dict]) -> None:
                   "signed": "unsigned", "username": "vitor", "cmdline": "update_helper.exe"})
 
 
+def _pico_isolado(k: int, metric: Dict, procs: List[Dict]) -> None:
+    """Uma única leitura fora do padrão no meio de leituras normais — o sintoma
+    relatado: alarma e some na coleta seguinte."""
+    if k == 3:
+        metric["cpu_percent"] = 96.0
+        metric["net_bytes_sent"] = 4e6
+    else:
+        metric["cpu_percent"] = 22 + (k % 3)
+
+
+def _instalacao_de_programas(k: int, metric: Dict, procs: List[Dict]) -> None:
+    """Vários executáveis novos e legítimos em coletas seguidas, como numa
+    instalação de software. Cada coleta traz um programa diferente — era isto
+    que virava vinte linhas de "Processo Desconhecido"."""
+    metric["cpu_percent"] = 45 + (k % 5)
+    procs.append({
+        "name": f"setup_app{k}.exe", "cpu_percent": 22.0, "mem_percent": 11.0,
+        "exe": f"C:\\Program Files\\App{k}\\setup_app{k}.exe",
+        "signed": "signed", "publisher": "Contoso Ltd", "username": "vitor",
+        "cmdline": f"setup_app{k}.exe /quiet",
+    })
+
+
 # Cenários próprios. Os de ataque que já existiam na demonstração entram logo
 # abaixo, por nome, em vez de reescritos aqui.
 _OWN_SCENARIOS: Dict[str, Dict[str, Any]] = {
@@ -309,6 +332,10 @@ _OWN_SCENARIOS: Dict[str, Dict[str, Any]] = {
                    "expect": None, "steps": 8, "overlay": _compilacao},
     "atualizacao_do_sistema": {"label": "Windows Update instalando atualizações", "family": NORMAL,
                                "expect": None, "steps": 8, "overlay": _atualizacao_do_sistema},
+    "pico_isolado": {"label": "Pico isolado numa leitura só", "family": NORMAL,
+                     "expect": None, "steps": 8, "overlay": _pico_isolado},
+    "instalacao_de_programas": {"label": "Instalação de vários programas legítimos", "family": NORMAL,
+                                "expect": None, "steps": 8, "overlay": _instalacao_de_programas},
 }
 
 

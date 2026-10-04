@@ -236,6 +236,29 @@ export function AnomalyDetail() {
         </p>
       )}
 
+      {/*
+        Mesma natureza da ressalva acima: diz por que o aviso está no painel
+        sem ter interrompido ninguém. Nunca mostra o número cru — "0,25" não
+        significa nada para quem lê.
+      */}
+      {anomaly.confidence != null && anomaly.confidence < 0.5 && (
+        <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">
+          Sinal fraco: os indícios existem, mas são poucos para ter certeza. Por isso este
+          aviso ficou registrado sem notificar você. Se acontecer de novo e com mais força,
+          o sistema avisa.
+        </p>
+      )}
+
+      {(anomaly.occurrences ?? 1) > 1 && (
+        <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">
+          Aconteceu {anomaly.occurrences} vezes desde que começou
+          {Array.isArray(anomaly.affected_metrics?.programas) &&
+            anomaly.affected_metrics.programas.length > 1 &&
+            `, envolvendo ${anomaly.affected_metrics.programas.length} programas diferentes`}
+          . Está contado como um aviso só para não encher o painel com a mesma coisa.
+        </p>
+      )}
+
       <TrustNote anomaly={anomaly} />
 
       <div className="mt-6 border-t border-hairline pt-5">

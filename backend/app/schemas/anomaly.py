@@ -54,6 +54,9 @@ class AnomalyOut(BaseModel):
     anomaly_type: str
     severity: str
     anomaly_score: Optional[float]
+    confidence: Optional[float] = None
+    occurrences: int = 1
+    last_seen_at: Optional[datetime] = None
     affected_metrics: Optional[Any]
     responsible_process: Optional[str]
     is_resolved: bool
