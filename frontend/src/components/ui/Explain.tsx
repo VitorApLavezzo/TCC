@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { usePolicy } from "../../context/PolicyContext";
 import { GLOSSARY } from "../../lib/glossary";
+import { fillPolicy } from "../../lib/policy";
 
 /**
  * Ajuda contextual dos termos técnicos.
@@ -12,7 +14,11 @@ export function Explain({ term, text, className }: { term?: string; text?: strin
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
   const id = useId();
-  const body = text ?? (term ? GLOSSARY[term] : undefined);
+  const policy = usePolicy();
+  // Frase que depende de número do servidor some enquanto ele não chega, em
+  // vez de mostrar o marcador cru ou um número velho guardado aqui.
+  const bruto = text ?? (term ? GLOSSARY[term] : undefined);
+  const body = bruto ? fillPolicy(bruto, policy) : undefined;
 
   useEffect(() => {
     if (!open) return;

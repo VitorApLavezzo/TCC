@@ -10,7 +10,8 @@ from app.config import settings
 from app.database import engine
 from app.routers import (
     account, actions, agent_api, agent_files, anomalies, audit, auth, chat, demo, evaluation,
-    explanations, insights, machines, metrics, playbooks, reports, reputation_hub, share, study, ws,
+    explanations, insights, machines, meta, metrics, playbooks, reports, reputation_hub, share,
+    study, ws,
 )
 
 
@@ -82,7 +83,7 @@ async def _observe_requests(request, call_next):
 
 for router in (auth, machines, metrics, anomalies, ws, explanations, agent_files, agent_api,
                actions, chat, insights, reports, account, share, evaluation, demo, reputation_hub,
-               playbooks, study, audit):
+               playbooks, study, audit, meta):
     app.include_router(router.router)
 
 

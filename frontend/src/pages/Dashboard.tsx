@@ -264,7 +264,7 @@ export function Dashboard() {
           <span className="text-fg-3">
             {learning && (learning.learning ?? !learning.ml_ready)
               ? "A detecção ainda está aprendendo o normal deste computador."
-              : "O sistema verifica a cada 30 segundos."}
+              : "O sistema continua verificando."}
           </span>
         </p>
       ) : (

@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { PolicyProvider } from "./context/PolicyContext";
 import { StatusProvider } from "./context/StatusContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import { ToastProvider } from "./components/ui/Toast";
@@ -67,6 +68,7 @@ export default function App() {
             <ConfirmProvider>
               <BrowserRouter>
                 <AuthProvider>
+                  <PolicyProvider>
                   <Suspense fallback={<PageFallback />}>
                   <Routes>
                     <Route
@@ -187,6 +189,7 @@ export default function App() {
                     />
                   </Routes>
                   </Suspense>
+                  </PolicyProvider>
                 </AuthProvider>
               </BrowserRouter>
             </ConfirmProvider>

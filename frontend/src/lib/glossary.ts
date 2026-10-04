@@ -34,15 +34,15 @@ export const GLOSSARY: Record<string, string> = {
   score:
     "O quanto esta leitura fugiu do comportamento habitual desta máquina, medido pelo modelo estatístico. Quanto mais negativo, mais fora do padrão.",
   aprendizado:
-    "Nas primeiras horas o sistema está conhecendo o que é normal neste computador: ele espera 100 leituras e 1 hora acompanhando. Até lá, tudo que encontrar fica registrado aqui sem virar aviso — porque numa máquina recém-instalada todo programa parece novo, inclusive os que sempre estiveram nela. A exceção são os sinais que não dependem de histórico, como um programa disfarçado de arquivo do sistema ou um arquivo-isca mexido: esses interrompem você desde o primeiro minuto.",
+    "Nas primeiras horas o sistema está conhecendo o que é normal neste computador: ele espera {aprendizado} acompanhando. Até lá, tudo que encontrar fica registrado aqui sem virar aviso — porque numa máquina recém-instalada todo programa parece novo, inclusive os que sempre estiveram nela. A exceção são os sinais que não dependem de histórico, como um programa disfarçado de arquivo do sistema ou um arquivo-isca mexido: esses interrompem você desde o primeiro minuto.",
   ao_vivo:
-    "O computador está enviando leituras neste momento, a cada 30 segundos, por conexão direta com o servidor.",
+    "O computador está enviando leituras neste momento, por conexão direta com o servidor. O ritmo se ajusta sozinho — {coleta} —, acelerando quando algo foge do normal.",
   agent_token:
     "A senha que identifica este computador ao enviar dados. Quem tiver o token pode enviar leituras em nome desta máquina — trate como senha.",
   chave_massa:
     "Uma chave reutilizável para instalar em muitos computadores de uma vez, sem digitar código em cada um.",
   codigo_pareamento:
-    "Um código de uso único, válido por pouco tempo, que autoriza um computador novo a se registrar na sua conta.",
+    "Um código de uso único, válido por {codigo_pareamento}, que autoriza um computador novo a se registrar na sua conta.",
   frequencia_leitura:
     "De quanto em quanto tempo o agente manda uma nova leitura. Automática deixa o servidor decidir (mais rápido quando algo foge do normal, mais devagar quando está tudo calmo).",
   tempo_real:

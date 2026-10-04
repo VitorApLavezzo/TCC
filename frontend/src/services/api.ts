@@ -263,4 +263,8 @@ export const demoApi = {
   cleanup: (id: number) => api.delete(`/demo/${id}`),
 };
 
+export const metaApi = {
+  policy: () => api.get("/meta/policy"),
+};
+
 export default api;

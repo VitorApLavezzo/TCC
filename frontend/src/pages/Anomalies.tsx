@@ -343,7 +343,7 @@ export function Anomalies() {
         ) : (
           <EmptyState
             title="Nenhum aviso neste período"
-            body="Seus computadores não apresentaram nada fora do normal. O sistema continua verificando a cada 30 segundos."
+            body="Seus computadores não apresentaram nada fora do normal. O sistema continua verificando."
           />
         )
       ) : (

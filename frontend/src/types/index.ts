@@ -350,3 +350,17 @@ export const SEVERITY_LABELS: Record<string, string> = {
   high: "Alta",
   critical: "Crítica",
 };
+
+/** Números que descrevem como o sistema trabalha, servidos por /api/meta/policy.
+ *  A tela nunca os escreve à mão: era assim que quatro telas acabaram
+ *  afirmando "a cada 30 segundos" numa coleta que é adaptativa. */
+export interface Policy {
+  aprendizado: { leituras: number; horas: number; rotulo: string };
+  coleta: {
+    rapido_segundos: number;
+    normal_segundos: number;
+    lento_segundos: number;
+    rotulo: string;
+  };
+  codigo_pareamento: { minutos: number; rotulo: string };
+}

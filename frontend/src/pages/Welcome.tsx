@@ -18,7 +18,7 @@ const WHAT_IT_DOES = [
   {
     icon: Gauge,
     title: "Acompanha",
-    body: "Processador, memória, disco, rede, temperatura e bateria, a cada 30 segundos.",
+    body: "Processador, memória, disco, rede, temperatura e bateria, a cada poucos segundos.",
   },
   {
     icon: BrainCircuit,
@@ -82,7 +82,7 @@ export function Welcome() {
         <div className="min-w-0 flex-1">
           <h1 className="font-display text-xl font-semibold tracking-tight text-fg">{connected.name} está conectado</h1>
           <p className="mt-2 max-w-prose text-sm leading-relaxed text-fg-2">
-            As leituras começam a chegar a cada 30 segundos. Nas próximas horas o sistema aprende o que é normal neste
+            As leituras já começaram a chegar. Nas próximas horas o sistema aprende o que é normal neste
             computador e, depois disso, passa a apontar desvios sutis, além dos problemas óbvios.
           </p>
         </div>

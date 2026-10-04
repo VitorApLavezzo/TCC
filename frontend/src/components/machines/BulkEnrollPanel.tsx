@@ -6,6 +6,7 @@ import { Button, IconButton } from "../ui/Button";
 import { Explain } from "../ui/Explain";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
+import { usePolicy } from "../../context/PolicyContext";
 import { bulkKeysApi, errorMessage } from "../../services/api";
 import { pluralize } from "../../lib/format";
 import { downloadSilentInstaller, downloadMassDeployScript, serverOneLiner } from "../../utils/installers";
@@ -27,6 +28,7 @@ interface BulkKey {
  * doméstico encarar um bloco corporativo antes de ver a própria máquina.
  */
 export function BulkEnrollPanel() {
+  const policy = usePolicy();
   const toast = useToast();
   const confirm = useConfirm();
   const [open, setOpen] = useState(false);
@@ -113,7 +115,7 @@ export function BulkEnrollPanel() {
       {open && (
         <div className="mt-4 space-y-4">
           <p className="max-w-prose text-xs leading-relaxed text-fg-2">
-            O código individual vale para um computador e expira em 30 minutos. Uma{" "}
+            O código individual vale para um computador e expira em {policy?.codigo_pareamento.rotulo ?? "pouco tempo"}. Uma{" "}
             <span className="inline-flex items-center gap-1 text-fg">
               chave de instalação em massa
               <Explain term="chave_massa" />
