@@ -16,7 +16,8 @@ import sys
 
 import pytest
 
-AGENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "agent"))
+from tests._caminhos import AGENT_DIR, FRONTEND_DIR, SEM_FRONTEND
+
 if AGENT_DIR not in sys.path:
     sys.path.insert(0, AGENT_DIR)
 
@@ -109,11 +110,11 @@ class TestUninstaller:
     ficava travada e a máquina continuava monitorada.
     """
 
-    INSTALLERS = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src", "utils", "installers.ts")
-    )
+    INSTALLERS = os.path.join(FRONTEND_DIR, "src", "utils", "installers.ts")
 
     def _source(self):
+        if not os.path.exists(self.INSTALLERS):
+            pytest.skip(SEM_FRONTEND)
         return open(self.INSTALLERS, encoding="utf-8").read()
 
     def test_kill_filter_does_not_match_itself(self):

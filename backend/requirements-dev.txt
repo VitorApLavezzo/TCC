@@ -1,0 +1,7 @@
+# Para rodar os testes. Instalado também na imagem do backend, para
+# `docker compose exec backend python -m pytest` funcionar sem instalar nada
+# a cada reinício do container.
+pytest==9.1.1
+# Os testes do agente (tests/test_agent.py) importam os módulos dele; a versão
+# é a mesma de agent/requirements.txt. requests já vem pelo pywebpush.
+psutil==6.0.0

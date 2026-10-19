@@ -318,7 +318,8 @@ class TestGuardaLocalDoAgente:
     def _guard(self):
         import os
         import sys
-        sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../agent")))
+        from tests._caminhos import AGENT_DIR
+        sys.path.insert(0, AGENT_DIR)
         from localguard import LocalGuard
         return LocalGuard()
 
