@@ -53,6 +53,8 @@ export default {
         // Íris: a cor do AnomalyDetect. Só interação e marca de detecção —
         // nunca "saudável", nunca preenchimento de superfície.
         accent: "rgb(var(--accent) / <alpha-value>)",
+        "series-1": "rgb(var(--series-1) / <alpha-value>)",
+        "series-2": "rgb(var(--series-2) / <alpha-value>)",
 
         // Estado de saúde: a única outra saturação com significado.
         ok: "rgb(var(--ok) / <alpha-value>)",

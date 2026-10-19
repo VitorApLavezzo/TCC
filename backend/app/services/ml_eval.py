@@ -20,6 +20,12 @@ Aqui ficam as duas medições que respondem isso:
 2. **Ablação**: os mesmos cenários do benchmark rodados três vezes — só
    regras, só modelo, os dois — para mostrar o que cada camada contribui.
 
+3. **Escolha do algoritmo**. A proposta do trabalho cita dois algoritmos —
+   Isolation Forest (Liu, Ting e Zhou, 2008) e One-Class SVM (Schölkopf et
+   al., 2001) — e o sistema usa um. A mesma retenção temporal mede os dois
+   nos mesmos dados, para a escolha se apoiar num número desta máquina e não
+   só na literatura.
+
 O corte temporal é deliberado: separar treino e teste ao acaso deixaria
 leituras do mesmo minuto dos dois lados e inflaria o resultado.
 """
@@ -29,6 +35,7 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import OneClassSVM
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -36,10 +43,39 @@ from app.core.timeutil import tz_offset_minutes
 from app.models.machine import Machine
 from app.models.metric import Metric
 from app.services import ml_service
+from app.services.forecasting import br
 
 # Mínimo para o corte fazer sentido: menos do que isso e o teste é anedota
 MIN_SAMPLES = 200
 TEST_RATIO = 0.3
+
+# Diferença de área sob a curva abaixo da qual dois detectores empatam.
+MARGEM_AUC = 0.05
+
+
+def _parametros() -> Dict[str, Dict[str, Any]]:
+    """Hiperparâmetros dos dois algoritmos comparados — e reportados na
+    resposta, porque a metodologia precisa deles para ser reproduzível.
+
+    Os dois partem da mesma suposição sobre a fração de anomalias: `nu` do
+    One-Class SVM é o limite superior dessa fração, o mesmo papel do
+    `contamination` do Isolation Forest. Sem isso um deles poderia ganhar só
+    por esperar mais anomalias que o outro. Nenhum dos dois é ajustado olhando
+    o teste — ajustar só o SVM seria vazamento e tornaria a comparação
+    desonesta.
+    """
+    return {
+        "isolation_forest": {
+            "n_estimators": 300,
+            "contamination": settings.ISOLATION_FOREST_CONTAMINATION,
+        },
+        "one_class_svm": {
+            "kernel": "rbf",
+            "gamma": "scale",
+            "nu": settings.ISOLATION_FOREST_CONTAMINATION,
+        },
+    }
+
 
 # Índices, dentro do vetor de atributos, das medidas que uma anomalia mexe.
 # As cíclicas (hora, dia) não são perturbadas: a anomalia injetada acontece
@@ -112,20 +148,26 @@ def holdout(db: Session, machine: Machine, test_ratio: float = TEST_RATIO,
     X_anom = _inject(X_test, rng)
     y = np.concatenate([np.zeros(len(X_test)), np.ones(len(X_anom))])
 
+    params = _parametros()
     scaler = StandardScaler().fit(X_train)
     modelo = IsolationForest(
-        n_estimators=300,
-        contamination=settings.ISOLATION_FOREST_CONTAMINATION,
+        **params["isolation_forest"],
         random_state=seed,
         n_jobs=-1,
     ).fit(scaler.transform(X_train))
+    # Núcleo RBF é sensível à escala: recebe o mesmo padronizador do Isolation
+    # Forest, ajustado só no treino.
+    svm = OneClassSVM(**params["one_class_svm"]).fit(scaler.transform(X_train))
 
     # decision_function: quanto menor, mais fora do padrão. Invertido, vira
     # "nota de anomalia", que é o que a curva ROC espera.
-    scores_modelo = -modelo.decision_function(scaler.transform(np.vstack([X_test, X_anom])))
+    avaliado = scaler.transform(np.vstack([X_test, X_anom]))
+    scores_modelo = -modelo.decision_function(avaliado)
+    scores_svm = -svm.decision_function(avaliado)
     scores_sigma = _sigma_baseline(X_train, np.vstack([X_test, X_anom]))
 
     auc_modelo = float(roc_auc_score(y, scores_modelo))
+    auc_svm = float(roc_auc_score(y, scores_svm))
     auc_sigma = float(roc_auc_score(y, scores_sigma))
     ponto = _operating_point(modelo, scaler, X_train, X_test, X_anom)
 
@@ -137,12 +179,16 @@ def holdout(db: Session, machine: Machine, test_ratio: float = TEST_RATIO,
         "samples_test": len(X_test),
         "samples_injected": len(X_anom),
         "auc_model": round(auc_modelo, 4),
+        "auc_ocsvm": round(auc_svm, 4),
         "auc_sigma_baseline": round(auc_sigma, 4),
         "gain": round(auc_modelo - auc_sigma, 4),
         "operating_point": ponto,
         "roc": _curve(y, scores_modelo),
+        "roc_ocsvm": _curve(y, scores_svm),
         "roc_baseline": _curve(y, scores_sigma),
         "verdict": _verdict(auc_modelo, auc_sigma),
+        "algorithm_verdict": _algorithm_verdict(auc_modelo, auc_svm),
+        "params": params,
     }
 
 
@@ -191,14 +237,36 @@ def _verdict(auc_modelo: float, auc_sigma: float) -> str:
     if auc_modelo < 0.7:
         return ("O modelo separa mal as leituras injetadas das normais nesta máquina "
                 "(área sob a curva abaixo de 0,70). Aqui, quem está sustentando a detecção são as regras.")
-    if diferenca >= 0.05:
-        return (f"O modelo supera o limiar fixo de três desvios por {diferenca:.02f} de área sob a curva: "
+    if diferenca >= MARGEM_AUC:
+        return (f"O modelo supera o limiar fixo de três desvios por {br(diferenca, 2)} de área sob a curva: "
                 "aprender o normal desta máquina rende mais do que um limite igual para todas.")
-    if diferenca <= -0.05:
+    if diferenca <= -MARGEM_AUC:
         return ("Nesta máquina o limiar fixo foi melhor que o modelo — sinal de que o histórico "
                 "ainda é curto ou muito uniforme para o modelo ter o que aprender.")
     return ("Modelo e limiar fixo empataram dentro da margem. O ganho do modelo aparece em máquinas "
             "com rotina marcada, não em uso uniforme.")
+
+
+def _algorithm_verdict(auc_isolation: float, auc_svm: float) -> str:
+    """Qual dos dois algoritmos da proposta separou melhor nesta máquina.
+
+    Se o One-Class SVM ganhar, a frase diz isso e para aí: inventar uma razão
+    para ter ficado com o Isolation Forest mesmo assim seria pior que o
+    resultado desfavorável. Na medição de custo feita para esta comparação, o
+    SVM com `nu` = 0,03 foi até mais rápido — custo não serve de desculpa.
+    """
+    diferenca = auc_isolation - auc_svm
+    if max(auc_isolation, auc_svm) < 0.7:
+        return ("Nenhum dos dois algoritmos separa bem as leituras injetadas das normais nesta "
+                "máquina (área sob a curva abaixo de 0,70 nos dois).")
+    if diferenca >= MARGEM_AUC:
+        return (f"O Isolation Forest supera o One-Class SVM por {br(diferenca, 2)} de área sob a curva "
+                "nesta máquina: a escolha do algoritmo se sustenta nos dados, não só na literatura.")
+    if diferenca <= -MARGEM_AUC:
+        return (f"Nesta máquina o One-Class SVM separou melhor que o Isolation Forest "
+                f"({br(-diferenca, 2)} a mais de área sob a curva).")
+    return ("Isolation Forest e One-Class SVM empataram dentro da margem de "
+            f"{br(MARGEM_AUC, 2)}: nesta máquina a escolha entre os dois não muda a detecção.")
 
 
 LAYER_LABELS = {

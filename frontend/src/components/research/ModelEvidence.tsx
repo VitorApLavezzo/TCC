@@ -87,11 +87,17 @@ export function ModelEvidence() {
   }
 
   const linhas: AblationRow[] = ablation?.rows ?? [];
-  const curva = (holdout?.roc ?? []).map((p: any, i: number) => ({
-    fpr: p.fpr,
-    modelo: p.tpr,
-    limiar: holdout?.roc_baseline?.[i]?.tpr ?? null,
-  }));
+  // Cada curva com os próprios pontos. Antes as curvas eram emparelhadas pelo
+  // índice e todas desenhadas no `fpr` do modelo — mas cada curva ROC tem os
+  // seus pares (fpr, tpr), e a do limiar fixo saía nas posições x erradas.
+  const curvas = [
+    { chave: "isolation", nome: "Isolation Forest", pontos: holdout?.roc ?? [],
+      cor: "text-series-1", largura: 2, traco: undefined },
+    { chave: "svm", nome: "One-Class SVM", pontos: holdout?.roc_ocsvm ?? [],
+      cor: "text-series-2", largura: 2, traco: "6 3" },
+    { chave: "limiar", nome: "Limiar de 3 desvios", pontos: holdout?.roc_baseline ?? [],
+      cor: "text-fg-3", largura: 1.5, traco: "2 3" },
+  ].filter((c) => c.pontos.length > 0);
 
   return (
     <div className="space-y-8">
@@ -145,7 +151,7 @@ export function ModelEvidence() {
       </Section>
 
       <Section
-        title="O modelo contra um limiar fixo"
+        title="Isolation Forest contra as alternativas"
         description="Treino na primeira parte do histórico, medição na parte final que ele nunca viu"
         actions={
           <select
@@ -174,9 +180,15 @@ export function ModelEvidence() {
             <Panel className="p-4">
               <dl className="space-y-2 text-sm">
                 <div className="flex justify-between gap-4">
-                  <dt className="text-fg-2">Área sob a curva — modelo</dt>
+                  <dt className="text-fg-2">Área sob a curva — Isolation Forest</dt>
                   <dd className="tnum font-mono text-fg">{holdout.auc_model.toFixed(3)}</dd>
                 </div>
+                {holdout.auc_ocsvm != null && (
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-fg-2">Área sob a curva — One-Class SVM</dt>
+                    <dd className="tnum font-mono text-fg">{holdout.auc_ocsvm.toFixed(3)}</dd>
+                  </div>
+                )}
                 <div className="flex justify-between gap-4">
                   <dt className="text-fg-2">Área sob a curva — limiar de 3 desvios</dt>
                   <dd className="tnum font-mono text-fg">{holdout.auc_sigma_baseline.toFixed(3)}</dd>
@@ -197,19 +209,34 @@ export function ModelEvidence() {
                 </div>
               </dl>
               <p className="mt-3 max-w-prose text-sm leading-relaxed text-fg-2">{holdout.verdict}</p>
+              {holdout.algorithm_verdict && (
+                <p className="mt-2 max-w-prose text-sm leading-relaxed text-fg-2">{holdout.algorithm_verdict}</p>
+              )}
             </Panel>
 
             <Panel className="p-4">
               <p className="channel-label">Curva ROC</p>
+              <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-micro text-fg-2" aria-label="Legenda">
+                {curvas.map((c) => (
+                  <li key={c.chave} className="inline-flex items-center gap-1.5">
+                    <svg width="20" height="6" aria-hidden="true" className={c.cor}>
+                      <line x1="0" y1="3" x2="20" y2="3" stroke="currentColor" strokeWidth={c.largura}
+                            strokeDasharray={c.traco} />
+                    </svg>
+                    {c.nome}
+                  </li>
+                ))}
+              </ul>
               <div className="mt-2 h-48">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={curva} margin={{ top: 4, right: 8, bottom: 4, left: -20 }}>
+                  <LineChart margin={{ top: 4, right: 8, bottom: 4, left: -20 }}>
                     <XAxis dataKey="fpr" type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
                     <YAxis type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
-                    <Line type="monotone" dataKey="modelo" dot={false} strokeWidth={2} stroke="currentColor"
-                          className="text-accent" />
-                    <Line type="monotone" dataKey="limiar" dot={false} strokeWidth={1.5} strokeDasharray="4 3"
-                          stroke="currentColor" className="text-fg-3" />
+                    {curvas.map((c) => (
+                      <Line key={c.chave} data={c.pontos} dataKey="tpr" name={c.nome} type="linear"
+                            dot={false} isAnimationActive={false} strokeWidth={c.largura}
+                            strokeDasharray={c.traco} stroke="currentColor" className={c.cor} />
+                    ))}
                   </LineChart>
                 </ResponsiveContainer>
               </div>
