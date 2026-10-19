@@ -89,25 +89,43 @@ class TestComparacaoDeAlgoritmos:
         assert a["auc_model"] == b["auc_model"]
 
 
+def _niveis(*pares):
+    """[(isolation, svm), ...] para k = 1, 2, 3, 5."""
+    return [{"sigma": k, "isolation_forest": a, "one_class_svm": b, "sigma_baseline": 0.5}
+            for k, (a, b) in zip((1, 2, 3, 5), pares)]
+
+
 class TestVereditoDoAlgoritmo:
     def test_isolation_forest_vence(self):
         from app.services.ml_eval import _algorithm_verdict
-        frase = _algorithm_verdict(0.95, 0.85)
+        frase = _algorithm_verdict(_niveis((0.80, 0.70), (0.90, 0.80), (0.95, 0.94), (0.99, 0.99)))
         assert "Isolation Forest" in frase and "supera" in frase
 
     def test_one_class_svm_vence(self):
         """Se o outro ganhou, a frase diz isso — sem inventar desculpa."""
         from app.services.ml_eval import _algorithm_verdict
-        frase = _algorithm_verdict(0.80, 0.92)
+        frase = _algorithm_verdict(_niveis((0.70, 0.71), (0.75, 0.85), (0.80, 0.92), (0.90, 0.99)))
         assert "One-Class SVM" in frase and "melhor" in frase
 
-    def test_empate_dentro_da_margem(self):
+    def test_empate_em_todos_os_niveis(self):
         from app.services.ml_eval import _algorithm_verdict
-        assert "empataram" in _algorithm_verdict(0.90, 0.88)
+        frase = _algorithm_verdict(_niveis((0.80, 0.79), (0.85, 0.86), (0.90, 0.88), (0.95, 0.96)))
+        assert "empataram" in frase
 
     def test_os_dois_ruins(self):
         from app.services.ml_eval import _algorithm_verdict
-        assert "nenhum dos dois" in _algorithm_verdict(0.60, 0.65).lower()
+        frase = _algorithm_verdict(_niveis((0.50, 0.52), (0.55, 0.58), (0.60, 0.62), (0.65, 0.68)))
+        assert "nenhum dos dois" in frase.lower()
+
+    def test_cruzamento_nao_vira_empate(self):
+        """O erro que a média escondia: o Isolation Forest melhor nos desvios
+        sutis, o SVM nos fortes, e a média dos níveis dizendo "empataram —
+        a escolha não muda a detecção". Muda, em sentidos opostos."""
+        from app.services.ml_eval import _algorithm_verdict
+        frase = _algorithm_verdict(_niveis((0.59, 0.53), (0.70, 0.69), (0.78, 0.84), (0.84, 0.95)))
+        assert "empataram" not in frase
+        assert "complementam" in frase
+        assert "1 desvio-padrão" in frase and "3 e 5 desvios-padrão" in frase
 
 
 class TestNumerosEmPortugues:
@@ -116,10 +134,104 @@ class TestNumerosEmPortugues:
 
     def test_veredito_do_algoritmo_usa_virgula(self):
         from app.services.ml_eval import _algorithm_verdict
-        for frase in (_algorithm_verdict(0.95, 0.85), _algorithm_verdict(0.80, 0.92),
-                      _algorithm_verdict(0.90, 0.88)):
-            assert "0." not in frase, frase
+        frase = _algorithm_verdict(_niveis((0.80, 0.79), (0.85, 0.86), (0.90, 0.88), (0.95, 0.96)))
+        assert "0." not in frase, frase
 
     def test_veredito_contra_o_limiar_usa_virgula(self):
         from app.services.ml_eval import _verdict
         assert "0." not in _verdict(0.95, 0.80)
+
+
+class TestInjecaoGraduada:
+    """A injeção antiga empurrava oito medidas ao mesmo tempo: qualquer
+    detector, inclusive o limiar de 3 desvios, chegava a área ~1,0 e a
+    comparação não diferenciava nada. Aqui a anomalia é uma medida só,
+    deslocada em k desvios-padrão do treino — e a pergunta vira "a partir de
+    quão sutil cada detector percebe"."""
+
+    def _base(self):
+        from app.services import ml_service
+        rng = np.random.default_rng(0)
+        X = rng.normal(50, 5, size=(40, len(ml_service.FEATURE_KEYS)))
+        sigma = X.std(axis=0)
+        return X, sigma
+
+    def test_mexe_em_uma_medida_so(self):
+        from app.services import ml_eval, ml_service
+        X, sigma = self._base()
+        col = ml_service.FEATURE_KEYS.index("net_connections")
+        Y = ml_eval._inject_single(X, col, 2.0, sigma)
+        mudou = np.where(np.any(Y != X, axis=0))[0]
+        assert list(mudou) == [col]
+        assert np.allclose(Y[:, col] - X[:, col], 2.0 * sigma[col])
+
+    def test_respeita_o_teto_da_medida(self):
+        """CPU e memória não passam de 100%."""
+        from app.services import ml_eval, ml_service
+        X, sigma = self._base()
+        col = ml_service.FEATURE_KEYS.index("cpu_percent")
+        X[:, col] = 99.0
+        assert ml_eval._inject_single(X, col, 5.0, sigma)[:, col].max() <= 100.0
+
+    def test_horario_nunca_e_perturbado(self):
+        """A anomalia acontece no mesmo instante da leitura original."""
+        from app.services import ml_eval, ml_service
+        perturbadas = {ml_service.FEATURE_KEYS[c] for c in ml_eval._perturbable_columns()}
+        assert not perturbadas & {"hour_sin", "hour_cos", "dow_sin", "dow_cos"}
+
+    def test_menor_desvio_percebido(self):
+        from app.services.ml_eval import _smallest_detectable
+        assert _smallest_detectable([(1, 0.6), (2, 0.93), (3, 0.99), (5, 1.0)]) == 2
+        assert _smallest_detectable([(1, 0.6), (2, 0.7), (3, 0.8), (5, 0.85)]) is None
+
+    def test_holdout_mede_os_tres_em_cada_nivel(self, db):
+        from app.services import ml_eval
+        s = ml_eval.holdout(db, _maquina_com_historico(db))["sensitivity"]
+        assert [r["sigma"] for r in s["rows"]] == list(ml_eval.SENSITIVITY_LEVELS)
+        for r in s["rows"]:
+            for detector in ("isolation_forest", "one_class_svm", "sigma_baseline"):
+                assert 0.0 <= r[detector] <= 1.0
+        assert set(s["smallest_detectable"]) == {"isolation_forest", "one_class_svm", "sigma_baseline"}
+
+    def test_desvio_maior_e_mais_facil_de_perceber(self, db):
+        """Sanidade do método: se 5 desvios não fossem mais fáceis que 1, a
+        injeção estaria medindo outra coisa."""
+        from app.services import ml_eval
+        rows = ml_eval.holdout(db, _maquina_com_historico(db))["sensitivity"]["rows"]
+        for detector in ("isolation_forest", "one_class_svm", "sigma_baseline"):
+            assert rows[-1][detector] >= rows[0][detector] - 0.01
+
+    def test_veredito_do_algoritmo_vem_da_medicao_graduada(self, db):
+        """É onde os algoritmos podem se diferenciar; na injeção de oito
+        medidas os dois empatam sempre."""
+        from app.services import ml_eval
+        r = ml_eval.holdout(db, _maquina_com_historico(db))
+        assert r["algorithm_verdict"] == ml_eval._algorithm_verdict(r["sensitivity"]["rows"])
+
+    def test_graduada_e_reproduzivel(self, db):
+        from app.services import ml_eval
+        m = _maquina_com_historico(db)
+        assert ml_eval.holdout(db, m)["sensitivity"] == ml_eval.holdout(db, m)["sensitivity"]
+
+
+class TestBaseDaVarredura:
+    """A varredura pontua níveis × medidas × leituras. Com o histórico cheio
+    eram 96 mil linhas e 8 s num endpoint síncrono — sem ganho de precisão:
+    com 1000 leituras-base o erro padrão da área já fica abaixo de 0,01."""
+
+    def test_limita_o_numero_de_leituras_base(self):
+        from app.services import ml_eval
+        X = np.arange(3000 * 2, dtype=float).reshape(3000, 2)
+        assert len(ml_eval._sensitivity_base(X)) == ml_eval.SENSITIVITY_MAX_BASE
+
+    def test_espalha_pelo_periodo_inteiro(self):
+        """As primeiras N leituras concentrariam a amostra numa faixa do dia."""
+        from app.services import ml_eval
+        X = np.arange(3000, dtype=float).reshape(3000, 1)
+        base = ml_eval._sensitivity_base(X)
+        assert base[0, 0] == 0 and base[-1, 0] == 2999
+
+    def test_historico_pequeno_usa_tudo(self):
+        from app.services import ml_eval
+        X = np.ones((90, 3))
+        assert len(ml_eval._sensitivity_base(X)) == 90

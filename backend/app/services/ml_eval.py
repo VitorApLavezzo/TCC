@@ -26,6 +26,13 @@ Aqui ficam as duas medições que respondem isso:
    nos mesmos dados, para a escolha se apoiar num número desta máquina e não
    só na literatura.
 
+4. **Sensibilidade** (injeção graduada). A injeção original empurra oito
+   medidas ao mesmo tempo: é um cenário real (um minerador mexe em CPU, rede
+   e carga juntos), mas fácil demais — todos os detectores, inclusive o
+   limiar de 3 desvios, chegam a área ~1,0 e a comparação não diferencia
+   nada. Aqui a anomalia é uma medida só, deslocada em k desvios-padrão do
+   treino, e a pergunta vira "a partir de quão sutil cada detector percebe".
+
 O corte temporal é deliberado: separar treino e teste ao acaso deixaria
 leituras do mesmo minuto dos dois lados e inflaria o resultado.
 """
@@ -51,6 +58,23 @@ TEST_RATIO = 0.3
 
 # Diferença de área sob a curva abaixo da qual dois detectores empatam.
 MARGEM_AUC = 0.05
+
+# Intensidades da injeção graduada, em desvios-padrão do treino. O 3 está na
+# lista de propósito: é onde o limiar fixo começa a enxergar por construção, e
+# o que interessa é o que cada modelo percebe abaixo dele.
+SENSITIVITY_LEVELS = (1, 2, 3, 5)
+
+# Área sob a curva a partir da qual se diz que um detector "percebe" um desvio.
+DETECTABLE_AUC = 0.9
+
+SENSITIVITY_DETECTORS = ("isolation_forest", "one_class_svm", "sigma_baseline")
+
+# Leituras-base da varredura. Com 1000 negativos e 8000 positivos por nível
+# (uma cópia por medida perturbável), o erro padrão da área sob a curva fica
+# abaixo de 0,01 (Hanley e McNeil, 1982) — oito vezes menor que a margem de
+# empate. Mais que isso só custava tempo: com o histórico cheio eram 96 mil
+# linhas pontuadas e 8 s num endpoint síncrono.
+SENSITIVITY_MAX_BASE = 1000
 
 
 def _parametros() -> Dict[str, Dict[str, Any]]:
@@ -108,6 +132,26 @@ def _inject(X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
             Y[:, col] = Y[:, col] + escala
         if teto is not None:
             Y[:, col] = np.minimum(Y[:, col], teto)
+    return Y
+
+
+def _perturbable_columns() -> List[int]:
+    """Colunas que a injeção graduada pode deslocar — nunca hora nem dia."""
+    return [ml_service.FEATURE_KEYS.index(k) for k in PERTURBABLE if k in ml_service.FEATURE_KEYS]
+
+
+def _inject_single(X: np.ndarray, col: int, k: float, sigma: np.ndarray) -> np.ndarray:
+    """Uma medida só, deslocada para cima em `k` desvios-padrão do treino.
+
+    Sem ruído por amostra, ao contrário de `_inject`: os positivos já variam
+    porque cada um parte de uma leitura real diferente, e um deslocamento
+    exato é o que dá sentido a "k desvios".
+    """
+    Y = X.copy()
+    Y[:, col] = Y[:, col] + k * sigma[col]
+    teto = PERTURBABLE[ml_service.FEATURE_KEYS[col]][2]
+    if teto is not None:
+        Y[:, col] = np.minimum(Y[:, col], teto)
     return Y
 
 
@@ -170,6 +214,7 @@ def holdout(db: Session, machine: Machine, test_ratio: float = TEST_RATIO,
     auc_svm = float(roc_auc_score(y, scores_svm))
     auc_sigma = float(roc_auc_score(y, scores_sigma))
     ponto = _operating_point(modelo, scaler, X_train, X_test, X_anom)
+    sensibilidade = _sensitivity(modelo, svm, scaler, X_train, X_test)
 
     return {
         "ready": True,
@@ -187,9 +232,74 @@ def holdout(db: Session, machine: Machine, test_ratio: float = TEST_RATIO,
         "roc_ocsvm": _curve(y, scores_svm),
         "roc_baseline": _curve(y, scores_sigma),
         "verdict": _verdict(auc_modelo, auc_sigma),
-        "algorithm_verdict": _algorithm_verdict(auc_modelo, auc_svm),
+        # Os dois algoritmos empatam sempre na injeção de oito medidas; é na
+        # graduada que podem se diferenciar, então o veredito sai dela.
+        "algorithm_verdict": _algorithm_verdict(sensibilidade["rows"]),
+        "sensitivity": sensibilidade,
+        "sensitivity_verdict": _sensitivity_verdict(sensibilidade),
         "params": params,
     }
+
+
+def _sensitivity_base(X_test: np.ndarray) -> np.ndarray:
+    """Até `SENSITIVITY_MAX_BASE` leituras, espaçadas pelo período de teste
+    inteiro: as primeiras N concentrariam a amostra numa faixa do dia."""
+    if len(X_test) <= SENSITIVITY_MAX_BASE:
+        return X_test
+    indices = np.linspace(0, len(X_test) - 1, SENSITIVITY_MAX_BASE).round().astype(int)
+    return X_test[indices]
+
+
+def _sensitivity(modelo, svm, scaler, X_train: np.ndarray, X_test: np.ndarray) -> Dict[str, Any]:
+    """Área sob a curva de cada detector, por intensidade de desvio.
+
+    Os negativos são as leituras de teste como vieram; os positivos, as mesmas
+    leituras com uma medida deslocada — uma cópia para cada medida perturbável.
+    O desvio-padrão é o do treino, o mesmo que o padronizador dos modelos e o
+    limiar fixo usam: "k desvios" significa a mesma coisa para os três.
+    """
+    sigma = X_train.std(axis=0)
+    colunas = [c for c in _perturbable_columns() if sigma[c] > 1e-9]
+    X_test = _sensitivity_base(X_test)
+    normal_avaliado = scaler.transform(X_test)
+    notas_normais = {
+        "isolation_forest": -modelo.decision_function(normal_avaliado),
+        "one_class_svm": -svm.decision_function(normal_avaliado),
+        "sigma_baseline": _sigma_baseline(X_train, X_test),
+    }
+
+    linhas = []
+    for k in SENSITIVITY_LEVELS:
+        anomalas = np.vstack([_inject_single(X_test, c, k, sigma) for c in colunas])
+        anomalas_avaliadas = scaler.transform(anomalas)
+        notas_anomalas = {
+            "isolation_forest": -modelo.decision_function(anomalas_avaliadas),
+            "one_class_svm": -svm.decision_function(anomalas_avaliadas),
+            "sigma_baseline": _sigma_baseline(X_train, anomalas),
+        }
+        y = np.concatenate([np.zeros(len(X_test)), np.ones(len(anomalas))])
+        linha: Dict[str, Any] = {"sigma": k}
+        for detector in SENSITIVITY_DETECTORS:
+            notas = np.concatenate([notas_normais[detector], notas_anomalas[detector]])
+            linha[detector] = round(float(roc_auc_score(y, notas)), 4)
+        linhas.append(linha)
+
+    return {
+        "levels": list(SENSITIVITY_LEVELS),
+        "features": [ml_service.FEATURE_KEYS[c] for c in colunas],
+        "rows": linhas,
+        "smallest_detectable": {
+            d: _smallest_detectable([(l["sigma"], l[d]) for l in linhas]) for d in SENSITIVITY_DETECTORS
+        },
+    }
+
+
+def _smallest_detectable(pares: List[Tuple[float, float]]) -> Optional[float]:
+    """Menor desvio em que o detector chega a `DETECTABLE_AUC`, ou None."""
+    for k, auc in pares:
+        if auc >= DETECTABLE_AUC:
+            return k
+    return None
 
 
 def _operating_point(modelo, scaler, X_train, X_test, X_anom) -> Dict[str, Any]:
@@ -247,26 +357,69 @@ def _verdict(auc_modelo: float, auc_sigma: float) -> str:
             "com rotina marcada, não em uso uniforme.")
 
 
-def _algorithm_verdict(auc_isolation: float, auc_svm: float) -> str:
-    """Qual dos dois algoritmos da proposta separou melhor nesta máquina.
+def _niveis(ks: List[float]) -> str:
+    """[1] -> "1 desvio-padrão"; [3, 5] -> "3 e 5 desvios-padrão"."""
+    nomes = [br(k, 0) if float(k).is_integer() else br(k, 1) for k in ks]
+    texto = nomes[0] if len(nomes) == 1 else ", ".join(nomes[:-1]) + " e " + nomes[-1]
+    return f"{texto} desvio-padrão" if ks == [1] else f"{texto} desvios-padrão"
+
+
+def _algorithm_verdict(linhas: List[Dict[str, Any]]) -> str:
+    """Qual dos dois algoritmos da proposta separou melhor, nível a nível.
+
+    A primeira versão comparava a média dos níveis, e a média escondia o
+    resultado mais interessante: os dois podem se cruzar — um melhor nos
+    desvios sutis, o outro nos fortes. Num histórico sintético com rotina, o
+    Isolation Forest ganhava em 1 desvio e o One-Class SVM em 3 e 5, e a média
+    os empatava dizendo que "a escolha não muda a detecção". Mudava, em
+    sentidos opostos.
 
     Se o One-Class SVM ganhar, a frase diz isso e para aí: inventar uma razão
     para ter ficado com o Isolation Forest mesmo assim seria pior que o
     resultado desfavorável. Na medição de custo feita para esta comparação, o
     SVM com `nu` = 0,03 foi até mais rápido — custo não serve de desculpa.
     """
-    diferenca = auc_isolation - auc_svm
-    if max(auc_isolation, auc_svm) < 0.7:
-        return ("Nenhum dos dois algoritmos separa bem as leituras injetadas das normais nesta "
-                "máquina (área sob a curva abaixo de 0,70 nos dois).")
-    if diferenca >= MARGEM_AUC:
-        return (f"O Isolation Forest supera o One-Class SVM por {br(diferenca, 2)} de área sob a curva "
-                "nesta máquina: a escolha do algoritmo se sustenta nos dados, não só na literatura.")
-    if diferenca <= -MARGEM_AUC:
-        return (f"Nesta máquina o One-Class SVM separou melhor que o Isolation Forest "
-                f"({br(-diferenca, 2)} a mais de área sob a curva).")
-    return ("Isolation Forest e One-Class SVM empataram dentro da margem de "
+    melhor_isolation = [l["sigma"] for l in linhas
+                        if l["isolation_forest"] - l["one_class_svm"] >= MARGEM_AUC]
+    melhor_svm = [l["sigma"] for l in linhas
+                  if l["one_class_svm"] - l["isolation_forest"] >= MARGEM_AUC]
+
+    if max(max(l["isolation_forest"], l["one_class_svm"]) for l in linhas) < 0.7:
+        return ("Nenhum dos dois algoritmos separa bem as leituras desviadas das normais nesta "
+                "máquina (área sob a curva abaixo de 0,70 em todos os níveis).")
+    if melhor_isolation and melhor_svm:
+        return (f"Os dois se complementam nesta máquina: o Isolation Forest separa melhor os desvios "
+                f"de {_niveis(melhor_isolation)}, e o One-Class SVM, os de {_niveis(melhor_svm)}.")
+    if melhor_isolation:
+        return (f"O Isolation Forest supera o One-Class SVM nos desvios de {_niveis(melhor_isolation)} "
+                "e não perde em nenhum nível: a escolha do algoritmo se sustenta nos dados, não só "
+                "na literatura.")
+    if melhor_svm:
+        return (f"Nesta máquina o One-Class SVM separou melhor que o Isolation Forest nos desvios de "
+                f"{_niveis(melhor_svm)}, sem perder em nenhum nível.")
+    return (f"Isolation Forest e One-Class SVM empataram em todos os níveis, dentro da margem de "
             f"{br(MARGEM_AUC, 2)}: nesta máquina a escolha entre os dois não muda a detecção.")
+
+
+_NOMES = {
+    "isolation_forest": "o Isolation Forest",
+    "one_class_svm": "o One-Class SVM",
+    "sigma_baseline": "o limiar fixo",
+}
+
+
+def _sensitivity_verdict(sensibilidade: Dict[str, Any]) -> str:
+    """Quão sutil é o menor desvio que cada detector percebe, numa frase."""
+    maior = SENSITIVITY_LEVELS[-1]
+    partes = []
+    for detector in SENSITIVITY_DETECTORS:
+        k = sensibilidade["smallest_detectable"][detector]
+        if k is None:
+            partes.append(f"{_NOMES[detector]} não chega a perceber nem com {maior}")
+        else:
+            partes.append(f"{_NOMES[detector]} a partir de {k}")
+    return ("Desviando uma medida só, " + ", ".join(partes[:-1]) + " e " + partes[-1]
+            + f" desvios-padrão (área sob a curva ≥ {br(DETECTABLE_AUC, 1)}).")
 
 
 LAYER_LABELS = {

@@ -25,6 +25,12 @@ const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).
  * modelo acrescenta algo às regras (ablação), e ele separa melhor que um
  * limiar fixo de três desvios (retenção temporal, com área sob a curva).
  */
+const SENSIBILIDADE = [
+  { chave: "isolation_forest", nome: "Isolation Forest" },
+  { chave: "one_class_svm", nome: "One-Class SVM" },
+  { chave: "sigma_baseline", nome: "Limiar de 3 desvios" },
+] as const;
+
 export function ModelEvidence() {
   const toast = useToast();
   const [ablation, setAblation] = useState<any>(null);
@@ -178,7 +184,8 @@ export function ModelEvidence() {
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             <Panel className="p-4">
-              <dl className="space-y-2 text-sm">
+              <p className="channel-label">Anomalia em várias medidas ao mesmo tempo</p>
+              <dl className="mt-2 space-y-2 text-sm">
                 <div className="flex justify-between gap-4">
                   <dt className="text-fg-2">Área sob a curva — Isolation Forest</dt>
                   <dd className="tnum font-mono text-fg">{holdout.auc_model.toFixed(3)}</dd>
@@ -209,9 +216,6 @@ export function ModelEvidence() {
                 </div>
               </dl>
               <p className="mt-3 max-w-prose text-sm leading-relaxed text-fg-2">{holdout.verdict}</p>
-              {holdout.algorithm_verdict && (
-                <p className="mt-2 max-w-prose text-sm leading-relaxed text-fg-2">{holdout.algorithm_verdict}</p>
-              )}
             </Panel>
 
             <Panel className="p-4">
@@ -241,10 +245,63 @@ export function ModelEvidence() {
                 </ResponsiveContainer>
               </div>
               <p className="mt-1 text-micro text-fg-3">
-                Linha cheia: modelo. Tracejada: limiar fixo. Quanto mais para o canto superior
-                esquerdo, melhor.
+                Quanto mais para o canto superior esquerdo, melhor.
               </p>
             </Panel>
+
+            {holdout.sensitivity && (
+              <Panel className="p-4 lg:col-span-2">
+                <p className="channel-label">Anomalia em uma medida só</p>
+                <p className="mt-1 max-w-prose text-sm leading-relaxed text-fg-2">
+                  Uma única medida deslocada para cima, em desvios-padrão do treino. É onde os
+                  detectores se diferenciam: com várias medidas mexendo juntas, todos acertam.
+                </p>
+                <div className="scroll-hint mt-3 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <caption className="sr-only">
+                      Área sob a curva de cada detector por intensidade do desvio. O maior valor de
+                      cada linha está em negrito.
+                    </caption>
+                    <thead>
+                      <tr className="border-b border-hairline text-left text-micro uppercase tracking-wide text-fg-3">
+                        <th className="py-2 font-medium">Desvio</th>
+                        {SENSIBILIDADE.map((d) => (
+                          <th key={d.chave} className="py-2 text-right font-medium">{d.nome}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-hairline">
+                      {holdout.sensitivity.rows.map((l: any) => {
+                        // O melhor de cada linha em negrito: é assim que um
+                        // cruzamento entre detectores salta aos olhos.
+                        const melhor = Math.max(...SENSIBILIDADE.map((d) => l[d.chave]));
+                        return (
+                          <tr key={l.sigma}>
+                            <td className="py-2 text-fg-2">
+                              {l.sigma} {l.sigma === 1 ? "desvio-padrão" : "desvios-padrão"}
+                            </td>
+                            {SENSIBILIDADE.map((d) => (
+                              <td key={d.chave}
+                                  className={`tnum py-2 text-right font-mono ${
+                                    l[d.chave] === melhor ? "font-semibold text-fg" : "text-fg-2"
+                                  }`}>
+                                {l[d.chave].toFixed(3)}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {holdout.sensitivity_verdict && (
+                  <p className="mt-3 max-w-prose text-sm leading-relaxed text-fg-2">{holdout.sensitivity_verdict}</p>
+                )}
+                {holdout.algorithm_verdict && (
+                  <p className="mt-2 max-w-prose text-sm leading-relaxed text-fg-2">{holdout.algorithm_verdict}</p>
+                )}
+              </Panel>
+            )}
           </div>
         )}
       </Section>
