@@ -17,10 +17,10 @@ Projeto de TCC — o objetivo é que **qualquer pessoa**, mesmo sem conhecimento
 - [Conectando computadores (agente)](#conectando-computadores-agente)
 - [Gerenciando as máquinas](#gerenciando-as-máquinas)
 - [Configuração (.env)](#configuração-env)
-- [Configurando a IA (Ollama e Groq)](#configurando-a-ia-ollama-e-groq)
+- [Configurando a IA (Ollama e Claude)](#configurando-a-ia-ollama-e-claude)
 - [Login com Google (opcional)](#login-com-google-opcional)
 - [Principais endpoints da API](#principais-endpoints-da-api)
-- [Operação: observabilidade, CI e segurança](#operação-observabilidade-ci-e-segurança)
+- [Operação: observabilidade, CI, backup e segurança](#operação-observabilidade-ci-backup-e-segurança)
 - [Testes](#testes)
 - [Solução de problemas](#solução-de-problemas)
 
@@ -90,14 +90,25 @@ Cada anomalia gera uma explicação em **linguagem simples para leigos**, com: r
 A geração usa uma **cadeia de provedores com fallback automático** ([ai_service.py](backend/app/services/ai_service.py)):
 
 ```
-1. Ollama (LLM local, ex: qwen2.5:14b — grátis e privado, requer GPU)
+1. Ollama (LLM local no PC com GPU, ex: qwen2.5:14b — grátis e privado)
         │ se offline/falhar (timeout de conexão: 5s)
         ▼
-2. API em nuvem compatível com OpenAI (Groq por padrão — camada gratuita)
+2. Claude pela CLI (usa a assinatura — dispensa chave de API)
+        │ se desativado/falhar
+        ▼
+3. API em nuvem compatível com OpenAI (Groq etc. — só se houver chave)
         │ se não configurada/falhar
         ▼
-3. Análise estática local (causas e recomendações pré-escritas por tipo)
+4. Análise estática local (causas e recomendações pré-escritas por tipo)
 ```
+
+O Claude pela CLI é um agente, não só um modelo — e o texto enviado carrega
+dado que um atacante controla (nome de processo, linha de comando). Por isso
+ele roda **só gerando texto**: nenhuma ferramenta, nenhum servidor MCP, nenhuma
+configuração de usuário (logo nenhum plugin nem hook), com um system prompt
+que diz que o pedido é dado, não instrução, e sem as variáveis de ambiente do
+backend. Os provedores em nuvem (2 e 3) nunca recebem dados de uma máquina
+marcada como "só IA local".
 
 Ou seja: **o sistema nunca fica sem explicação**, mesmo sem GPU e sem internet. O campo `model_used` da explicação registra qual provedor respondeu. As explicações são geradas de forma assíncrona (fila serial) para não travar a ingestão de métricas.
 
@@ -160,7 +171,8 @@ O que este projeto tem e ferramentas parecidas (Zabbix, Netdata, PRTG, NinjaOne)
 
 - **Estudo de compreensão com pessoas**: cada participante vê os mesmos avisos, metade com a explicação da IA e metade só com os números, em ordem sorteada; o sistema cronometra, corrige e aplica o SUS no fim, com teste estatístico e exportação em CSV. É a única medida do projeto que não vem do sistema avaliando a si mesmo.
 - **Ablação das camadas**: os mesmos cenários rodados só com regras, só com o modelo e com os dois — a resposta em número para "o Isolation Forest acrescenta alguma coisa?".
-- **Validação por retenção temporal**: treino na primeira parte do histórico, medição na parte final, com área sob a curva ROC comparada a um detector de limiar fixo de três desvios.
+- **Validação por retenção temporal**: treino na primeira parte do histórico, medição na parte final, comparando três detectores nos mesmos dados — Isolation Forest, One-Class SVM (os dois algoritmos da proposta, com a mesma suposição sobre a fração de anomalias) e um limiar fixo de três desvios. Duas injeções de anomalia: várias medidas ao mesmo tempo (o caso do minerador, que todos acertam) e **uma medida só, deslocada em 1, 2, 3 e 5 desvios-padrão** — que é onde os detectores se diferenciam, e onde o veredito compara nível a nível.
+- **Benchmark reproduzível**: o relógio virtual dos cenários termina sempre na quarta-feira mais recente às 15h. O modelo usa hora e dia da semana como atributos, e ancorado em "agora" o mesmo código dava números diferentes conforme a hora em que se rodava.
 - **Fidelidade da explicação**: cada "se você fechar o Chrome, a memória cai para 48%" é conferido contra a leitura seguinte à ação, e a taxa de acerto sai por provedor. Medir se a IA **estava certa**, e não se o texto pareceu bom.
 
 ---
@@ -419,7 +431,7 @@ Parâmetros de detecção (em [config.py](backend/app/config.py), sobrescrevíve
 
 ---
 
-## Configurando a IA (Ollama e Groq)
+## Configurando a IA (Ollama e Claude)
 
 ### Opção A — Ollama em outra máquina (ex: seu PC com GPU)
 
@@ -431,9 +443,26 @@ Parâmetros de detecção (em [config.py](backend/app/config.py), sobrescrevíve
 
 `OLLAMA_BASE_URL=http://ollama:11434` e suba com `docker compose --profile local-ollama up -d`.
 
-### Fallback em nuvem (Groq — recomendado ter sempre)
+### Claude pela CLI (reserva quando o PC com GPU está desligado)
 
-Crie uma chave gratuita em https://console.groq.com/keys e coloque em `CLOUD_LLM_API_KEY`. Quando o Ollama estiver desligado/inacessível, as explicações continuam funcionando pela nuvem.
+Usa a assinatura do Claude já logada na sua máquina — não precisa de chave de
+API. A imagem do backend traz a CLI; a credencial vem da pasta apontada por
+`CLAUDE_HOST_CONFIG`, montada somente-leitura e copiada para dentro do
+container ao subir. No `.env`:
+
+```bash
+CLAUDE_CLI_ENABLED=true
+CLAUDE_CLI_MODEL=sonnet              # alias do modelo mais recente da família
+CLAUDE_HOST_CONFIG=/home/SEU-USUARIO/.claude
+```
+
+Apontar para o `~/.claude` de verdade (e não para uma cópia) faz um
+`docker compose restart backend` pegar sempre a credencial atual.
+
+### API em nuvem compatível com OpenAI (opcional)
+
+Com uma chave em `CLOUD_LLM_API_KEY` (ex: Groq, gratuita em
+https://console.groq.com/keys), entra depois do Claude na cadeia.
 
 ---
 
@@ -496,7 +525,7 @@ Documentação interativa completa em `/docs`. Resumo:
 
 ---
 
-## Operação: observabilidade, CI e segurança
+## Operação: observabilidade, CI, backup e segurança
 
 **Métricas do serviço.** `GET /metrics` expõe, no formato de texto do
 Prometheus e sem dependência nova, contadores de requisições por rota, e — o
@@ -510,6 +539,16 @@ aberta (não há dado de usuário nela); num servidor público, feche-a no Nginx
 roda, a cada push e pull request, os testes do backend (`pytest`), os testes do
 painel (`vitest`) e a verificação de tipos com o build (`tsc && vite build`).
 
+**Backup do banco.** O serviço `backup` do compose faz um `pg_dump` a cada 6
+horas em `./backups` (fora do git: tem dados das máquinas monitoradas) e guarda
+14 dias (`BACKUP_INTERVAL_HOURS`, `BACKUP_KEEP_DAYS`). O dump só ganha o nome
+final se terminou, então um arquivo interrompido nunca se passa por válido.
+Para restaurar (apaga e recria as tabelas do banco atual):
+
+```bash
+gunzip -c backups/anomaly_db-AAAAMMDD-HHMMSS.sql.gz | docker compose exec -T db psql -U postgres -d anomaly_db
+```
+
 **Segurança.** O modelo de ameaça — quem é confiado, quanto, e quais riscos
 foram aceitos de propósito — está em [SECURITY.md](SECURITY.md). Em resumo:
 login, cadastro e pareamento têm limite de tentativas por IP; a lista de
@@ -522,12 +561,18 @@ rede.
 ## Testes
 
 ```bash
+# com o sistema rodando: a imagem do backend já traz o pytest
+docker compose exec backend python -m pytest
+
+# ou fora do Docker
 cd backend
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-Os testes usam SQLite em memória — não precisam do PostgreSQL nem de Docker.
+Os testes usam SQLite em memória — não precisam do PostgreSQL. Os do agente
+acham a pasta dele tanto no checkout quanto no container; os poucos que leem o
+código do frontend são pulados no container, com o motivo escrito, e rodam no CI.
 Cobrem a API, o motor de detecção, a checagem de números das explicações, a
 política de notificações e os módulos do agente (remoção de segredos, arquivos-isca,
 beaconing, autoatualização). `tests/test_novidades.py` cobre o que é novo e
