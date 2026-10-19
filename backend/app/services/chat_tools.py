@@ -4,6 +4,11 @@ Ferramentas de leitura que a conversa pode chamar.
 Cada ferramenta é uma consulta fechada aos dados do próprio dono, com escopo
 sempre limitado às máquinas dele — a IA nunca monta SQL nem alcança dados de
 outra conta. Todas são somente leitura.
+
+E o escopo respeita a privacidade de cada máquina (`reachable`): com foco, a
+conversa alcança só a máquina em foco; sem foco, todas menos as "sem IA". Antes
+uma ferramenta chamada com `machine_id` de outra máquina escapava do foco, e
+uma máquina "só IA local" chegava à nuvem mesmo com outra selecionada.
 """
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
@@ -21,10 +26,32 @@ from app.models.metric import Metric
 from app.models.process import ProcessSnapshot
 
 
-def _machines(db: Session, user, machine: Optional[Machine]) -> List[Machine]:
+def reachable(db: Session, user, machine: Optional[Machine]) -> List[Machine]:
+    """As máquinas que esta conversa pode consultar."""
+    from app.services import llm
     if machine is not None:
-        return [machine]
-    return db.query(Machine).filter(Machine.owner_id == user.id).all()
+        return [] if llm.privacy_of(machine) == llm.PRIVACY_NO_AI else [machine]
+    return [m for m in db.query(Machine).filter(Machine.owner_id == user.id).all()
+            if llm.privacy_of(m) != llm.PRIVACY_NO_AI]
+
+
+def conversation_privacy(machine: Optional[Machine], alcance: List[Machine]) -> str:
+    """A privacidade mais restrita entre o que a conversa alcança.
+
+    Com foco é a da máquina (inclusive "sem IA", que não chama ninguém). Sem
+    foco, basta uma máquina "só IA local" ao alcance para a conversa inteira
+    ficar no modelo local.
+    """
+    from app.services import llm
+    if machine is not None:
+        return llm.privacy_of(machine)
+    if any(llm.privacy_of(m) == llm.PRIVACY_LOCAL_ONLY for m in alcance):
+        return llm.PRIVACY_LOCAL_ONLY
+    return llm.PRIVACY_ANY
+
+
+def _machines(db: Session, user, machine: Optional[Machine]) -> List[Machine]:
+    return reachable(db, user, machine)
 
 
 def _parse_dt(value: Optional[str], offset: int, default) -> datetime:
@@ -42,15 +69,21 @@ def _parse_dt(value: Optional[str], offset: int, default) -> datetime:
 
 
 def _resolve_machine(db: Session, user, machine: Optional[Machine], args: Dict) -> Optional[Machine]:
+    """A máquina pedida, se estiver ao alcance desta conversa."""
+    alcance = reachable(db, user, machine)
     mid = args.get("machine_id")
-    if mid is not None:
-        return db.query(Machine).filter(Machine.id == int(mid), Machine.owner_id == user.id).first()
-    return machine
+    if mid is None:
+        return machine if machine in alcance else None
+    try:
+        mid = int(mid)
+    except (TypeError, ValueError):
+        return None
+    return next((m for m in alcance if m.id == mid), None)
 
 
 def t_list_machines(db: Session, user, machine, args) -> Any:
     out = []
-    for m in db.query(Machine).filter(Machine.owner_id == user.id).all():
+    for m in reachable(db, user, machine):
         latest = db.query(Metric).filter(Metric.machine_id == m.id).order_by(Metric.timestamp.desc()).first()
         out.append({"id": m.id, "name": m.name, "os": m.os_pretty or m.os_type, "active": m.is_active,
                     "last_seen": m.last_seen,
@@ -163,7 +196,7 @@ def t_energy(db: Session, user, machine, args) -> Any:
 
 def t_compare_machines(db: Session, user, machine, args) -> Any:
     from app.services import fleet
-    return fleet.peer_insights(db, user.id)
+    return fleet.peer_insights(db, user.id, machine_ids=[m.id for m in reachable(db, user, machine)])
 
 
 def t_worst_moment(db: Session, user, machine, args) -> Any:

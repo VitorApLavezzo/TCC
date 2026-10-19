@@ -58,9 +58,15 @@ PEER_METRICS = [
 ]
 
 
-def peer_insights(db: Session, owner_id: int, days: int = 7) -> Dict[str, Any]:
+def peer_insights(db: Session, owner_id: int, days: int = 7,
+                  machine_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+    """`machine_ids` restringe a comparação — o chat passa só as máquinas que a
+    conversa pode alcançar, nunca uma marcada como "sem IA"."""
     since = utcnow() - timedelta(days=days)
-    machines = db.query(Machine).filter(Machine.owner_id == owner_id).all()
+    query = db.query(Machine).filter(Machine.owner_id == owner_id)
+    if machine_ids is not None:
+        query = query.filter(Machine.id.in_(machine_ids))
+    machines = query.all()
     if len(machines) < 3:
         return {"ready": False, "reason": "A comparação entre computadores precisa de pelo menos 3 conectados.",
                 "insights": []}

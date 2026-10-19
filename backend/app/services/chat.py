@@ -31,7 +31,7 @@ HISTORY_TURNS = 6
 
 
 def _system_prompt(db: Session, user: User, machine: Optional[Machine]) -> str:
-    machines = db.query(Machine).filter(Machine.owner_id == user.id).all()
+    machines = chat_tools.reachable(db, user, machine)
     machine_list = "; ".join(f"id={m.id} \"{m.name}\" ({m.os_type})" for m in machines) or "nenhum"
     scope = f"O foco é o computador id={machine.id} (\"{machine.name}\")." if machine else \
         "A pessoa não escolheu um computador específico."
@@ -64,7 +64,9 @@ def _run_reasoning(db: Session, user: User, machine: Optional[Machine], history:
     convo = [f"{'PESSOA' if h['role'] == 'user' else 'ASSISTENTE'}: {h['content']}" for h in history]
     convo.append(f"PESSOA: {question}")
     trace: List[Dict[str, Any]] = []
-    privacy = llm.privacy_of(machine) if machine else llm.PRIVACY_ANY
+    # A mais restrita entre o que a conversa alcança: sem foco, uma máquina
+    # "só IA local" basta para tudo ficar no modelo local.
+    privacy = chat_tools.conversation_privacy(machine, chat_tools.reachable(db, user, machine))
 
     scratch = ""
     for _ in range(MAX_STEPS):
@@ -107,10 +109,15 @@ def answer_async(db: Session, message_id: int):
     user = db.query(User).filter(User.id == msg.user_id).first()
     machine = db.query(Machine).filter(Machine.id == msg.machine_id).first() if msg.machine_id else None
 
+    # Só o histórico do mesmo escopo: a tela não reinicia a conversa ao trocar
+    # de máquina, e a resposta sobre uma máquina "só IA local" seguiria no
+    # prompt para a nuvem na pergunta seguinte, sobre outra.
+    mesmo_escopo = (ChatMessage.machine_id == msg.machine_id) if msg.machine_id is not None \
+        else ChatMessage.machine_id.is_(None)
     history_rows = (
         db.query(ChatMessage)
         .filter(ChatMessage.conversation_id == msg.conversation_id, ChatMessage.id < msg.id,
-                ChatMessage.status == "done")
+                ChatMessage.status == "done", mesmo_escopo)
         .order_by(ChatMessage.id.desc())
         .limit(HISTORY_TURNS * 2)
         .all()
