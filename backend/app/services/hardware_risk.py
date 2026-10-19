@@ -254,6 +254,9 @@ def _maybe_warn(db: Session, machine: Machine, riscos: List[Dict[str, Any]]) -> 
                     "recomendacao": risco["advice"],
                 },
                 source="hardware",
+                # Uma condição por peça: o risco da bateria não pode ser
+                # somado ao aviso que fala do disco
+                identity=risco["component_label"],
                 # Desgaste não muda de um dia para o outro
                 cooldown_minutes=7 * 24 * 60,
             ),

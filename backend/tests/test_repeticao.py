@@ -275,3 +275,72 @@ class TestReavaliacaoAgendadaNaoEOcorrencia:
         assert a.severity == "high"
         assert a.occurrences == 1
         assert self._notificacoes(db, a.id) > antes
+
+
+class TestReconferenciaPorCondicao:
+    """A reconferência só pode casar com o aviso da mesma condição. Antes, o
+    risco de bateria subia a gravidade do aviso que falava do disco; o segundo
+    programa de um surto sumia; e a previsão que piorava ficava "alta" com
+    "enche em 5 dias" na tela."""
+
+    def _hw(self, peca, severidade):
+        from app.services.anomaly_service import Candidate
+        return Candidate(anomaly_type="hardware_failure_risk", severity=severidade, affected={"peca": peca},
+                         source="hardware", identity=peca, cooldown_minutes=7 * 24 * 60)
+
+    def test_peca_diferente_e_outro_aviso(self, client, machine, db):
+        from app.services.anomaly_service import persist_candidate
+        m = _machine(db, machine)
+        disco = persist_candidate(db, m, self._hw("Disco", "medium"))
+        bateria = persist_candidate(db, m, self._hw("Bateria", "high"))
+        assert bateria is not None and bateria.id != disco.id
+        assert bateria.affected_metrics["peca"] == "Bateria"
+        db.refresh(disco)
+        assert disco.severity == "medium" and disco.affected_metrics["peca"] == "Disco"
+
+    def test_outro_programa_no_surto_e_outro_aviso(self, client, machine, db):
+        from app.services.anomaly_service import Candidate, persist_candidate
+        m = _machine(db, machine)
+
+        def surto(programa):
+            return Candidate(anomaly_type="outbreak_suspected", severity="critical", responsible=programa,
+                             affected={"programa": programa}, source="fleet", identity=f"chave-{programa}",
+                             cooldown_minutes=12 * 60)
+
+        a = persist_candidate(db, m, surto("setup.exe"))
+        b = persist_candidate(db, m, surto("payload.exe"))
+        assert b is not None and b.id != a.id and b.responsible_process == "payload.exe"
+
+    def test_mesma_peca_igual_continua_silenciada(self, client, machine, db):
+        from app.services.anomaly_service import persist_candidate
+        m = _machine(db, machine)
+        persist_candidate(db, m, self._hw("Disco", "medium"))
+        assert persist_candidate(db, m, self._hw("Disco", "medium")) is None
+
+    def test_piora_mostra_os_numeros_novos_e_refaz_a_explicacao(self, client, machine, db, monkeypatch):
+        from app.models.explanation import AIExplanation
+        from app.services import explanation_queue
+        from app.services.anomaly_service import Candidate, persist_candidate
+        pedidos = []
+        monkeypatch.setattr(explanation_queue, "request_explanation", lambda *a: pedidos.append(a) or True)
+        m = _machine(db, machine)
+
+        def previsao(sev, dias):
+            return Candidate(anomaly_type="disk_forecast", severity=sev, affected={"dias_ate_encher": dias},
+                             details={"sentence": f"enche em {dias} dias"}, source="forecast",
+                             cooldown_minutes=24 * 60)
+
+        a = persist_candidate(db, m, previsao("medium", 5.0))
+        pronta = db.query(AIExplanation).filter(AIExplanation.anomaly_id == a.id).first()
+        pronta.summary, pronta.possible_causes = "O disco enche em 5 dias.", ["algo"]
+        db.commit()
+        pedidos.clear()
+
+        persist_candidate(db, m, previsao("high", 1.0))
+        db.refresh(a)
+        assert a.severity == "high"
+        assert a.affected_metrics["dias_ate_encher"] == 1.0
+        assert a.affected_metrics["_behavior"]["sentence"] == "enche em 1.0 dias"
+        assert pedidos, "a explicação velha falava em 5 dias: tem que ser refeita"
+        refazer = db.query(AIExplanation).filter(AIExplanation.anomaly_id == a.id).first()
+        assert refazer.possible_causes == []

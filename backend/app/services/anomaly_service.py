@@ -104,6 +104,8 @@ class Candidate:
     source: str = "behavior"
     score: Optional[float] = None
     confidence: Optional[float] = None
+    # Qual condição, quando o tipo sozinho não basta (a peça, o executável).
+    identity: Optional[str] = None
     cooldown_minutes: int = ANOMALY_COOLDOWN_MINUTES
 
 
@@ -113,7 +115,8 @@ ESCALATION_OCCURRENCES = 10
 
 
 def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
-                    minutes: int = ANOMALY_COOLDOWN_MINUTES, now=None) -> Optional[Anomaly]:
+                    minutes: int = ANOMALY_COOLDOWN_MINUTES, now=None,
+                    by_condition: bool = False, condition_key: Optional[str] = None) -> Optional[Anomaly]:
     """O aviso vivo deste tipo nesta máquina, para somar a repetição nele.
 
     A chave é `(máquina, tipo)` — não `(máquina, tipo, programa)`, como era. A
@@ -131,17 +134,18 @@ def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
     defeito que esta agregação existe para corrigir.
     """
     cutoff = (now or utcnow()) - timedelta(minutes=minutes)
-    return (
-        db.query(Anomaly)
-        .filter(
-            Anomaly.machine_id == machine_id,
-            Anomaly.anomaly_type == anomaly_type,
-            Anomaly.detected_at >= cutoff,
-            Anomaly.is_resolved == False,  # noqa: E712
-        )
-        .order_by(Anomaly.detected_at.desc())
-        .first()
+    query = db.query(Anomaly).filter(
+        Anomaly.machine_id == machine_id,
+        Anomaly.anomaly_type == anomaly_type,
+        Anomaly.detected_at >= cutoff,
+        Anomaly.is_resolved == False,  # noqa: E712
     )
+    # Reconferência agendada é da mesma condição ou não é reconferência: sem
+    # isto, o risco de bateria subia a gravidade do aviso que falava do disco.
+    if by_condition:
+        query = query.filter(Anomaly.condition_key == condition_key) if condition_key is not None \
+            else query.filter(Anomaly.condition_key.is_(None))
+    return query.order_by(Anomaly.detected_at.desc()).first()
 
 
 # Origens que reconferem a mesma condição periodicamente, pelo agendador: a
@@ -157,15 +161,19 @@ def _reevaluate(db: Session, machine: Machine, existing: Anomaly, c: Candidate) 
     """Reconferência agendada de uma condição que já tem aviso aberto.
 
     Igual, não faz nada — é o que acontecia antes da agregação. Mais grave
-    (o disco que enchia em 5 dias agora enche em 1), sobe a gravidade e avisa:
-    silenciar uma piora é o mesmo defeito que a revisão apontou na agregação.
+    (o disco que enchia em 5 dias agora enche em 1), sobe a gravidade, troca
+    a evidência pela nova, refaz a explicação e avisa. Só subir a gravidade
+    deixava a tela dizendo "alta" com "enche em 5 dias" ao lado.
     """
     if SEVERITY_ORDER.get(c.severity, 0) <= SEVERITY_ORDER.get(existing.severity, 0):
         db.commit()
         return None
     existing.severity = c.severity
     existing.confidence = c.confidence
+    existing.affected_metrics = _affected_of(c)
+    existing.responsible_process = _normalize_process_name(c.responsible) or existing.responsible_process
     db.commit()
+    _queue_explanation(db, existing, machine)
     _announce(db, machine, existing, motivo="agravado")
     return existing
 
@@ -248,10 +256,38 @@ def filter_reason(db: Session, machine: Machine, c: Candidate, now,
     if rule:
         rule.hits = (rule.hits or 0) + 1
         return f"regra #{rule.id}", None
-    existing = _recent_anomaly(machine.id, c.anomaly_type, db, c.cooldown_minutes, now)
+    existing = _recent_anomaly(machine.id, c.anomaly_type, db, c.cooldown_minutes, now,
+                               by_condition=c.source in REEVALUATED_SOURCES, condition_key=c.identity)
     if existing is not None:
         return "aviso igual recente", existing
     return None, None
+
+
+def _affected_of(c: Candidate) -> Dict[str, Any]:
+    affected = dict(c.affected or {})
+    if c.details:
+        affected["_behavior"] = c.details
+    return affected
+
+
+def _queue_explanation(db: Session, anomaly: Anomaly, machine: Machine) -> None:
+    """Põe a explicação em "analisando" e pede à fila.
+
+    A fila pula aviso que já tem explicação pronta, então refazer uma exige
+    voltar a este estado — o mesmo em que todo aviso nasce.
+    """
+    explicacao = db.query(AIExplanation).filter(AIExplanation.anomaly_id == anomaly.id).first()
+    if explicacao is None:
+        explicacao = AIExplanation(anomaly_id=anomaly.id)
+        db.add(explicacao)
+    explicacao.summary = "Analisando com Inteligência Artificial..."
+    explicacao.possible_causes = []
+    explicacao.recommendations = []
+    explicacao.model_used = None
+    db.commit()
+
+    from app.services.explanation_queue import request_explanation
+    request_explanation(anomaly.id, anomaly.metric_id, machine.id)
 
 
 def _announce(db: Session, machine: Machine, anomaly: Anomaly, motivo: str) -> None:
@@ -338,9 +374,7 @@ def persist_candidate(
             return None
 
     signals = incidents.collect_signals(metric, [c.anomaly_type, *extra_signal_types])
-    affected = dict(c.affected or {})
-    if c.details:
-        affected["_behavior"] = c.details
+    affected = _affected_of(c)
 
     # Ainda conhecendo a máquina: registra, mas não incomoda. Não é filtro —
     # o aviso existe e aparece no painel; o que muda é a notificação.
@@ -357,6 +391,7 @@ def persist_candidate(
         severity=c.severity,
         anomaly_score=c.score,
         confidence=c.confidence,
+        condition_key=c.identity,
         occurrences=1,
         last_seen_at=now,
         affected_metrics=affected,
@@ -370,18 +405,8 @@ def persist_candidate(
     incidents.attach(db, anomaly, signals, now)
 
     # Explicação vazia indica que a IA ainda está trabalhando
-    db.add(AIExplanation(
-        anomaly_id=anomaly.id,
-        summary="Analisando com Inteligência Artificial...",
-        possible_causes=[],
-        recommendations=[],
-        model_used=None,
-    ))
-    db.commit()
+    _queue_explanation(db, anomaly, machine)
     db.refresh(anomaly)
-
-    from app.services.explanation_queue import request_explanation
-    request_explanation(anomaly.id, anomaly.metric_id, machine.id)
 
     _announce(db, machine, anomaly, motivo="criado")
     return anomaly

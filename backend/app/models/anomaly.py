@@ -21,6 +21,10 @@ class Anomaly(Base):
     # Repetições somadas neste mesmo aviso, e quando foi a última delas.
     # `detected_at` continua marcando quando o problema começou.
     occurrences = Column(Integer, default=1, server_default="1")
+    # Qual condição este aviso descreve, quando o tipo sozinho não basta: a
+    # peça no risco de hardware, o executável no surto da frota. A
+    # reconferência agendada só casa com o aviso da mesma condição.
+    condition_key = Column(String, index=True)
     last_seen_at = Column(DateTime(timezone=True))
     affected_metrics = Column(JSON)
     responsible_process = Column(String)

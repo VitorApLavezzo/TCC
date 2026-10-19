@@ -197,6 +197,9 @@ def detect_outbreaks(db: Session) -> int:
                     affected={"programa": ident.name, "computadores_afetados": len(machines),
                               "assinado": "sim" if signed else "não"},
                     responsible=ident.name,
+                    # Um surto por executável: o segundo programa não pode
+                    # sumir dentro do aviso do primeiro
+                    identity=key,
                     details={
                         "type": "outbreak_suspected", "identity_key": key, "machines": names,
                         "sha256": ident.sha256, "publisher": ident.publisher, "signed": ident.signed,
