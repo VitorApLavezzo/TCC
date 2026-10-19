@@ -459,3 +459,35 @@ def test_chave_de_ablacao_restaura_o_valor_anterior():
     finally:
         set_confidence_mode(anterior)
     assert apply_confidence("medium", 0.1) == "low"
+
+
+class TestRelogioReproduzivel:
+    """O modelo usa hora do dia e dia da semana como atributos, e o relógio
+    virtual do benchmark era ancorado em "agora": o mesmo código dava número
+    diferente às 23h40 e às 00h05. Resultado de TCC tem que sair igual quando
+    a banca pedir para rodar de novo."""
+
+    def test_ancora_sempre_na_quarta_as_15h_locais(self):
+        from datetime import datetime, timedelta, timezone
+        from app.services.benchmark import _relogio_virtual
+        for agora in (datetime(2026, 10, 19, 3, 5, tzinfo=timezone.utc),
+                      datetime(2026, 10, 23, 22, 45, tzinfo=timezone.utc),
+                      datetime(2026, 10, 21, 18, 0, tzinfo=timezone.utc)):
+            ancora = _relogio_virtual(agora)
+            local = ancora + timedelta(minutes=-180)
+            assert (local.weekday(), local.hour, local.minute) == (2, 15, 0)
+            assert agora - timedelta(days=7) < ancora <= agora
+
+    def test_mesmo_resultado_em_horarios_diferentes(self, db):
+        from datetime import datetime, timezone
+        from app.core.security import get_password_hash
+        from app.models.user import User
+        from app.services import benchmark
+        u = User(email="rel@t.com", username="rel", hashed_password=get_password_hash("x"))
+        db.add(u)
+        db.commit()
+        madrugada = datetime(2026, 10, 19, 3, 10, tzinfo=timezone.utc)
+        sexta_noite = datetime(2026, 10, 16, 23, 50, tzinfo=timezone.utc)
+        a = benchmark.run_scenario(db, "compilacao", u.id, now=madrugada)
+        b = benchmark.run_scenario(db, "compilacao", u.id, now=sexta_noite)
+        assert a.detected == b.detected and a.notified == b.notified

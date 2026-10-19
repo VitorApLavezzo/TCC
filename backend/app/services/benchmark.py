@@ -349,7 +349,7 @@ def scenarios() -> Dict[str, Dict[str, Any]]:
     todos = dict(_OWN_SCENARIOS)
     for nome, spec in demo.SCENARIOS.items():
         todos[nome] = {"label": spec["label"], "family": ATTACK, "expect": spec["expect"],
-                       "steps": spec["attack"], "demo": nome}
+                       "steps": spec["attack"], "demo": nome, "interval": spec.get("interval", INTERVAL)}
     return todos
 
 
@@ -392,10 +392,44 @@ def _feed(db, machine, data: Dict[str, Any], procs: List[Dict], ts, extra: Dict[
         criadas += agent_events.handle_events(db, machine, extra["events"], metric, ts)
     if extra.get("beacons"):
         criadas += agent_events.evaluate_beacons(db, machine, extra["beacons"], ts)
+    if extra.get("reconferir"):
+        # Em produção o agendador reconfere a previsão de disco a cada 15
+        # minutos. O benchmark pulava esse caminho de código inteiro, e o
+        # cenário de disco enchendo não tinha como ser detectado.
+        from app.services import forecasting
+        previsto = forecasting.check_machine(db, machine)
+        if previsto is not None:
+            criadas.append(previsto)
     return criadas
 
 
-def run_scenario(db, name: str, owner_id: int) -> ScenarioResult:
+# Fuso das máquinas efêmeras do benchmark (o mesmo de Brasília).
+BENCH_TZ_OFFSET = -180
+
+# Dia da semana (0 = segunda) e hora local em que o relógio virtual termina.
+RELOGIO_DIA, RELOGIO_HORA = 2, 15
+
+
+def _relogio_virtual(now) -> "datetime":
+    """A quarta-feira mais recente às 15h no fuso da máquina, em UTC.
+
+    O modelo usa hora do dia e dia da semana como atributos. Com o relógio
+    virtual ancorado em "agora", o mesmo código dava resultado diferente
+    conforme a hora em que se rodava — às 23h40 e às 00h05 saíram listas
+    diferentes de falsos positivos. Ancorado num dia e hora fixos, os
+    atributos de horário são sempre os mesmos e o número se repete. Fica a
+    no máximo 7 dias atrás: dentro da janela de 14 da previsão de disco.
+    """
+    from datetime import timedelta
+    local = now + timedelta(minutes=BENCH_TZ_OFFSET)
+    alvo = (local - timedelta(days=(local.weekday() - RELOGIO_DIA) % 7)).replace(
+        hour=RELOGIO_HORA, minute=0, second=0, microsecond=0)
+    if alvo > local:
+        alvo -= timedelta(days=7)
+    return alvo - timedelta(minutes=BENCH_TZ_OFFSET)
+
+
+def run_scenario(db, name: str, owner_id: int, now=None) -> ScenarioResult:
     """Roda um cenário numa máquina efêmera e devolve o que o sistema detectou.
 
     A fase de aquecimento não entra na medição: ela existe para a máquina
@@ -423,7 +457,7 @@ def run_scenario(db, name: str, owner_id: int) -> ScenarioResult:
         # por um texto que ninguém vai ler, já que a máquina é apagada no fim.
         # O que o benchmark mede é a detecção, não a redação.
         ai_privacy="no_ai",
-        system_info={"form_factor": "desktop", "is_admin": True, "tz_offset_minutes": -180},
+        system_info={"form_factor": "desktop", "is_admin": True, "tz_offset_minutes": BENCH_TZ_OFFSET},
     )
     db.add(machine)
     db.commit()
@@ -443,8 +477,9 @@ def run_scenario(db, name: str, owner_id: int) -> ScenarioResult:
     random.seed(f"{SEED}:{name}")
 
     try:
-        agora = utcnow()
-        fim_do_aquecimento = agora - timedelta(seconds=spec["steps"] * INTERVAL)
+        agora = _relogio_virtual(now or utcnow())
+        intervalo = spec.get("interval", INTERVAL)
+        fim_do_aquecimento = agora - timedelta(seconds=spec["steps"] * intervalo)
         passo = timedelta(hours=WARMUP_HOURS) / WARMUP_STEPS
 
         # Aquecimento: máquina em uso comum, para sair do aprendizado e formar
@@ -455,7 +490,7 @@ def run_scenario(db, name: str, owner_id: int) -> ScenarioResult:
 
         # Só o que acontece daqui para frente é medido
         for k in range(spec["steps"]):
-            ts = fim_do_aquecimento + timedelta(seconds=(k + 1) * INTERVAL)
+            ts = fim_do_aquecimento + timedelta(seconds=(k + 1) * intervalo)
             data = demo._base_metric(WARMUP_STEPS + k)
             procs = demo._normal_processes()
             if "demo" in spec:
@@ -463,6 +498,10 @@ def run_scenario(db, name: str, owner_id: int) -> ScenarioResult:
             else:
                 spec["overlay"](k, data, procs)
                 extra = {}
+            # A reconferência agendada roda para todo cenário, não só o de
+            # disco: se um cenário normal fizesse a previsão disparar, seria
+            # um falso positivo de verdade, e tem que aparecer na conta.
+            extra["reconferir"] = True
             _record(resultado, _feed(db, machine, data, procs, ts, extra))
     except Exception as e:  # noqa: BLE001 — um cenário quebrado não derruba a rodada
         resultado.error = f"{type(e).__name__}: {e}"

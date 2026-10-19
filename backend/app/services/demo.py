@@ -32,7 +32,12 @@ SCENARIOS: Dict[str, Dict[str, Any]] = {
                  "expect": "cpu_loop"},
     "memory_leak": {"label": "Vazamento de memória", "warmup": 12, "attack": 12, "expect": "memory_leak"},
     "ransomware": {"label": "Sequestro de dados (ransomware)", "warmup": 8, "attack": 4, "expect": "ransomware_canary"},
-    "disk_filling": {"label": "Disco enchendo rápido", "warmup": 20, "attack": 10, "expect": "disk_forecast"},
+    # Passos de uma hora virtual, só aqui: a previsão de disco projeta tendência
+    # de horas a dias e exige meio dia de histórico. A 30 s por passo ela era
+    # impossível por construção, e a demonstração mostrava "sem tendência"
+    # num cenário chamado "disco enchendo".
+    "disk_filling": {"label": "Disco enchendo rápido", "warmup": 20, "attack": 10, "expect": "disk_forecast",
+                     "interval": 3600},
     "masquerade": {"label": "Vírus disfarçado de svchost.exe", "warmup": 8, "attack": 3, "expect": "process_masquerading"},
     "beaconing": {"label": "Programa contatando servidor em intervalos", "warmup": 8, "attack": 8, "expect": "beaconing"},
 }
@@ -99,9 +104,13 @@ def _scenario_step(scenario: str, phase: str, k: int, metric: Dict, procs: List[
         procs.append({"name": "leaky_app.exe", "cpu_percent": 6.0, "mem_percent": min(4 + k * 4.0, 55),
                       "exe": "C:\\Program Files\\LeakyApp\\leaky_app.exe", "signed": "signed", "username": "demo"})
     elif scenario == "disk_filling":
+        # O tamanho do disco é o da leitura-base. Recalcular com um total
+        # próprio (100 GB contra os 500 do aquecimento) fazia o uso em GB cair
+        # enquanto o percentual subia: a previsão via o disco esvaziando.
+        total = metric["disk_used"] + metric["disk_free"]
         metric["disk_percent"] = min(58 + k * 3.5, 99)
-        metric["disk_used"] = metric["disk_percent"] / 100 * 100e9
-        metric["disk_free"] = (100 - metric["disk_percent"]) / 100 * 100e9
+        metric["disk_used"] = metric["disk_percent"] / 100 * total
+        metric["disk_free"] = total - metric["disk_used"]
     elif scenario == "masquerade":
         procs.append({"name": "svchost.exe", "cpu_percent": 35.0, "mem_percent": 4.0,
                       "exe": "C:\\Users\\demo\\AppData\\Local\\Temp\\svchost.exe", "signed": "unsigned",
@@ -172,7 +181,7 @@ def step(db: Session, session: DemoSession) -> Dict[str, Any]:
     attack_k = k - spec["warmup"] if phase == "attack" else 0
 
     # Tempo virtual: leituras espaçadas de INTERVAL no passado→agora para as janelas dos detectores fecharem
-    virtual_ts = utcnow() - timedelta(seconds=(session.total_steps - k) * INTERVAL)
+    virtual_ts = utcnow() - timedelta(seconds=(session.total_steps - k) * spec.get("interval", INTERVAL))
     data = _base_metric(k)
     procs = _normal_processes()
     extra = _scenario_step(session.scenario, phase, attack_k, data, procs)
@@ -198,10 +207,17 @@ def step(db: Session, session: DemoSession) -> Dict[str, Any]:
         created += agent_events.handle_events(db, machine, extra["events"], metric, virtual_ts)
     if extra["beacons"]:
         created += agent_events.evaluate_beacons(db, machine, extra["beacons"], virtual_ts)
-    if session.scenario == "disk_filling" and phase == "attack" and attack_k == spec["attack"] - 1:
+    if session.scenario == "disk_filling" and phase == "attack":
+        # A mesma reconferência que o agendador faz em produção a cada 15
+        # minutos. Antes só se escrevia a frase da previsão no log; quem cria
+        # o aviso "Disco Vai Encher em Breve" é o check_machine.
         from app.services import forecasting
-        f = forecasting.disk_forecast(db, machine, days=1)
-        session.log = (session.log or []) + [f"Previsão de disco: {f.get('sentence', 'sem tendência')}"]
+        previsto = forecasting.check_machine(db, machine)
+        if previsto is not None:
+            created.append(previsto)
+        if attack_k == spec["attack"] - 1:
+            f = forecasting.disk_forecast(db, machine)
+            session.log = (session.log or []) + [f"Previsão de disco: {f.get('sentence') or f.get('reason')}"]
 
     log = list(session.log or [])
     for anomaly in created:

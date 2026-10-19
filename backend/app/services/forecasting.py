@@ -40,6 +40,22 @@ def fmt_days(days: float) -> str:
     return f"{round(months)} meses" if months < 24 else f"{br(months / 12)} anos"
 
 
+def frase_previsao(span_dias: float, gb_por_dia: float, eta_dias: float) -> str:
+    """A frase da previsão de disco, do jeito que uma pessoa fala.
+
+    A versão anterior dizia "dos últimos 1 dias" e "enche em cerca de menos de
+    um dia" — e ficou à vista quando a demonstração passou a mostrar a
+    previsão de verdade.
+    """
+    if span_dias >= 10:
+        periodo = "das últimas duas semanas"
+    else:
+        n = max(round(span_dias), 1)
+        periodo = "do último dia" if n == 1 else f"dos últimos {n} dias"
+    quando = "em menos de um dia" if eta_dias < 1 else f"em cerca de {fmt_days(eta_dias)}"
+    return f"No ritmo {periodo} ({br(gb_por_dia)} GB por dia), o disco enche {quando}."
+
+
 def _bucketed(rows, value_fn, bucket: str) -> List:
     groups = defaultdict(list)
     for r in rows:
@@ -91,14 +107,13 @@ def disk_forecast(db: Session, machine: Machine, days: int = 14) -> Dict[str, An
 
     eta = usable / slope
     confidence = "alta" if r2 >= 0.8 and xs[-1] >= 7 else "média" if r2 >= 0.5 else "baixa"
-    period = "das últimas duas semanas" if xs[-1] >= 10 else f"dos últimos {max(round(xs[-1]), 1)} dias"
     return {
         **base,
         "trend": "enchendo",
         "eta_days": round(eta, 1),
         "eta_date": (utcnow() + timedelta(days=eta)).isoformat(),
         "confidence": confidence,
-        "sentence": f"No ritmo {period} ({br(slope)} GB por dia), o disco enche em cerca de {fmt_days(eta)}.",
+        "sentence": frase_previsao(xs[-1], slope, eta),
     }
 
 
