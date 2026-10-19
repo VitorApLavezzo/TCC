@@ -16,6 +16,28 @@ services:
     ports:
       - "5432:5432"
 
+  # Cópia do banco a cada 6 horas em ./backups, guardando 14 dias. Os dados de
+  # coleta do TCC já sumiram uma vez sem cópia nenhuma. Roda com o usuário do
+  # host para os arquivos não nascerem do root. Como restaurar: scripts/backup.sh
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    user: "${BACKUP_UID:-1000}:${BACKUP_GID:-1000}"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: anomaly_db
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-6}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/backup.sh:ro
+    entrypoint: ["/bin/sh", "/backup.sh"]
+
   # Opcional — só sobe com: docker compose --profile local-ollama up -d
   # Use quando o stack rodar na mesma máquina que tem a GPU.
   # Se o Ollama roda em OUTRA máquina (ex: seu PC), deixe desligado e

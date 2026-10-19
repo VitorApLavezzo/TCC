@@ -26,3 +26,6 @@ docs/
 # Sistema operacional
 .DS_Store
 Thumbs.db
+
+# Cópias do banco: têm dados das máquinas monitoradas (processos, linhas de comando)
+backups/
