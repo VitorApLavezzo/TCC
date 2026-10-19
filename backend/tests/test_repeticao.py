@@ -226,3 +226,52 @@ class TestVinteProgramasViramUmAviso:
         assert len(avisos) == 1, f"esperava 1 aviso agregado, veio {len(avisos)}"
         assert avisos[0].occurrences == 20
         assert len(avisos[0].affected_metrics["programas"]) == 20
+
+
+class TestReavaliacaoAgendadaNaoEOcorrencia:
+    """A previsão de disco reconfere a mesma condição a cada 15 minutos; a de
+    frota, a cada 5. Contar cada reconferência como ocorrência fazia o aviso
+    escalar e notificar de novo em horas, sem nada novo ter acontecido."""
+
+    def _cand_agendado(self, severidade="medium", origem="forecast", tipo="disk_forecast"):
+        from app.services.anomaly_service import Candidate
+        return Candidate(anomaly_type=tipo, severity=severidade, source=origem, cooldown_minutes=24 * 60)
+
+    def _notificacoes(self, db, anomaly_id):
+        from app.models.notification import Notification
+        return db.query(Notification).filter(Notification.anomaly_id == anomaly_id).count()
+
+    def test_reconferencia_nao_conta_nem_escala(self, client, machine, db):
+        from app.models.anomaly import Anomaly
+        from app.services.anomaly_service import ESCALATION_OCCURRENCES, persist_candidate
+        m = _machine(db, machine)
+        a = persist_candidate(db, m, self._cand_agendado())
+        antes = self._notificacoes(db, a.id)
+        for _ in range(ESCALATION_OCCURRENCES + 2):
+            persist_candidate(db, m, self._cand_agendado())
+        db.refresh(a)
+        assert a.occurrences == 1
+        assert a.severity == "medium"
+        assert self._notificacoes(db, a.id) == antes
+        assert db.query(Anomaly).filter(Anomaly.machine_id == m.id).count() == 1
+
+    def test_vale_para_a_frota_tambem(self, client, machine, db):
+        from app.services.anomaly_service import ESCALATION_OCCURRENCES, persist_candidate
+        m = _machine(db, machine)
+        a = persist_candidate(db, m, self._cand_agendado(origem="fleet", tipo="outbreak_suspected"))
+        for _ in range(ESCALATION_OCCURRENCES + 2):
+            persist_candidate(db, m, self._cand_agendado(origem="fleet", tipo="outbreak_suspected"))
+        db.refresh(a)
+        assert a.occurrences == 1 and a.severity == "medium"
+
+    def test_reconferencia_mais_grave_sobe_e_avisa(self, client, machine, db):
+        """O disco que enchia em 5 dias agora enche em 1: isso a pessoa precisa saber."""
+        from app.services.anomaly_service import persist_candidate
+        m = _machine(db, machine)
+        a = persist_candidate(db, m, self._cand_agendado("medium"))
+        antes = self._notificacoes(db, a.id)
+        persist_candidate(db, m, self._cand_agendado("high"))
+        db.refresh(a)
+        assert a.severity == "high"
+        assert a.occurrences == 1
+        assert self._notificacoes(db, a.id) > antes

@@ -144,6 +144,32 @@ def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
     )
 
 
+# Origens que reconferem a mesma condição periodicamente, pelo agendador: a
+# previsão de disco a cada 15 minutos, a frota a cada 5, tendência, deriva e
+# risco de hardware em horas. Reconferência não é ocorrência nova — somá-la
+# fazia o aviso escalar e notificar de novo em poucas horas sem nada ter
+# acontecido. Leitura do agente (comportamento, modelo) e evento do agente são
+# observações novas e continuam somando. Detector agendado novo entra aqui.
+REEVALUATED_SOURCES = frozenset({"forecast", "fleet", "trend", "drift", "hardware"})
+
+
+def _reevaluate(db: Session, machine: Machine, existing: Anomaly, c: Candidate) -> Optional[Anomaly]:
+    """Reconferência agendada de uma condição que já tem aviso aberto.
+
+    Igual, não faz nada — é o que acontecia antes da agregação. Mais grave
+    (o disco que enchia em 5 dias agora enche em 1), sobe a gravidade e avisa:
+    silenciar uma piora é o mesmo defeito que a revisão apontou na agregação.
+    """
+    if SEVERITY_ORDER.get(c.severity, 0) <= SEVERITY_ORDER.get(existing.severity, 0):
+        db.commit()
+        return None
+    existing.severity = c.severity
+    existing.confidence = c.confidence
+    db.commit()
+    _announce(db, machine, existing, motivo="agravado")
+    return existing
+
+
 # Quantas ocorrências ficam guardadas com detalhe. O suficiente para a pessoa
 # ver o que entrou no agregado sem transformar a coluna JSON num depósito.
 OCCURRENCE_HISTORY = 10
@@ -304,6 +330,8 @@ def persist_candidate(
         hour = local_time(now, tz_offset_minutes(machine)).hour
         reason, existing = filter_reason(db, machine, c, now, hour)
         if existing is not None:
+            if c.source in REEVALUATED_SOURCES:
+                return _reevaluate(db, machine, existing, c)
             return absorb(db, machine, existing, c, now)
         if reason:
             db.commit()
