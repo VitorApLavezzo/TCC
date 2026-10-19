@@ -67,6 +67,26 @@ def reset_db():
     yield
 
 
+@pytest.fixture(autouse=True)
+def modelos_isolados(tmp_path, monkeypatch):
+    """Cada teste grava e lê modelos num diretório próprio e vazio.
+
+    O diretório padrão de modelos, no container, é o volume de produção — e
+    `docker compose exec backend python -m pytest` é o comando documentado. Os
+    testes treinam para as máquinas 1 e 2 e apagam o modelo ao apagar a
+    máquina efêmera: numa instalação nova, eram os modelos de verdade. E sem
+    um diretório por teste, a máquina 1 de um teste carregava o modelo da
+    máquina 1 do anterior.
+    """
+    from app.services import ml_service
+    diretorio = tmp_path / "ml_models"
+    diretorio.mkdir()
+    monkeypatch.setattr(ml_service, "MODEL_DIR", str(diretorio))
+    ml_service._cache.clear()
+    yield
+    ml_service._cache.clear()
+
+
 @pytest.fixture()
 def client():
     return TestClient(app)
