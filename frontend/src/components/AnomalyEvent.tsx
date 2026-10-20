@@ -100,7 +100,8 @@ export function AnomalyEvent({
             processName(anomaly) ||
             anomaly.during_learning ||
             (anomaly.occurrences ?? 1) > 1 ||
-            anomaly.weak_signal) && (
+            anomaly.weak_signal ||
+            anomaly.user_driven) && (
             <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-micro text-fg-3">
               {machineName && <span>{machineName}</span>}
               {processName(anomaly) && <span className="font-mono">{processName(anomaly)}</span>}
@@ -117,6 +118,9 @@ export function AnomalyEvent({
               )}
               {anomaly.weak_signal && (
                 <span className="rounded-full bg-sunken px-2 py-0.5 text-fg-2">sinal fraco</span>
+              )}
+              {anomaly.user_driven && (
+                <span className="rounded-full bg-sunken px-2 py-0.5 text-fg-2">você estava usando</span>
               )}
             </span>
           )}

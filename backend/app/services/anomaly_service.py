@@ -30,7 +30,7 @@ from app.models.machine import Machine
 from app.models.metric import Metric
 from app.models.process import ProcessSnapshot
 from app.services import context, feedback, incidents, learning, ml_service, trust
-from app.services.behavior_analyzer import DetectionContext, analyze_behavior
+from app.services.behavior_analyzer import LOLBINS, DetectionContext, analyze_behavior
 
 ANOMALY_COOLDOWN_MINUTES = 30
 
@@ -108,6 +108,8 @@ class Candidate:
     # Qual condição, quando o tipo sozinho não basta (a peça, o executável).
     identity: Optional[str] = None
     cooldown_minutes: int = ANOMALY_COOLDOWN_MINUTES
+    # Rebaixado porque a pessoa estava usando e o programa pesado era o da tela
+    user_driven: bool = False
 
 
 # Repetir tanto assim dentro da janela deixa de ser repetição e vira o
@@ -392,6 +394,7 @@ def persist_candidate(
         severity=c.severity,
         anomaly_score=c.score,
         confidence=c.confidence,
+        user_driven=c.user_driven,
         condition_key=c.identity,
         occurrences=1,
         last_seen_at=now,
@@ -506,6 +509,15 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     if not candidates:
         return None
 
+    # Gravidade pelo contexto, antes da escolha do principal: o jogo que a
+    # pessoa está jogando não interrompe, nem pelo modelo nem pelos detectores
+    if context.context_on():
+        processes = db.query(ProcessSnapshot).filter(ProcessSnapshot.metric_id == metric.id).all()
+        for c in candidates:
+            proc = _reference_process(processes, c.responsible)
+            nivel = ctx.trust(proc).level if proc is not None else None
+            c.severity, c.user_driven = context_severity(c.anomaly_type, c.severity, metric, proc, nivel)
+
     local_hour = local_time(now, offset).hour
     allowed: List[Candidate] = []
     related: List[Dict[str, Any]] = []
@@ -540,6 +552,62 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
         extra_signal_types=[c.anomaly_type for c in candidates if c is not primary],
         skip_filters=True, now=now,
     )
+
+
+# Tipos de carga: os únicos que o contexto de uso pode rebaixar. Segurança
+# nunca; vazamento de memória também não — é defeito mesmo no programa que a
+# pessoa está usando.
+LOAD_TYPES = {
+    "high_cpu", "background_load", "gpu_anomaly", "resource_abuse", "resource_exhaustion",
+    "cpu_loop", "thermal_throttling", "behavioral_anomaly",
+}
+
+# Pessoa no teclado ou no mouse há menos que isto está usando o computador
+PRESENT_IDLE_SECONDS = 120
+
+
+def _reference_process(processes, responsible: Optional[str]):
+    """O processo do aviso: o responsável, ou o dominante quando não há um."""
+    if responsible:
+        mesmos = [p for p in processes if p.name == responsible]
+        if mesmos:
+            return max(mesmos, key=lambda p: p.cpu_percent or 0.0)
+    return context.dominant(processes)
+
+
+def context_severity(anomaly_type: str, severity: str, metric, process,
+                     trust_level: Optional[int] = None) -> Tuple[str, bool]:
+    """(gravidade, conduzido pela pessoa) pelo contexto de uso.
+
+    | Situação                                             | Gravidade        |
+    | presente (< 2 min ocioso) e programa conduzido       | low              |
+    | segundo plano, confiável ou de segurança (2 ou 3)    | low              |
+    | segundo plano, comum (1)                             | no máximo medium |
+    | segundo plano, desconhecido (0)                      | mantém           |
+    | sem informação de contexto                           | mantém           |
+
+    Ferramentas do próprio Windows usadas por ataques (LOLBINS) nunca são
+    rebaixadas por confiança: um minerador dentro do rundll32 assinado pela
+    Microsoft é a técnica clássica. Convive com `ml_severity` e
+    `apply_confidence`; o piso é `low`.
+    """
+    if not context.context_on() or anomaly_type not in LOAD_TYPES or process is None:
+        return severity, False
+    foreground = getattr(metric, "foreground_pid", None)
+    conduzido = context.is_user_driven(process, foreground, getattr(metric, "foreground_name", None))
+    idle = getattr(metric, "user_idle_seconds", None)
+    presente = idle is not None and idle < PRESENT_IDLE_SECONDS
+    if conduzido is True and presente:
+        return "low", True
+    if conduzido is False:
+        nome = (getattr(process, "name", "") or "").lower()
+        if nome.removesuffix(".exe") in LOLBINS:
+            return severity, False
+        if trust_level is not None and trust_level >= trust.TRUSTED:
+            return "low", False
+        if trust_level == trust.COMMON and SEVERITY_ORDER.get(severity, 0) > SEVERITY_ORDER["medium"]:
+            return "medium", False
+    return severity, False
 
 
 def ml_severity(anomaly_type: str, severity: str, trust_info) -> str:

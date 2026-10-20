@@ -59,6 +59,8 @@ class AnomalyOut(BaseModel):
     # tela repetir o corte por conta própria faria a etiqueta mentir assim que
     # a constante fosse ajustada.
     weak_signal: bool = False
+    # A pessoa estava usando o computador e o programa pesado era o da tela
+    user_driven: Optional[bool] = False
     occurrences: int = 1
     last_seen_at: Optional[datetime] = None
     affected_metrics: Optional[Any]

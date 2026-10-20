@@ -249,6 +249,12 @@ export function AnomalyDetail() {
             : " A gravidade abaixo já leva isso em conta."}
         </p>
       )}
+      {anomaly.user_driven && (
+        <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">
+          Você estava usando o computador e o programa pesado era o que estava na tela (ou foi aberto
+          por ele). Por isso este aviso ficou registrado sem interromper você.
+        </p>
+      )}
 
       {(anomaly.occurrences ?? 1) > 1 && (
         <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">

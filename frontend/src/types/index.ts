@@ -191,6 +191,8 @@ export interface Anomaly {
   confidence?: number | null;
   /** O servidor já decidiu se a evidência é fraca — a tela não repete o corte. */
   weak_signal?: boolean;
+  /** Rebaixado porque a pessoa estava usando o computador e o programa pesado era o da tela. */
+  user_driven?: boolean;
   /** Quantas vezes este mesmo aviso se repetiu antes de ser resolvido. */
   occurrences?: number;
   last_seen_at?: string | null;

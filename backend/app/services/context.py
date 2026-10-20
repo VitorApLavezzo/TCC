@@ -31,6 +31,15 @@ MIN_READINGS = 3
 # Pseudoprocessos que "usam" o processador ocioso
 _IDLE = {"system idle process", "idle"}
 
+# O shell do Windows: com a área de trabalho ou uma pasta na frente, a janela
+# ativa é o explorer.exe — e quase tudo descende dele, inclusive o que roda
+# sozinho desde o login. Com o shell na frente, só ele mesmo conta como
+# conduzido; descender dele não diz nada.
+SHELL_PROCESSES = {
+    "explorer.exe", "shellexperiencehost.exe", "startmenuexperiencehost.exe", "searchhost.exe",
+    "searchapp.exe", "textinputhost.exe", "lockapp.exe",
+}
+
 # Chave de reprodução: a avaliação roda o mesmo período com e sem contexto
 # para medir o que ele acrescenta. Em operação fica sempre ligada.
 _context_on = True
@@ -47,7 +56,8 @@ def context_on() -> bool:
     return _context_on
 
 
-def is_user_driven(proc: Any, foreground_pid: Optional[int]) -> Optional[bool]:
+def is_user_driven(proc: Any, foreground_pid: Optional[int],
+                   foreground_name: Optional[str] = None) -> Optional[bool]:
     """O processo é a janela ativa ou descende dela?
 
     Por parentesco, nunca por nome: um minerador chamado chrome.exe não
@@ -58,10 +68,12 @@ def is_user_driven(proc: Any, foreground_pid: Optional[int]) -> Optional[bool]:
         return None
     if getattr(proc, "pid", None) == foreground_pid:
         return True
+    if (foreground_name or "").lower() in SHELL_PROCESSES:
+        return False
     return foreground_pid in (getattr(proc, "ancestors", None) or [])
 
 
-def _dominant(processes: List[Any]) -> Optional[Any]:
+def dominant(processes: List[Any]) -> Optional[Any]:
     reais = [p for p in processes
              if (getattr(p, "name", "") or "").lower() not in _IDLE and getattr(p, "pid", None) != 0]
     if not reais:
@@ -112,12 +124,12 @@ def compute(db: Session, metric: Metric, processes: List[Any],
     """Preenche as colunas de contexto da leitura (sem commit)."""
     if not _context_on:
         return
-    dominante = _dominant(processes)
+    dominante = dominant(processes)
     if dominante is None:
         return
     nucleos = max(int(metric.cpu_count_logical or 1), 1)
     metric.top_proc_cpu = min(float(dominante.cpu_percent or 0.0) / nucleos, 100.0)
-    conduzido = is_user_driven(dominante, metric.foreground_pid)
+    conduzido = is_user_driven(dominante, metric.foreground_pid, metric.foreground_name)
     metric.top_proc_user_driven = None if conduzido is None else int(conduzido)
     nivel = trust_levels.get(trust.key_of(dominante))
     metric.top_proc_trust = nivel.level if nivel else trust.UNKNOWN

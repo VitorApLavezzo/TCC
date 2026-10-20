@@ -171,3 +171,126 @@ def test_ingestao_grava_o_contexto(client, machine, db):
     assert metric.top_proc_user_driven == 1
     assert metric.top_proc_cpu == pytest.approx(60.0)
     assert metric.top_proc_trust is not None
+
+
+class TestJanelaDoShell:
+    """Quase tudo descende do explorer.exe — inclusive o que roda sozinho desde o login."""
+
+    def test_filho_do_explorer_nao_e_conduzido_quando_a_janela_e_o_explorer(self):
+        from app.services import context
+        minerador = _proc(pid=4000, name="svc_update.exe", ancestors=[1500, 4])
+        assert context.is_user_driven(minerador, 1500, "explorer.exe") is False
+
+    def test_o_proprio_explorer_na_frente_e_conduzido(self):
+        from app.services import context
+        assert context.is_user_driven(_proc(pid=1500, name="explorer.exe"), 1500, "Explorer.EXE") is True
+
+    def test_compute_usa_o_nome_da_janela(self, db):
+        from app.services import context
+        m = _machine(db)
+        metric = _leitura(db, m.id, foreground_pid=1500, foreground_name="explorer.exe")
+        context.compute(db, metric, [_proc(pid=4000, name="svc_update.exe", ancestors=[1500, 4])], {})
+        assert metric.top_proc_user_driven == 0
+
+
+def _ctx_leitura(idle=None, fg=None, fg_name=None):
+    return SimpleNamespace(user_idle_seconds=idle, foreground_pid=fg, foreground_name=fg_name)
+
+
+class TestGravidadePeloContexto:
+    """Uma linha da tabela da spec por teste."""
+
+    def test_presente_e_conduzido_vira_baixa(self):
+        from app.services import anomaly_service as a
+        assert a.context_severity("high_cpu", "high", _ctx_leitura(idle=10, fg=900), _proc(pid=900), 0) == ("low", True)
+
+    def test_presente_mas_ausente_ha_mais_de_dois_minutos_mantem(self):
+        from app.services import anomaly_service as a
+        assert a.context_severity("high_cpu", "high", _ctx_leitura(idle=600, fg=900), _proc(pid=900), 0) == ("high", False)
+
+    def test_segundo_plano_confiavel_ou_de_seguranca_vira_baixa(self):
+        from app.services import anomaly_service as a
+        for nivel in (2, 3):
+            r = a.context_severity("background_load", "high", _ctx_leitura(idle=10, fg=1), _proc(pid=900), nivel)
+            assert r == ("low", False), nivel
+
+    def test_segundo_plano_comum_no_maximo_media(self):
+        from app.services import anomaly_service as a
+        leitura = _ctx_leitura(idle=10, fg=1)
+        assert a.context_severity("background_load", "high", leitura, _proc(pid=900), 1) == ("medium", False)
+        assert a.context_severity("background_load", "low", leitura, _proc(pid=900), 1) == ("low", False)
+
+    def test_segundo_plano_desconhecido_mantem(self):
+        from app.services import anomaly_service as a
+        r = a.context_severity("background_load", "high", _ctx_leitura(idle=10, fg=1), _proc(pid=900), 0)
+        assert r == ("high", False)
+
+    def test_sem_contexto_mantem(self):
+        from app.services import anomaly_service as a
+        assert a.context_severity("high_cpu", "high", _ctx_leitura(), _proc(pid=900), 2) == ("high", False)
+        assert a.context_severity("high_cpu", "high", _ctx_leitura(idle=10, fg=900), None, 2) == ("high", False)
+
+    def test_ferramenta_do_windows_usada_por_ataque_nao_e_rebaixada_por_confianca(self):
+        from app.services import anomaly_service as a
+        rundll = _proc(pid=900, name="rundll32.exe", exe="C:\\Windows\\System32\\rundll32.exe")
+        r = a.context_severity("background_load", "high", _ctx_leitura(idle=10, fg=1), rundll, 2)
+        assert r == ("high", False)
+
+    def test_seguranca_e_vazamento_ficam_intocados(self):
+        from app.services import anomaly_service as a
+        leitura = _ctx_leitura(idle=10, fg=900)
+        for tipo in ("unknown_process", "memory_leak", "process_masquerading"):
+            assert a.context_severity(tipo, "high", leitura, _proc(pid=900), 3) == ("high", False), tipo
+
+    def test_contexto_desligado_e_identidade(self):
+        from app.services import anomaly_service as a
+        from app.services import context
+        anterior = context.set_context_mode(False)
+        try:
+            r = a.context_severity("high_cpu", "high", _ctx_leitura(idle=10, fg=900), _proc(pid=900), 3)
+            assert r == ("high", False)
+        finally:
+            context.set_context_mode(anterior)
+
+    def test_tipos_de_carga(self):
+        from app.services import anomaly_service as a
+        assert a.LOAD_TYPES == {"high_cpu", "background_load", "gpu_anomaly", "resource_abuse",
+                                "resource_exhaustion", "cpu_loop", "thermal_throttling", "behavioral_anomaly"}
+
+
+def _jogo_na_tela(client, machine):
+    from tests.test_pipeline import _ingest, _processo
+    jogo = _processo(pid=900, name="jogo.exe", cpu_percent=760.0, signed="unsigned", publisher=None,
+                     exe="D:\\Jogos\\jogo.exe", ancestors=[300, 4])
+    res = _ingest(client, machine["agent_token"], cpu_percent=97.0, user_idle_seconds=5.0,
+                  foreground_pid=900, foreground_name="jogo.exe", processes=[jogo])
+    assert res.status_code == 202
+
+
+def test_ponta_a_ponta_detector_com_o_jogo_na_tela(client, machine, db, monkeypatch):
+    """O candidato de um detector passa pelo contexto antes de virar aviso."""
+    from app.models.anomaly import Anomaly
+    from app.services import anomaly_service, behavior_analyzer
+    achado = behavior_analyzer.BehaviorAnalysis()
+    achado.anomaly_type, achado.severity, achado.confidence = "cpu_loop", "high", 0.9
+    achado.responsible_process = "jogo.exe"
+    achado.detector = "cpu_loop"
+    monkeypatch.setattr(anomaly_service, "analyze_behavior", lambda *a, **k: [achado])
+    monkeypatch.setattr(anomaly_service.learning, "is_learning", lambda *a, **k: False)
+    _jogo_na_tela(client, machine)
+    aviso = db.query(Anomaly).filter(Anomaly.machine_id == machine["id"]).one()
+    assert (aviso.anomaly_type, aviso.severity, aviso.user_driven) == ("cpu_loop", "low", True)
+
+
+def test_ponta_a_ponta_modelo_com_o_jogo_na_tela(client, machine, db, monkeypatch):
+    """O candidato do modelo também: duas leituras fora do padrão com o jogo na frente."""
+    from app.models.anomaly import Anomaly
+    from app.services import anomaly_service, ml_service
+    monkeypatch.setattr(anomaly_service, "analyze_behavior", lambda *a, **k: [])
+    monkeypatch.setattr(anomaly_service.learning, "is_learning", lambda *a, **k: False)
+    monkeypatch.setattr(ml_service, "predict_anomaly", lambda *a, **k: (True, -0.4))
+    monkeypatch.setattr(ml_service, "alert_threshold", lambda *a, **k: -0.1)
+    _jogo_na_tela(client, machine)
+    _jogo_na_tela(client, machine)
+    aviso = db.query(Anomaly).filter(Anomaly.machine_id == machine["id"]).one()
+    assert (aviso.anomaly_type, aviso.severity, aviso.user_driven) == ("high_cpu", "low", True)
