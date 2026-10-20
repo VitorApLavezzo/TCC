@@ -208,6 +208,16 @@ def available_features(metrics) -> List[str]:
     return keys
 
 
+def training_fill(metrics, keys: List[str]) -> Dict[str, float]:
+    """Mediana de cada opcional de `keys` nas leituras de treino."""
+    fill = {}
+    for key in keys:
+        if key in OPTIONAL_FEATURES:
+            vals = [v for v in (_optional_value(m, key) for m in metrics) if v is not None]
+            fill[key] = float(np.median(vals)) if vals else 0.0
+    return fill
+
+
 def _compatible(bundle: Optional[dict]) -> bool:
     """O modelo usa só atributos que esta versão conhece (a lista pode ser menor)."""
     features = (bundle or {}).get("features")
@@ -247,11 +257,7 @@ def train_model(machine_id: int, db: Session) -> bool:
         return False
 
     keys = available_features(metrics)
-    fill = {}
-    for key in keys:
-        if key in OPTIONAL_FEATURES:
-            vals = [v for v in (_optional_value(m, key) for m in metrics) if v is not None]
-            fill[key] = float(np.median(vals))
+    fill = training_fill(metrics, keys)
     X = np.array([_metric_to_vector(m, offset, keys, fill) for m in metrics], dtype=float)
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)

@@ -116,13 +116,14 @@ PERTURBABLE = {
 }
 
 
-def _inject(X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+def _inject(X: np.ndarray, rng: np.random.Generator, keys: Optional[List[str]] = None) -> np.ndarray:
     """Cria positivos a partir de leituras reais, exagerando o que uma anomalia exagera."""
+    keys = ml_service.FEATURE_KEYS if keys is None else keys
     Y = X.copy()
     for chave, (modo, fator, teto) in PERTURBABLE.items():
-        if chave not in ml_service.FEATURE_KEYS:
+        if chave not in keys:
             continue
-        col = ml_service.FEATURE_KEYS.index(chave)
+        col = keys.index(chave)
         # Ruído por amostra: sem ele, todos os positivos ficariam alinhados
         # num ponto só e a curva ROC sairia otimista demais.
         escala = fator * rng.uniform(0.7, 1.3, size=Y.shape[0])
@@ -135,12 +136,14 @@ def _inject(X: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     return Y
 
 
-def _perturbable_columns() -> List[int]:
-    """Colunas que a injeção graduada pode deslocar — nunca hora nem dia."""
-    return [ml_service.FEATURE_KEYS.index(k) for k in PERTURBABLE if k in ml_service.FEATURE_KEYS]
+def _perturbable_columns(keys: Optional[List[str]] = None) -> List[int]:
+    """Colunas de `keys` que a injeção graduada pode deslocar — nunca hora nem dia."""
+    keys = ml_service.FEATURE_KEYS if keys is None else keys
+    return [i for i, k in enumerate(keys) if k in PERTURBABLE]
 
 
-def _inject_single(X: np.ndarray, col: int, k: float, sigma: np.ndarray) -> np.ndarray:
+def _inject_single(X: np.ndarray, col: int, k: float, sigma: np.ndarray,
+                   keys: Optional[List[str]] = None) -> np.ndarray:
     """Uma medida só, deslocada para cima em `k` desvios-padrão do treino.
 
     Sem ruído por amostra, ao contrário de `_inject`: os positivos já variam
@@ -149,7 +152,8 @@ def _inject_single(X: np.ndarray, col: int, k: float, sigma: np.ndarray) -> np.n
     """
     Y = X.copy()
     Y[:, col] = Y[:, col] + k * sigma[col]
-    teto = PERTURBABLE[ml_service.FEATURE_KEYS[col]][2]
+    keys = ml_service.FEATURE_KEYS if keys is None else keys
+    teto = PERTURBABLE[keys[col]][2]
     if teto is not None:
         Y[:, col] = np.minimum(Y[:, col], teto)
     return Y
@@ -182,14 +186,18 @@ def holdout(db: Session, machine: Machine, test_ratio: float = TEST_RATIO,
         return {"ready": False,
                 "reason": f"São precisas ao menos {MIN_SAMPLES} leituras; esta máquina tem {len(metrics)}."}
 
-    X = np.array([ml_service._metric_to_vector(m, offset) for m in metrics], dtype=float)
-    corte = int(len(X) * (1 - test_ratio))
+    # Os atributos que o treino desta máquina escolheria, decididos só com a
+    # parte de treino — a de teste não pode influir no que o modelo enxerga
+    corte = int(len(metrics) * (1 - test_ratio))
+    keys = ml_service.available_features(metrics[:corte])
+    fill = ml_service.training_fill(metrics[:corte], keys)
+    X = np.array([ml_service._metric_to_vector(m, offset, keys, fill) for m in metrics], dtype=float)
     X_train, X_test = X[:corte], X[corte:]
     if len(X_test) < 30:
         return {"ready": False, "reason": "A parte de teste ficou pequena demais para medir."}
 
     rng = np.random.default_rng(seed)
-    X_anom = _inject(X_test, rng)
+    X_anom = _inject(X_test, rng, keys)
     y = np.concatenate([np.zeros(len(X_test)), np.ones(len(X_anom))])
 
     params = _parametros()
@@ -214,7 +222,7 @@ def holdout(db: Session, machine: Machine, test_ratio: float = TEST_RATIO,
     auc_svm = float(roc_auc_score(y, scores_svm))
     auc_sigma = float(roc_auc_score(y, scores_sigma))
     ponto = _operating_point(modelo, scaler, X_train, X_test, X_anom)
-    sensibilidade = _sensitivity(modelo, svm, scaler, X_train, X_test)
+    sensibilidade = _sensitivity(modelo, svm, scaler, X_train, X_test, keys)
 
     return {
         "ready": True,
@@ -223,6 +231,7 @@ def holdout(db: Session, machine: Machine, test_ratio: float = TEST_RATIO,
         "samples_train": len(X_train),
         "samples_test": len(X_test),
         "samples_injected": len(X_anom),
+        "features": keys,
         "auc_model": round(auc_modelo, 4),
         "auc_ocsvm": round(auc_svm, 4),
         "auc_sigma_baseline": round(auc_sigma, 4),
@@ -250,7 +259,8 @@ def _sensitivity_base(X_test: np.ndarray) -> np.ndarray:
     return X_test[indices]
 
 
-def _sensitivity(modelo, svm, scaler, X_train: np.ndarray, X_test: np.ndarray) -> Dict[str, Any]:
+def _sensitivity(modelo, svm, scaler, X_train: np.ndarray, X_test: np.ndarray,
+                 keys: Optional[List[str]] = None) -> Dict[str, Any]:
     """Área sob a curva de cada detector, por intensidade de desvio.
 
     Os negativos são as leituras de teste como vieram; os positivos, as mesmas
@@ -259,7 +269,8 @@ def _sensitivity(modelo, svm, scaler, X_train: np.ndarray, X_test: np.ndarray) -
     limiar fixo usam: "k desvios" significa a mesma coisa para os três.
     """
     sigma = X_train.std(axis=0)
-    colunas = [c for c in _perturbable_columns() if sigma[c] > 1e-9]
+    keys = ml_service.FEATURE_KEYS if keys is None else keys
+    colunas = [c for c in _perturbable_columns(keys) if sigma[c] > 1e-9]
     X_test = _sensitivity_base(X_test)
     normal_avaliado = scaler.transform(X_test)
     notas_normais = {
@@ -270,7 +281,7 @@ def _sensitivity(modelo, svm, scaler, X_train: np.ndarray, X_test: np.ndarray) -
 
     linhas = []
     for k in SENSITIVITY_LEVELS:
-        anomalas = np.vstack([_inject_single(X_test, c, k, sigma) for c in colunas])
+        anomalas = np.vstack([_inject_single(X_test, c, k, sigma, keys) for c in colunas])
         anomalas_avaliadas = scaler.transform(anomalas)
         notas_anomalas = {
             "isolation_forest": -modelo.decision_function(anomalas_avaliadas),
@@ -286,7 +297,7 @@ def _sensitivity(modelo, svm, scaler, X_train: np.ndarray, X_test: np.ndarray) -
 
     return {
         "levels": list(SENSITIVITY_LEVELS),
-        "features": [ml_service.FEATURE_KEYS[c] for c in colunas],
+        "features": [keys[c] for c in colunas],
         "rows": linhas,
         "smallest_detectable": {
             d: _smallest_detectable([(l["sigma"], l[d]) for l in linhas]) for d in SENSITIVITY_DETECTORS

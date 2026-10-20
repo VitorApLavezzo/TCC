@@ -235,3 +235,37 @@ class TestBaseDaVarredura:
         from app.services import ml_eval
         X = np.ones((90, 3))
         assert len(ml_eval._sensitivity_base(X)) == 90
+
+
+class TestAtributosDaMaquina:
+    """A avaliação mede o modelo que a máquina teria, com os atributos que ela tem."""
+
+    def test_sem_contexto_mede_os_17(self, db):
+        from app.services import ml_eval, ml_service
+        m = _maquina_com_historico(db)
+        assert ml_eval.holdout(db, m)["features"] == ml_service.BASE_FEATURE_KEYS
+
+    def test_com_contexto_mede_os_que_o_treino_escolheria(self, db):
+        from app.services import ml_eval, ml_service
+        m = _maquina_com_historico(db)
+        rng = np.random.default_rng(3)
+        for met in db.query(Metric).filter(Metric.machine_id == m.id).all():
+            met.top_proc_cpu = float(rng.normal(15, 3))
+            met.top_proc_known = 1
+            met.cpu_std_10m = float(rng.normal(6, 1))
+        db.commit()
+        r = ml_eval.holdout(db, m)
+        assert r["features"] == ml_service.BASE_FEATURE_KEYS + ["top_proc_cpu", "top_proc_known", "cpu_std_10m"]
+        assert r["ready"] and 0.0 <= r["auc_model"] <= 1.0
+
+    def test_colunas_perturbaveis_indexam_a_lista_usada(self):
+        from app.services import ml_eval
+        keys = ["top_proc_cpu", "hour_sin", "cpu_percent", "net_connections"]
+        assert ml_eval._perturbable_columns(keys) == [2, 3]
+
+    def test_teto_vem_da_lista_usada(self):
+        from app.services import ml_eval
+        keys = ["top_proc_cpu", "cpu_percent"]
+        X = np.full((10, 2), 99.0)
+        sigma = np.ones(2)
+        assert ml_eval._inject_single(X, 1, 5.0, sigma, keys)[:, 1].max() <= 100.0
