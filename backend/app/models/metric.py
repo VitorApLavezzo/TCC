@@ -55,6 +55,15 @@ class Metric(Base):
     foreground_pid = Column(Integer)  # programa na janela da frente, quando o sistema informa
     foreground_name = Column(String)
 
+    # Contexto da leitura (services/context.py), gravado na chegada: o que
+    # separa um jogo de um minerador com a mesma carga
+    top_proc_cpu = Column(Float)  # CPU do processo dominante ÷ núcleos lógicos (0–100)
+    top_proc_user_driven = Column(Integer)  # 1 janela ativa ou filho dela; 0 não; nulo sem janela
+    top_proc_trust = Column(Integer)  # 0 desconhecido, 1 comum, 2 confiável, 3 segurança
+    top_proc_known = Column(Integer)  # 1 se o programa já é conhecido nesta máquina
+    cpu_std_10m = Column(Float)  # oscilação da CPU nos últimos 10 minutos
+    gpu_std_10m = Column(Float)
+
     # GPU
     gpu_metrics = Column(JSON)
 

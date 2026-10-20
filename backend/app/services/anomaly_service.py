@@ -28,7 +28,8 @@ from app.models.anomaly import Anomaly
 from app.models.explanation import AIExplanation
 from app.models.machine import Machine
 from app.models.metric import Metric
-from app.services import feedback, incidents, learning, ml_service
+from app.models.process import ProcessSnapshot
+from app.services import context, feedback, incidents, learning, ml_service, trust
 from app.services.behavior_analyzer import DetectionContext, analyze_behavior
 
 ANOMALY_COOLDOWN_MINUTES = 30
@@ -427,6 +428,13 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
 
     # 1. Análise comportamental (padrões avançados)
     findings = analyze_behavior(metric, db, ctx) if _active_layer != "ml" else []
+
+    # Contexto da leitura, antes do modelo: o modelo o usa como atributo
+    if context.context_on():
+        processes = db.query(ProcessSnapshot).filter(ProcessSnapshot.metric_id == metric.id).all()
+        if not ctx.trust_levels:  # camada "só ML": os detectores não calcularam
+            ctx.trust_levels = trust.evaluate_all(db, machine.id, processes)
+        context.compute(db, metric, processes, ctx.trust_levels)
 
     # 2. Isolation Forest (desvio estatístico)
     ml_threshold = ml_service.alert_threshold(machine.id, sensitivity.get("ml", 1.0))
