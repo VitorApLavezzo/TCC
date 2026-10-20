@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Text
+from sqlalchemy import JSON, Column, Integer, Float, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -28,5 +28,6 @@ class ProcessSnapshot(Base):
     signed = Column(String)  # "signed" | "unsigned" | "unknown"
     publisher = Column(String)
     parent_name = Column(String)
+    ancestors = Column(JSON)  # pids dos pais (até 8), só nos três de maior CPU
 
     metric = relationship("Metric", back_populates="processes")

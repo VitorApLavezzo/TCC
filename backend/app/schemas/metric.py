@@ -23,6 +23,8 @@ class ProcessData(BaseModel):
     signed: Optional[str] = None
     publisher: Optional[str] = None
     parent_name: Optional[str] = None
+    # Pids dos processos pais (até 8), só nos três de maior CPU
+    ancestors: Optional[List[int]] = None
 
 
 class ProcessStart(BaseModel):
@@ -114,6 +116,9 @@ class MetricCreate(BaseModel):
     load_avg_15: Optional[float] = None
     boot_time: Optional[float] = None
     user_idle_seconds: Optional[float] = None
+    # Programa na janela da frente (Windows); None sem janela ou em agente antigo
+    foreground_pid: Optional[int] = None
+    foreground_name: Optional[str] = None
 
     # GPU
     gpu_metrics: Optional[List[GPUData]] = None

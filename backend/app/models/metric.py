@@ -52,6 +52,8 @@ class Metric(Base):
     load_avg_15 = Column(Float)
     boot_time = Column(Float)  # epoch do último boot — muda quando o computador reinicia
     user_idle_seconds = Column(Float)  # tempo sem teclado/mouse, quando o sistema informa
+    foreground_pid = Column(Integer)  # programa na janela da frente, quando o sistema informa
+    foreground_name = Column(String)
 
     # GPU
     gpu_metrics = Column(JSON)

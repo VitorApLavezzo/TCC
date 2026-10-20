@@ -209,3 +209,17 @@ def test_demonstracao_continua_detectando(client, auth, db):
         machine_id = sessao.machine_ids[0]
         tipos = {a.anomaly_type for a in db.query(Anomaly).filter(Anomaly.machine_id == machine_id).all()}
         assert demo.SCENARIOS[cenario]["expect"] in tipos, f"{cenario} parou de detectar: {tipos}"
+
+
+def test_janela_ativa_e_pais_chegam_ao_banco(client, machine, db):
+    """O contexto de uso depende destes campos; o Pydantic descarta o que não está declarado."""
+    from app.models.metric import Metric
+    from app.models.process import ProcessSnapshot
+    res = _ingest(client, machine["agent_token"], foreground_pid=900, foreground_name="jogo.exe",
+                  processes=[_processo(pid=900, name="jogo.exe", ancestors=[300, 4])])
+    assert res.status_code == 202
+    metric = db.query(Metric).filter(Metric.machine_id == machine["id"]).order_by(Metric.id.desc()).first()
+    assert metric.foreground_pid == 900
+    assert metric.foreground_name == "jogo.exe"
+    snap = db.query(ProcessSnapshot).filter(ProcessSnapshot.metric_id == metric.id).one()
+    assert snap.ancestors == [300, 4]
