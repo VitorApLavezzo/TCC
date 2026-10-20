@@ -113,7 +113,10 @@ class TestUninstaller:
     INSTALLERS = os.path.join(FRONTEND_DIR, "src", "utils", "installers.ts")
 
     def _source(self):
-        if not os.path.exists(self.INSTALLERS):
+        # Pula só quando o frontend inteiro não está presente (o container do
+        # backend). Se o frontend existe e o arquivo sumiu ou mudou de nome, o
+        # teste tem que quebrar — pular aí esconderia a regressão no CI.
+        if not os.path.isdir(FRONTEND_DIR):
             pytest.skip(SEM_FRONTEND)
         return open(self.INSTALLERS, encoding="utf-8").read()
 
