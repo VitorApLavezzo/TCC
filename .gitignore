@@ -28,4 +28,7 @@ docs/
 Thumbs.db
 
 # Cópias do banco: têm dados das máquinas monitoradas (processos, linhas de comando)
-backups/
+# A pasta vem no repositório (.gitkeep): se o Docker a criar, ela nasce do
+# root e o serviço de backup, que roda com o usuário do host, não grava.
+backups/*
+!backups/.gitkeep

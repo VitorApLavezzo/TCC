@@ -6,10 +6,24 @@
 # BACKUP_KEEP_DAYS. O dump vai primeiro para um arquivo temporário e só ganha o
 # nome final se terminou: um dump interrompido nunca se passa por válido.
 #
-# Restaurar (apaga e recria as tabelas do banco atual):
+# Restaurar (apaga e recria as tabelas do banco atual; pare o backend antes):
+#   docker compose stop backend
 #   gunzip -c backups/anomaly_db-AAAAMMDD-HHMMSS.sql.gz \
-#     | docker compose exec -T db psql -U postgres -d anomaly_db
+#     | docker compose exec -T db psql -U postgres -d anomaly_db -v ON_ERROR_STOP=1 --single-transaction
+#   docker compose start backend
 set -eu
+
+# Os dumps têm os tokens dos agentes e as linhas de comando das máquinas:
+# legíveis só pelo dono.
+umask 077
+
+if [ ! -w /backups ]; then
+    echo "[backup] /backups não é gravável pelo usuário $(id -u). Se a pasta ./backups" >&2
+    echo "[backup] foi criada pelo Docker, ela é do root: apague-a e rode 'git checkout backups'." >&2
+    exit 1
+fi
+# Sobra de um dump interrompido antes de ganhar o nome final
+rm -f /backups/*.sql.gz.tmp
 
 intervalo=$(( ${BACKUP_INTERVAL_HOURS:-6} * 3600 ))
 guardar=${BACKUP_KEEP_DAYS:-14}

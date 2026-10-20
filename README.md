@@ -543,10 +543,15 @@ painel (`vitest`) e a verificação de tipos com o build (`tsc && vite build`).
 horas em `./backups` (fora do git: tem dados das máquinas monitoradas) e guarda
 14 dias (`BACKUP_INTERVAL_HOURS`, `BACKUP_KEEP_DAYS`). O dump só ganha o nome
 final se terminou, então um arquivo interrompido nunca se passa por válido.
-Para restaurar (apaga e recria as tabelas do banco atual):
+Para restaurar (apaga e recria as tabelas do banco atual). Com
+`ON_ERROR_STOP` e `--single-transaction`, uma restauração que falha no meio
+desfaz tudo em vez de deixar o banco pela metade:
 
 ```bash
-gunzip -c backups/anomaly_db-AAAAMMDD-HHMMSS.sql.gz | docker compose exec -T db psql -U postgres -d anomaly_db
+docker compose stop backend
+gunzip -c backups/anomaly_db-AAAAMMDD-HHMMSS.sql.gz \
+  | docker compose exec -T db psql -U postgres -d anomaly_db -v ON_ERROR_STOP=1 --single-transaction
+docker compose start backend
 ```
 
 **Segurança.** O modelo de ameaça — quem é confiado, quanto, e quais riscos
