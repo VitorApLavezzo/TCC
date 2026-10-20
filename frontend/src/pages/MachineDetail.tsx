@@ -15,6 +15,7 @@ import { ArrowLeft } from "lucide-react";
 import { ModelHealth } from "../components/reliability/ModelHealth";
 import { HardwareRisk } from "../components/reliability/HardwareRisk";
 import { Timeline } from "../components/reliability/Timeline";
+import { ActivityLabelControl } from "../components/machines/ActivityLabelControl";
 
 /** A história desta máquina: avisos, mudanças, ações e automações juntos. */
 function TimelineTab({ machineId }: { machineId: number }) {
@@ -66,7 +67,11 @@ export function MachineDetail() {
         <ArrowLeft size={12} aria-hidden="true" />
         Painel
       </TextButton>
-      <PageHeader title={machine?.name ?? "Computador"} description={machine?.os_pretty ?? machine?.os_type ?? undefined} />
+      <PageHeader
+        title={machine?.name ?? "Computador"}
+        description={machine?.os_pretty ?? machine?.os_type ?? undefined}
+        aside={machine ? <ActivityLabelControl machineId={machineId} /> : undefined}
+      />
 
       <div className="flex flex-wrap gap-1 border-b border-hairline">
         {TABS.map((t) => (

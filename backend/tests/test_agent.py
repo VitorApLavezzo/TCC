@@ -347,3 +347,65 @@ class TestAscendencia:
         import collector
         payload = collector.collect_metrics()
         assert "foreground_pid" in payload and "foreground_name" in payload
+
+
+@pytest.fixture(scope="module")
+def agente(tmp_path_factory):
+    """agent.py grava log e configuração ao lado de si; no container essa pasta é só leitura."""
+    antes = os.environ.get("AGENT_CONFIG_DIR")
+    os.environ["AGENT_CONFIG_DIR"] = str(tmp_path_factory.mktemp("agente"))
+    try:
+        import agent
+        return agent
+    finally:
+        if antes is None:
+            os.environ.pop("AGENT_CONFIG_DIR", None)
+        else:
+            os.environ["AGENT_CONFIG_DIR"] = antes
+
+
+class TestRotuloNaBandeja:
+    """"O que estou fazendo": o gabarito marcado no próprio computador."""
+
+    def test_rotulos_da_bandeja_sao_ascii(self, agente):
+        # O backend X11 do pystray usa latin-1: acento vira lixo ou erro
+        for _, texto in agente.ACTIVITY_MENU:
+            assert texto.isascii(), texto
+
+    def test_menu_cobre_exatamente_o_catalogo_do_servidor(self, agente):
+        from app.services import activity_labels
+        ids = [i for i, _ in agente.ACTIVITY_MENU if i != "parar"]
+        assert set(ids) == set(activity_labels.LABELS)
+        assert "parar" in {i for i, _ in agente.ACTIVITY_MENU}
+
+    def test_envia_com_o_token(self, agente, monkeypatch):
+        chamadas = []
+
+        class Resposta:
+            status_code = 200
+
+        def post(url, json=None, headers=None, timeout=None):
+            chamadas.append((url, json, headers))
+            return Resposta()
+
+        monkeypatch.setattr(agente, "API_TOKEN", "tok-123")
+        monkeypatch.setattr(agente.requests, "post", post)
+        assert agente.send_activity_label("jogando") is True
+        url, corpo, headers = chamadas[0]
+        assert url.endswith("/api/agent/activity-label")
+        assert corpo == {"label": "jogando"}
+        assert headers["X-Agent-Token"] == "tok-123"
+
+    def test_sem_rede_devolve_false(self, agente, monkeypatch):
+        def falha(*a, **k):
+            raise agente.requests.ConnectionError("sem rede")
+
+        monkeypatch.setattr(agente.requests, "post", falha)
+        assert agente.send_activity_label("jogando") is False
+
+    def test_servidor_recusando_devolve_false(self, agente, monkeypatch):
+        class Resposta:
+            status_code = 422
+
+        monkeypatch.setattr(agente.requests, "post", lambda *a, **k: Resposta())
+        assert agente.send_activity_label("xyz") is False

@@ -76,6 +76,8 @@ export const machinesApi = {
   delete: (id: number) => api.delete(`/machines/${id}`),
   regenerateToken: (id: number) => api.post(`/machines/${id}/regenerate-token`),
   setRealtime: (id: number, minutes: number) => api.post(`/machines/${id}/realtime`, { minutes }),
+  activityLabels: (id: number, days = 7) => api.get(`/machines/${id}/activity-labels`, { params: { days } }),
+  markActivity: (id: number, label: string) => api.post(`/machines/${id}/activity-label`, { label }),
 };
 
 export const bulkKeysApi = {

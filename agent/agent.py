@@ -609,6 +609,36 @@ def run():
     logger.info("Agent stopped.")
 
 
+# "O que estou fazendo": o gabarito da avaliação em dado real. Os ids são os
+# do servidor (activity_labels.LABELS); o texto é só ASCII porque o backend
+# X11 do pystray usa latin-1. Diferente do modo atividade pesada, o rótulo não
+# muda a detecção — só registra o que a pessoa estava fazendo.
+ACTIVITY_MENU = [
+    ("jogando", "Jogando"),
+    ("trabalho_pesado", "Trabalho pesado (compilar, renderizar)"),
+    ("uso_normal", "Uso normal"),
+    ("teste_minerador", "Teste: minerador parado"),
+    ("teste_minerador_em_uso", "Teste: minerador em uso"),
+    ("teste_disfarce", "Teste: programa disfarcado"),
+    ("teste_isca", "Teste: arquivo-isca"),
+    ("teste_periodico", "Teste: contato periodico"),
+    ("parar", "Parar marcacao"),
+]
+
+
+def send_activity_label(label: str) -> bool:
+    """Avisa o servidor do que a pessoa está fazendo. Sem rede, só não marca."""
+    try:
+        response = requests.post(f"{API_URL}/api/agent/activity-label", json={"label": label},
+                                 headers={"X-Agent-Token": API_TOKEN}, timeout=10)
+    except requests.RequestException:
+        return False
+    if response.status_code != 200:
+        return False
+    logger.info(f"Atividade marcada pela bandeja: {label}.")
+    return True
+
+
 def start_with_tray() -> bool:
     try:
         import webbrowser
@@ -637,6 +667,11 @@ def start_with_tray() -> bool:
                     pass
             return handler
 
+        def on_label(label):
+            def handler(icon, item):
+                send_activity_label(label)
+            return handler
+
         def on_quit(icon, item):
             global running
             logger.info("Encerrado pelo usuário via bandeja do sistema.")
@@ -651,12 +686,16 @@ def start_with_tray() -> bool:
             pystray.MenuItem("Por 3 horas", on_focus(180)),
             pystray.MenuItem("Desligar o modo", on_focus(0)),
         )
+        activity_menu = pystray.Menu(*[
+            pystray.MenuItem(texto, on_label(label)) for label, texto in ACTIVITY_MENU
+        ])
         icon = pystray.Icon(
             "anomalydetect-agent", _icon_image(), f"AnomalyDetect - {machine_name}",
             menu=pystray.Menu(
                 pystray.MenuItem(f"Monitorando: {machine_name}", None, enabled=False),
                 pystray.MenuItem("Abrir painel", on_open, default=True),
                 pystray.MenuItem("Estou fazendo algo pesado", focus_menu),
+                pystray.MenuItem("O que estou fazendo", activity_menu),
                 pystray.Menu.SEPARATOR,
                 pystray.MenuItem("Sair", on_quit),
             ),
