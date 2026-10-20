@@ -57,6 +57,7 @@ TYPE_SIGNALS = {
     "beaconing": ["c2"],
     "cpu_loop": ["cpu_loop"],
     "high_cpu": ["cpu_pressure"],
+    "background_load": ["cpu_pressure"],
     "high_memory": ["memory_pressure"],
     "resource_exhaustion": ["memory_pressure", "cpu_pressure"],
     "disk_full": ["disk_pressure"],

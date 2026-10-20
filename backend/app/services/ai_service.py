@@ -549,6 +549,12 @@ def generate_variant(db: Session, anomaly: Anomaly, level: str) -> Dict[str, Any
 # ---------------------------------------------------------------------------
 
 CAUSES_MAP = {
+    "background_load": [
+        "Programa pesado rodando em segundo plano, sem ser a janela que você está usando",
+        "Minerador de criptomoedas ou outro programa indesejado usando o processador escondido",
+        "Tarefa agendada, atualização ou backup rodando sozinha",
+        "Programa que você fechou mas continuou trabalhando por trás",
+    ],
     "high_cpu": [
         "Processo intensivo em execução (compilação, renderização, encoding de vídeo)",
         "Malware ou minerador de criptomoedas consumindo CPU em background",
@@ -689,6 +695,12 @@ CAUSES_MAP = {
 }
 
 RECS_MAP = {
+    "background_load": [
+        "Confira se você abriu esse programa ou se ele faz parte de algo que você instalou",
+        "Abra o Gerenciador de Tarefas (Ctrl+Shift+Esc), clique com o botão direito no processo e escolha 'Abrir local do arquivo'",
+        "Se não reconhecer o programa, encerre-o e execute um antivírus atualizado",
+        "Se for uma tarefa legítima (renderização, backup), marque o aviso como normal",
+    ],
     "high_cpu": [
         "Abra o Gerenciador de Tarefas (Ctrl+Shift+Esc) e identifique o processo com maior CPU",
         "Encerre o processo suspeito se não for essencial",

@@ -574,6 +574,7 @@ def ml_severity(anomaly_type: str, severity: str, trust_info) -> str:
 # do sistema inteiro. Ficar calado é a resposta honesta.
 BLAME_FIELD = {
     "high_cpu": "cpu_percent",
+    "background_load": "cpu_percent",
     "cpu_loop": "cpu_percent",
     "resource_exhaustion": "cpu_percent",
     "high_memory": "mem_percent",

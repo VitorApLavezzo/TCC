@@ -101,7 +101,7 @@ def condition_status(db: Session, anomaly: Anomaly, since=None, min_readings: in
             return True, f"{proc} ainda ocupa {mems[-1]:.1f}% da memória (era {reference:.1f}% no aviso)."
         return False, f"{proc} caiu para {mems[-1]:.1f}% da memória (era {reference:.1f}% no aviso)."
 
-    if t == "high_cpu":
+    if t in ("high_cpu", "background_load"):
         values = [m.cpu_percent or 0 for m in metrics]
         still = _majority([v >= 85 for v in values])
         return still, f"Processador em média {_avg(values):.0f}% nas últimas {n} leituras."

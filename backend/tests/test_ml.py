@@ -258,3 +258,99 @@ class TestAtributosOpcionais:
         contribs = ml_service.explain_contributions(m.id, leitura)
         assert contribs and contribs[0]["group"] == "dominant_process"
         assert contribs[0]["label"] == "Programa dominante"
+
+
+def _classificar(cpu, conduzido, contributions=None, **over):
+    from app.services.ml_service import classify_anomaly
+    m = make_mock_metric(cpu=cpu, mem=over.pop("mem", 40.0), disk=50.0)
+    m.top_proc_user_driven = conduzido
+    db = MagicMock()
+    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+        make_mock_metric(cpu=20.0) for _ in range(20)
+    ]
+    return classify_anomaly(m, db, contributions)
+
+
+class TestSegundoPlano:
+    """O mesmo processador cheio: jogo na janela da frente × programa sozinho em segundo plano."""
+
+    def test_processador_cheio_sem_ninguem_conduzindo_e_segundo_plano(self):
+        r = _classificar(97.0, 0)
+        assert (r["anomaly_type"], r["severity"]) == ("background_load", "high")
+
+    def test_gravidade_segue_a_do_processador(self):
+        r = _classificar(92.0, 0)
+        assert (r["anomaly_type"], r["severity"]) == ("background_load", "medium")
+
+    def test_conduzido_pela_pessoa_continua_processador(self):
+        assert _classificar(97.0, 1)["anomaly_type"] == "high_cpu"
+
+    def test_sem_janela_ativa_continua_processador(self):
+        assert _classificar(97.0, None)["anomaly_type"] == "high_cpu"
+
+    def test_grupo_programa_dominante_sem_limite_fixo(self):
+        grupo = [{"group": "dominant_process", "label": "Programa dominante", "percent": 80.0}]
+        assert _classificar(40.0, 0, grupo)["anomaly_type"] == "background_load"
+        assert _classificar(40.0, 1, grupo)["anomaly_type"] == "high_cpu"
+
+    def test_grupo_estabilidade(self):
+        grupo = [{"group": "stability", "label": "Estabilidade da carga", "percent": 80.0}]
+        r = _classificar(40.0, None, grupo)
+        assert (r["anomaly_type"], r["severity"]) == ("behavioral_anomaly", "medium")
+
+    def test_grupo_presenca(self):
+        grupo = [{"group": "presence", "label": "Presença de quem usa", "percent": 80.0}]
+        r = _classificar(40.0, None, grupo)
+        assert (r["anomaly_type"], r["severity"]) == ("unusual_time", "low")
+
+    def test_contexto_desligado_nunca_da_segundo_plano(self):
+        from app.services import context
+        grupo = [{"group": "dominant_process", "label": "Programa dominante", "percent": 80.0}]
+        anterior = context.set_context_mode(False)
+        try:
+            assert _classificar(97.0, 0)["anomaly_type"] == "high_cpu"
+            assert _classificar(40.0, 0, grupo)["anomaly_type"] == "high_cpu"
+        finally:
+            context.set_context_mode(anterior)
+
+    def test_tipo_registrado_onde_os_tipos_de_carga_estao(self):
+        from app.core import labels
+        from app.services import anomaly_service, incidents
+        assert labels.ANOMALY_TYPE_LABELS["background_load"] == "Programa Pesado Rodando em Segundo Plano"
+        assert "background_load" in labels.PERFORMANCE_TYPES
+        assert "background_load" not in labels.SECURITY_TYPES
+        assert "background_load" in labels.COUNTERFACTUAL_TYPES
+        assert labels.DETECTOR_OF_TYPE["background_load"] == "ml"
+        assert incidents.TYPE_SIGNALS["background_load"] == ["cpu_pressure"]
+        # Sem isto o aviso sai sem programa responsável
+        assert anomaly_service.BLAME_FIELD["background_load"] == "cpu_percent"
+
+    def test_reconferencia_olha_o_processador(self, db):
+        """A reconferência de um aviso de segundo plano mede o processador, como a de CPU."""
+        from datetime import timedelta
+        from app.core.timeutil import utcnow
+        from app.models.anomaly import Anomaly
+        from app.models.metric import Metric
+        from app.services import conditions
+        from tests.test_trust import _machine
+        m = _machine(db)
+        agora = utcnow()
+        a = Anomaly(machine_id=m.id, anomaly_type="background_load", severity="high",
+                    detected_at=agora - timedelta(minutes=10), affected_metrics={})
+        db.add(a)
+        for i in range(4):
+            db.add(Metric(machine_id=m.id, cpu_percent=97.0, timestamp=agora - timedelta(minutes=8 - 2 * i)))
+        db.commit()
+        ainda, frase = conditions.condition_status(db, a, since=agora - timedelta(minutes=9))
+        assert ainda is True and frase.startswith("Processador em média 97%")
+
+
+def test_explicacao_sem_ia_do_segundo_plano_fala_do_que_ninguem_abriu():
+    """Sem IA disponível, o aviso novo não pode cair nas causas genéricas."""
+    from types import SimpleNamespace
+    from app.services.ai_service import _generate_fallback_explanation
+    anomaly = SimpleNamespace(anomaly_type="background_load", severity="high", responsible_process="svc_update.exe")
+    out = _generate_fallback_explanation(anomaly, None)
+    texto = " ".join(out["possible_causes"]).lower()
+    assert "segundo plano" in texto and "minerador" in texto
+    assert any("você abriu" in r.lower() or "voce abriu" in r.lower() for r in out["recommendations"])

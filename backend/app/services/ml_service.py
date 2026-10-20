@@ -110,6 +110,11 @@ GROUP_TO_TYPE = {
     "processes": ("process_surge", "medium"),
     "gpu": ("gpu_anomaly", "low"),
     "time": ("unusual_time", "low"),
+    # Programa dominante: `background_load` quando ninguém o conduz (ver `_in_background`)
+    "dominant_process": ("high_cpu", "medium"),
+    "stability": ("behavioral_anomaly", "medium"),
+    # Uso num momento incomum para esta máquina
+    "presence": ("unusual_time", "low"),
 }
 
 _cache: Dict[int, Tuple[float, dict]] = {}
@@ -437,6 +442,16 @@ def explain_contributions(machine_id: int, metric, offset_minutes: Optional[int]
     return result
 
 
+def _in_background(metric) -> bool:
+    """O programa dominante roda sem a pessoa: não é a janela ativa nem descende dela.
+
+    Sem janela ativa (nulo) não dá para saber, e o aviso fica com o nome de
+    sempre.
+    """
+    from app.services import context
+    return context.context_on() and getattr(metric, "top_proc_user_driven", None) == 0
+
+
 def classify_anomaly(metric, db: Session, contributions: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     machine_id = metric.machine_id
     recent_metrics = (
@@ -460,7 +475,7 @@ def classify_anomaly(metric, db: Session, contributions: Optional[List[Dict[str,
 
     if current_cpu > 90:
         affected["cpu"] = current_cpu
-        anomaly_type = "high_cpu"
+        anomaly_type = "background_load" if _in_background(metric) else "high_cpu"
         severity = "high" if current_cpu > 95 else "medium"
 
     if current_mem > 90:
@@ -496,6 +511,8 @@ def classify_anomaly(metric, db: Session, contributions: Optional[List[Dict[str,
     if anomaly_type == "unknown" and contributions:
         top = contributions[0]
         anomaly_type, severity = GROUP_TO_TYPE.get(top["group"], ("behavioral_anomaly", "medium"))
+        if top["group"] == "dominant_process" and _in_background(metric):
+            anomaly_type = "background_load"
         affected["principal_desvio"] = top["label"]
         affected["peso_no_desvio_pct"] = top["percent"]
 

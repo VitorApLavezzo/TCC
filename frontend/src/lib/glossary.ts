@@ -52,6 +52,8 @@ export const GLOSSARY: Record<string, string> = {
 /** Como cada anomalia se explica em uma frase, antes da IA responder. */
 export const ANOMALY_TYPE_HINTS: Record<string, string> = {
   high_cpu: "O processador ficou perto do limite por tempo suficiente para deixar o computador lento.",
+  background_load:
+    "Um programa está ocupando o processador sem ser o que você está usando na tela. Pode ser uma tarefa legítima, ou algo que você não abriu.",
   high_memory: "A memória RAM encheu. Programas passam a fechar sozinhos ou travar.",
   resource_exhaustion: "Processador e memória saturaram juntos — o computador fica quase inutilizável.",
   disk_full: "O disco está perto de encher. Salvar arquivos e atualizar programas pode falhar.",

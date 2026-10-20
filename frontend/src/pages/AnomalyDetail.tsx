@@ -38,7 +38,7 @@ const MEM = { key: "mem_percent" as keyof Metric, label: "Memória", term: "memo
 const NET = { key: "net_connections" as keyof Metric, label: "Conexões de rede", term: "conexoes" };
 
 const CHART_FOR: Record<string, { key: keyof Metric; label: string; term: string; threshold?: number }> = {
-  high_cpu: CPU, cpu_loop: CPU, resource_exhaustion: CPU, thermal_throttling: CPU,
+  high_cpu: CPU, background_load: CPU, cpu_loop: CPU, resource_exhaustion: CPU, thermal_throttling: CPU,
   high_memory: MEM, memory_leak: MEM,
   disk_full: { key: "disk_percent", label: "Disco", term: "disco", threshold: THRESHOLDS.disk.warn },
   disk_forecast: { key: "disk_percent", label: "Disco", term: "disco", threshold: THRESHOLDS.disk.warn },

@@ -2,6 +2,7 @@
 
 ANOMALY_TYPE_LABELS = {
     "high_cpu": "Consumo Excessivo de CPU",
+    "background_load": "Programa Pesado Rodando em Segundo Plano",
     "high_memory": "Consumo Excessivo de Memória",
     "resource_exhaustion": "Esgotamento de Recursos (CPU + Memória)",
     "disk_full": "Disco Quase Cheio",
@@ -50,7 +51,7 @@ SEVERITY_ORDER = {"low": 1, "medium": 2, "high": 3, "critical": 4}
 # Avisos de desempenho: silenciados no "modo atividade pesada" e ajustáveis
 # pelo feedback. Uma pessoa jogando espera processador alto.
 PERFORMANCE_TYPES = {
-    "high_cpu", "high_memory", "resource_exhaustion", "cpu_loop", "memory_leak", "resource_abuse",
+    "high_cpu", "background_load", "high_memory", "resource_exhaustion", "cpu_loop", "memory_leak", "resource_abuse",
     "behavioral_change", "behavioral_anomaly", "network_spike", "disk_activity", "disk_space_change",
     "process_surge", "gpu_anomaly", "unusual_time", "thermal_throttling",
 }
@@ -81,7 +82,7 @@ LEARNING_EXEMPT = {
 # recomendação é irrelevante; num aviso de segurança é pior que irrelevante,
 # porque enquadra uma ameaça como incômodo de desempenho.
 COUNTERFACTUAL_TYPES = {
-    "high_cpu", "high_memory", "resource_exhaustion", "memory_leak",
+    "high_cpu", "background_load", "high_memory", "resource_exhaustion", "memory_leak",
     "cpu_loop", "resource_abuse", "thermal_throttling",
 }
 
@@ -100,6 +101,7 @@ DETECTOR_OF_TYPE = {
     "suspicious_parent": "suspicious_parent",
     "suspicious_command": "suspicious_parent",
     "high_cpu": "ml",
+    "background_load": "ml",
     "high_memory": "ml",
     "resource_exhaustion": "ml",
     "disk_full": "ml",

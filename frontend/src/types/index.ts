@@ -259,6 +259,7 @@ export interface AnomalyStats {
 
 export const ANOMALY_TYPE_LABELS: Record<string, string> = {
   high_cpu: "Processador Sobrecarregado",
+  background_load: "Programa Pesado Rodando em Segundo Plano",
   high_memory: "Memória Quase Esgotada",
   resource_exhaustion: "Computador no Limite (CPU + Memória)",
   disk_full: "Disco Quase Cheio",
