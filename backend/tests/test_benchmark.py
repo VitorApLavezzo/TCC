@@ -504,3 +504,143 @@ class TestRelogioReproduzivel:
         a = benchmark.run_scenario(db, "compilacao", u.id, now=madrugada)
         b = benchmark.run_scenario(db, "compilacao", u.id, now=sexta_noite)
         assert a.detected == b.detected and a.notified == b.notified
+
+
+def _dono_bench(db, sufixo="ctx"):
+    from app.core.security import get_password_hash
+    from app.models.user import User
+    u = User(email=f"bench{sufixo}@t.com", username=f"bench{sufixo}", hashed_password=get_password_hash("x"))
+    db.add(u)
+    db.commit()
+    return u.id
+
+
+def _na_camada(camada):
+    from app.services import anomaly_service
+    return anomaly_service.set_detection_layer(camada)
+
+
+class TestAblacaoHonesta:
+    """Eventos do agente (isca, contato periódico) são regra, não Isolation Forest."""
+
+    @pytest.mark.parametrize("cenario", ["ransomware", "beaconing"])
+    def test_so_ml_nao_ve_os_eventos_do_agente(self, db, cenario):
+        from app.services import benchmark
+        anterior = _na_camada("ml")
+        try:
+            r = benchmark.run_scenario(db, cenario, _dono_bench(db))
+        finally:
+            _na_camada(anterior)
+        assert r.error is None, r.error
+        assert r.expected not in r.detected
+
+    def test_regras_continuam_vendo_os_eventos(self, db):
+        from app.services import benchmark
+        anterior = _na_camada("regras")
+        try:
+            r = benchmark.run_scenario(db, "ransomware", _dono_bench(db))
+        finally:
+            _na_camada(anterior)
+        assert r.verdict == "acerto", r.detected
+
+    def test_so_ml_continua_aprendendo_os_programas(self, db):
+        """O cadastro de programas conhecidos é aprendizado, não detector: sem ele,
+        "programa conhecido" seria sempre 0 na camada do modelo."""
+        from app.core.timeutil import utcnow
+        from app.models.process_baseline import ProcessBaseline
+        from app.services import benchmark, demo
+        from tests.test_trust import _machine
+        m = _machine(db)
+        anterior = _na_camada("ml")
+        try:
+            benchmark._feed(db, m, demo._base_metric(0), demo._normal_processes(),
+                            benchmark._relogio_virtual(utcnow()), {})
+        finally:
+            _na_camada(anterior)
+        assert db.query(ProcessBaseline).filter(ProcessBaseline.machine_id == m.id).count() > 0
+
+
+class TestViu:
+    def test_viu_conta_ataque_com_qualquer_aviso(self):
+        from app.services.benchmark import ATTACK, NORMAL, confusion
+        r = confusion([
+            _res("a", ATTACK, "cpu_loop", ["high_cpu"]),
+            _res("b", ATTACK, "cpu_loop", ["cpu_loop"]),
+            _res("c", ATTACK, "beaconing", []),
+            _res("d", NORMAL, None, ["high_cpu"]),
+        ])
+        assert r["seen"] == 2
+        assert r["true_positives"] == 1
+
+
+class TestLeituraComContexto:
+    def test_leitura_base_tem_presenca_e_janela_ativa(self):
+        from app.services import demo
+        base = demo._base_metric(0)
+        procs = {p["name"]: p for p in demo._normal_processes()}
+        assert base["user_idle_seconds"] < 120
+        assert base["foreground_pid"] == procs["chrome.exe"]["pid"]
+        assert base["foreground_name"] == "chrome.exe"
+
+    def test_snapshot_guarda_pid_e_pais(self):
+        from app.services import benchmark
+        rows = list(benchmark._snapshot_rows(1, [{"name": "a.exe", "pid": 77, "ancestors": [5, 4]}], None))
+        assert rows[0].pid == 77 and rows[0].ancestors == [5, 4]
+
+    def test_jogo_pesado_esta_na_tela(self):
+        from app.services import benchmark, demo
+        data, procs = demo._base_metric(0), demo._normal_processes()
+        benchmark._jogo_pesado(0, data, procs)
+        jogo = next(p for p in procs if p["name"] == "jogo.exe")
+        assert data["foreground_pid"] == jogo["pid"]
+        assert data["user_idle_seconds"] < 120
+
+    def test_minerador_roda_por_tras_do_navegador(self):
+        from app.services import benchmark, demo
+        data, procs = demo._base_metric(0), demo._normal_processes()
+        benchmark._minerador(0, data, procs)
+        minerador = next(p for p in procs if p["name"] == "xmrig.exe")
+        assert data["foreground_name"] == "chrome.exe"
+        assert data["foreground_pid"] not in [minerador["pid"]] + minerador["ancestors"]
+
+    def test_programas_conhecidos_sao_semeados(self, db):
+        from app.models.process_baseline import ProcessBaseline
+        from app.services import benchmark
+        from tests.test_trust import _machine
+        m = _machine(db)
+        benchmark._seed_known(db, m, ["jogo.exe"])
+        b = db.query(ProcessBaseline).filter(ProcessBaseline.machine_id == m.id).one()
+        assert b.process_name == "jogo.exe" and b.is_known
+
+
+class TestCasosDificeis:
+    """Jogo × minerador: a distinção que o contexto de uso existe para fazer."""
+
+    def _rodar(self, db, nome):
+        from app.services import benchmark
+        r = benchmark.run_scenario(db, nome, _dono_bench(db, nome))
+        assert r.error is None, r.error
+        return r
+
+    def test_jogo_sem_assinatura_ja_jogado_nao_interrompe(self, db):
+        r = self._rodar(db, "jogo_sem_assinatura")
+        assert r.notified == [], r.detected
+
+    def test_compilacao_filha_do_editor_nao_interrompe(self, db):
+        r = self._rodar(db, "compilacao_do_editor")
+        assert r.notified == [], r.detected
+
+    def test_minerador_com_a_pessoa_navegando_interrompe(self, db):
+        r = self._rodar(db, "minerador_com_pessoa_navegando")
+        assert r.notified, r.detected
+
+    def test_minerador_no_rundll32_interrompe(self, db):
+        r = self._rodar(db, "minerador_no_rundll32")
+        assert r.notified, r.detected
+
+
+def test_relatorio_conta_os_ataques_que_o_sistema_viu():
+    from app.services.benchmark import ATTACK, BenchmarkResult, confusion, to_markdown
+    cenarios = [_res("a", ATTACK, "cpu_loop", ["high_cpu"]), _res("b", ATTACK, "beaconing", [])]
+    md = to_markdown(BenchmarkResult(scenarios=cenarios, metrics=confusion(cenarios)))
+    assert "| Ataques percebidos (qualquer aviso) | 1 de 2 |" in md

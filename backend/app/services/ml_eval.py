@@ -462,6 +462,8 @@ def ablation(db: Session, owner_id: int, names: Optional[List[str]] = None) -> D
                 "recall": metrics.get("recall"),
                 "f1": metrics.get("f1"),
                 "true_positives": metrics.get("true_positives"),
+                # Ataques com algum aviso, mesmo de outro tipo: "o modelo viu"
+                "seen": metrics.get("seen"),
                 "false_negatives": metrics.get("false_negatives"),
                 "false_positives": metrics.get("false_positives"),
                 "scenarios": len(resultado.scenarios),

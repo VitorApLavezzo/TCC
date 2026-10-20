@@ -51,9 +51,23 @@ NORMAL_PROCS = [
 ]
 
 
+# Pid e pais de cada programa comum. Tudo aberto pela pessoa descende do
+# explorer.exe; o svchost vem do services.exe.
+NORMAL_PIDS = {"explorer.exe": 1500, "chrome.exe": 2500, "Code.exe": 3100, "Spotify.exe": 3400,
+               "svchost.exe": 900}
+NORMAL_ANCESTORS = {"explorer.exe": [700], "chrome.exe": [1500, 700], "Code.exe": [1500, 700],
+                    "Spotify.exe": [1500, 700], "svchost.exe": [640, 4]}
+
+
 def _base_metric(step: int) -> Dict[str, Any]:
     wave = math.sin(step / 4) * 6
     return {
+        # Alguém navegando: teclado e mouse mexidos há segundos, o Chrome na
+        # frente. Sem `random` de propósito: mudar a sequência do gerador
+        # mudaria todos os números já publicados dos cenários.
+        "user_idle_seconds": 3.0 + (step % 9) * 6,
+        "foreground_pid": NORMAL_PIDS["chrome.exe"],
+        "foreground_name": "chrome.exe",
         "cpu_percent": max(3.0, 14 + wave + random.uniform(-3, 3)),
         "mem_percent": 46 + math.sin(step / 6) * 4 + random.uniform(-2, 2),
         "disk_percent": 58.0,
@@ -84,7 +98,7 @@ def _normal_processes() -> List[Dict[str, Any]]:
         out.append({"name": name, "cpu_percent": max(0, cpu_b + random.uniform(-1, 1)),
                     "mem_percent": max(0, mem_b + random.uniform(-1, 1)), "exe": exe, "signed": signed,
                     "publisher": "Microsoft" if signed == "signed" and "svchost" in name else "—",
-                    "username": "demo"})
+                    "username": "demo", "pid": NORMAL_PIDS[name], "ancestors": NORMAL_ANCESTORS[name]})
     return out
 
 

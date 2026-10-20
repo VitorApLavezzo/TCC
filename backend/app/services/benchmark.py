@@ -120,6 +120,9 @@ def confusion(results: List[ScenarioResult]) -> Dict[str, Any]:
     fp = sum(1 for r in quietos if r.detected)
     tn = len(quietos) - fp
     fp_notificado = sum(1 for r in quietos if r.notified)
+    # "O modelo viu": ataque com qualquer aviso, mesmo com outro nome. Separa
+    # "não percebeu nada" de "percebeu e chamou de outra coisa".
+    viu = sum(1 for r in ataques if r.detected)
 
     precision = _ratio(tp, tp + fp)
     recall = _ratio(tp, tp + fn)
@@ -132,6 +135,7 @@ def confusion(results: List[ScenarioResult]) -> Dict[str, Any]:
 
     return {
         "true_positives": tp,
+        "seen": viu,
         "false_negatives": fn,
         "false_positives": fp,
         "true_negatives": tn,
@@ -175,6 +179,8 @@ def to_markdown(result: BenchmarkResult) -> str:
         f"| Precisão | {_pct(m['precision'])} | dos avisos emitidos, quantos eram problema de verdade |",
         f"| Revocação | {_pct(m['recall'])} | dos problemas existentes, quantos foram encontrados |",
         f"| F1 | {_pct(m['f1'])} | equilíbrio entre as duas |",
+        f"| Ataques percebidos (qualquer aviso) | {m.get('seen', 0)} de {m['true_positives'] + m['false_negatives']} "
+        f"| ataques com algum aviso, mesmo com outro nome |",
         f"| Taxa de alarme falso (qualquer aviso) | {_pct(m['false_positive_rate'])} | das situações normais, quantas geraram algum aviso |",
         f"| Taxa de alarme falso (que interrompe) | {_pct(m.get('false_positive_rate_notified'))} | das situações normais, quantas geraram aviso que chega à pessoa |",
         "",
@@ -241,13 +247,48 @@ def _antivirus_varrendo(k: int, metric: Dict, procs: List[Dict]) -> None:
                   "username": "SYSTEM", "cmdline": "avp.exe -scan"})
 
 
+# Pids dos programas que os cenários põem para rodar
+PID_JOGO, PID_STEAM, PID_COMPILADOR, PID_MINERADOR = 5200, 5100, 7300, 6600
+
+
+def _na_tela(metric: Dict, pid: int, name: str) -> None:
+    """A pessoa está usando o computador, com este programa na janela da frente."""
+    metric["foreground_pid"] = pid
+    metric["foreground_name"] = name
+    metric["user_idle_seconds"] = 2.0
+
+
 def _jogo_pesado(k: int, metric: Dict, procs: List[Dict]) -> None:
     metric["cpu_percent"] = 88 + (k % 4)
     metric["mem_percent"] = 74.0
     metric["gpu_metrics"] = [{"name": "GPU", "load_percent": 97, "memory_percent": 88, "temperature": 74}]
     procs.append({"name": "jogo.exe", "cpu_percent": 82.0, "mem_percent": 22.0,
                   "exe": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Jogo\\jogo.exe",
-                  "signed": "signed", "publisher": "Estudio de Jogos SA", "username": "vitor"})
+                  "signed": "signed", "publisher": "Estudio de Jogos SA", "username": "vitor",
+                  "pid": PID_JOGO, "ancestors": [PID_STEAM, 1500, 700]})
+    _na_tela(metric, PID_JOGO, "jogo.exe")
+
+
+def _jogo_sem_assinatura(k: int, metric: Dict, procs: List[Dict]) -> None:
+    """O caso relatado: jogo fora da Steam, sem assinatura, já jogado antes."""
+    metric["cpu_percent"] = 88 + (k % 4)
+    metric["mem_percent"] = 70.0
+    metric["gpu_metrics"] = [{"name": "GPU", "load_percent": 95, "memory_percent": 80, "temperature": 72}]
+    procs.append({"name": "jogo.exe", "cpu_percent": 80.0, "mem_percent": 20.0,
+                  "exe": "D:\\Games\\Jogo\\jogo.exe", "signed": "unsigned", "username": "vitor",
+                  "cmdline": "jogo.exe", "pid": PID_JOGO, "ancestors": [1500, 700]})
+    _na_tela(metric, PID_JOGO, "jogo.exe")
+
+
+def _compilacao_do_editor(k: int, metric: Dict, procs: List[Dict]) -> None:
+    """O compilador não é a janela: é filho do editor que está na frente."""
+    metric["cpu_percent"] = 95.0
+    metric["load_avg_1"] = 9.0
+    procs.append({"name": "cl.exe", "cpu_percent": 90.0, "mem_percent": 12.0,
+                  "exe": "C:\\Program Files\\Microsoft Visual Studio\\VC\\bin\\cl.exe",
+                  "signed": "signed", "publisher": "Microsoft Corporation", "username": "vitor",
+                  "pid": PID_COMPILADOR, "ancestors": [7200, 3100, 1500, 700]})
+    _na_tela(metric, 3100, "Code.exe")
 
 
 def _backup_noturno(k: int, metric: Dict, procs: List[Dict]) -> None:
@@ -279,9 +320,30 @@ def _atualizacao_do_sistema(k: int, metric: Dict, procs: List[Dict]) -> None:
 def _minerador(k: int, metric: Dict, procs: List[Dict]) -> None:
     metric["cpu_percent"] = 97.0
     metric["net_bytes_sent"] = 3e6
+    # Iniciado no login (filho do explorer); a pessoa está no navegador
     procs.append({"name": "xmrig.exe", "cpu_percent": 95.0, "mem_percent": 8.0,
                   "exe": "C:\\Users\\vitor\\AppData\\Roaming\\xmrig.exe", "signed": "unsigned",
-                  "username": "vitor", "cmdline": "xmrig.exe -o pool.exemplo:3333"})
+                  "username": "vitor", "cmdline": "xmrig.exe -o pool.exemplo:3333",
+                  "pid": PID_MINERADOR, "ancestors": [1500, 700]})
+
+
+def _minerador_com_pessoa_navegando(k: int, metric: Dict, procs: List[Dict]) -> None:
+    """O teste atômico: minerador renomeado, sem nome de minerador, com a pessoa usando o Chrome."""
+    metric["cpu_percent"] = 96.0
+    procs.append({"name": "svc_update.exe", "cpu_percent": 92.0, "mem_percent": 4.0,
+                  "exe": "C:\\Users\\vitor\\AppData\\Local\\svc_update\\svc_update.exe",
+                  "signed": "unsigned", "username": "vitor", "cmdline": "svc_update.exe --bench=1M",
+                  "pid": PID_MINERADOR, "ancestors": [1500, 700]})
+
+
+def _minerador_no_rundll32(k: int, metric: Dict, procs: List[Dict]) -> None:
+    """O minerador dentro de um binário assinado da Microsoft: a técnica clássica."""
+    metric["cpu_percent"] = 96.0
+    procs.append({"name": "rundll32.exe", "cpu_percent": 92.0, "mem_percent": 3.0,
+                  "exe": "C:\\Windows\\System32\\rundll32.exe", "signed": "signed",
+                  "publisher": "Microsoft Windows", "username": "vitor",
+                  "cmdline": "rundll32.exe C:\\Users\\vitor\\AppData\\Local\\Temp\\m.dll,Start",
+                  "pid": PID_MINERADOR, "ancestors": [1500, 700]})
 
 
 def _binario_de_temp(k: int, metric: Dict, procs: List[Dict]) -> None:
@@ -330,6 +392,19 @@ _OWN_SCENARIOS: Dict[str, Dict[str, Any]] = {
                            "expect": None, "steps": 8, "overlay": _antivirus_varrendo},
     "jogo_pesado": {"label": "Jogo exigente em tela cheia", "family": NORMAL,
                     "expect": None, "steps": 8, "overlay": _jogo_pesado},
+    # Os quatro casos difíceis do contexto de uso: o mesmo processador cheio,
+    # com e sem a pessoa conduzindo
+    "jogo_sem_assinatura": {"label": "Jogo sem assinatura, já jogado antes, na tela", "family": NORMAL,
+                            "expect": None, "steps": 8, "overlay": _jogo_sem_assinatura,
+                            "known_processes": ["jogo.exe"]},
+    "compilacao_do_editor": {"label": "Compilação aberta pelo editor que está na tela", "family": NORMAL,
+                             "expect": None, "steps": 8, "overlay": _compilacao_do_editor,
+                             "known_processes": ["cl.exe"]},
+    "minerador_com_pessoa_navegando": {"label": "Minerador renomeado com a pessoa navegando", "family": ATTACK,
+                                       "expect": "unknown_process", "steps": 6,
+                                       "overlay": _minerador_com_pessoa_navegando},
+    "minerador_no_rundll32": {"label": "Minerador dentro do rundll32 assinado", "family": ATTACK,
+                              "expect": "background_load", "steps": 6, "overlay": _minerador_no_rundll32},
     "backup_noturno": {"label": "Backup em nuvem durante a madrugada", "family": NORMAL,
                        "expect": None, "steps": 8, "overlay": _backup_noturno},
     "compilacao": {"label": "Compilação de projeto usando todos os núcleos", "family": NORMAL,
@@ -357,11 +432,20 @@ def scenarios() -> Dict[str, Dict[str, Any]]:
 # Execução
 # ---------------------------------------------------------------------------
 
+def _seed_known(db, machine, names: List[str]) -> None:
+    """Programas que a máquina já conhece antes do cenário — "já jogado antes"."""
+    from app.models.process_baseline import ProcessBaseline
+    for name in names:
+        db.add(ProcessBaseline(machine_id=machine.id, process_name=name, seen_count=40, is_known=True,
+                               avg_cpu=60.0, max_cpu=90.0, avg_mem_percent=15.0, max_mem_percent=25.0))
+    db.commit()
+
+
 def _snapshot_rows(metric_id: int, procs: List[Dict], now):
     from app.models.process import ProcessSnapshot
     for p in procs:
         yield ProcessSnapshot(
-            metric_id=metric_id, timestamp=now, name=p["name"],
+            metric_id=metric_id, timestamp=now, name=p["name"], pid=p.get("pid"), ancestors=p.get("ancestors"),
             cpu_percent=p.get("cpu_percent", 0), mem_percent=p.get("mem_percent", 0),
             mem_rss=p.get("mem_percent", 0) / 100 * 16 * 1024 ** 3, num_threads=8, status="running",
             username=p.get("username"), exe=p.get("exe"), signed=p.get("signed"),
@@ -388,10 +472,13 @@ def _feed(db, machine, data: Dict[str, Any], procs: List[Dict], ts, extra: Dict[
     a = process_metric(metric, machine, db, process_starts=extra.get("process_starts") or [], now=ts)
     if a:
         criadas.append(a)
-    if extra.get("events"):
-        criadas += agent_events.handle_events(db, machine, extra["events"], metric, ts)
-    if extra.get("beacons"):
-        criadas += agent_events.evaluate_beacons(db, machine, extra["beacons"], ts)
+    # Eventos do agente (arquivo-isca, contato periódico) são evidência por
+    # regra: na ablação "só Isolation Forest" eles inflavam a linha do modelo
+    if detection_layer() != "ml":
+        if extra.get("events"):
+            criadas += agent_events.handle_events(db, machine, extra["events"], metric, ts)
+        if extra.get("beacons"):
+            criadas += agent_events.evaluate_beacons(db, machine, extra["beacons"], ts)
     if extra.get("reconferir") and detection_layer() == "ambas":
         # Em produção o agendador reconfere a previsão de disco a cada 15
         # minutos. O benchmark pulava esse caminho de código inteiro, e o
@@ -483,6 +570,7 @@ def run_scenario(db, name: str, owner_id: int, now=None) -> ScenarioResult:
         intervalo = spec.get("interval", INTERVAL)
         fim_do_aquecimento = agora - timedelta(seconds=spec["steps"] * intervalo)
         passo = timedelta(hours=WARMUP_HOURS) / WARMUP_STEPS
+        _seed_known(db, machine, spec.get("known_processes") or [])
 
         # Aquecimento: máquina em uso comum, para sair do aprendizado e formar
         # os baselines de processo como uma máquina real formaria

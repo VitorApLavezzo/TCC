@@ -13,6 +13,8 @@ type AblationRow = {
   recall: number | null;
   f1: number | null;
   true_positives: number;
+  /** Ataques com algum aviso, mesmo de outro tipo. */
+  seen?: number | null;
   false_positives: number;
 };
 
@@ -132,6 +134,9 @@ export function ModelEvidence() {
                     <th className="py-2 text-right font-medium">Revocação</th>
                     <th className="py-2 text-right font-medium">F1</th>
                     <th className="py-2 text-right font-medium">Acertos</th>
+                    <th className="py-2 text-right font-medium" title="Ataques com algum aviso, mesmo com outro nome">
+                      Viu
+                    </th>
                     <th className="py-2 text-right font-medium">Falsos positivos</th>
                   </tr>
                 </thead>
@@ -143,6 +148,7 @@ export function ModelEvidence() {
                       <td className="tnum py-2 text-right font-mono text-fg">{pct(l.recall)}</td>
                       <td className="tnum py-2 text-right font-mono text-fg">{pct(l.f1)}</td>
                       <td className="tnum py-2 text-right font-mono text-fg-2">{l.true_positives}</td>
+                      <td className="tnum py-2 text-right font-mono text-fg-2">{l.seen ?? "—"}</td>
                       <td className="tnum py-2 text-right font-mono text-fg-2">{l.false_positives}</td>
                     </tr>
                   ))}

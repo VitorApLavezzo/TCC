@@ -31,6 +31,7 @@ from app.models.metric import Metric
 from app.models.process import ProcessSnapshot
 from app.services import context, feedback, incidents, learning, ml_service, trust
 from app.services.behavior_analyzer import LOLBINS, DetectionContext, analyze_behavior
+from app.services.behavior_analyzer import _update_process_baseline as update_process_baseline
 
 ANOMALY_COOLDOWN_MINUTES = 30
 
@@ -431,6 +432,12 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
 
     # 1. Análise comportamental (padrões avançados)
     findings = analyze_behavior(metric, db, ctx) if _active_layer != "ml" else []
+
+    # O cadastro de programas conhecidos é aprendizado, não detector: na camada
+    # "só ML" quem o atualiza (um detector) não roda
+    if _active_layer == "ml":
+        update_process_baseline(machine.id, db.query(ProcessSnapshot)
+                                .filter(ProcessSnapshot.metric_id == metric.id).all(), db)
 
     # Contexto da leitura, antes do modelo: o modelo o usa como atributo
     if context.context_on():
