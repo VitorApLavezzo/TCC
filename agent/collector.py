@@ -79,6 +79,7 @@ def collect_metrics() -> Dict[str, Any]:
     uptime = time.time() - boot
     load_avg = list(psutil.getloadavg()) if hasattr(psutil, "getloadavg") else [0.0, 0.0, 0.0]
     user_idle = sensors.idle_seconds() if _HAS_SENSORS else None
+    foreground = sensors.foreground_process() if _HAS_SENSORS else None
 
     temperatures = collect_temperatures()
     gpu_metrics = collect_gpu()
@@ -126,6 +127,8 @@ def collect_metrics() -> Dict[str, Any]:
         "load_avg_15": load_avg[2],
         "boot_time": boot,
         "user_idle_seconds": user_idle,
+        "foreground_pid": foreground[0] if foreground else None,
+        "foreground_name": foreground[1] if foreground else None,
 
         # GPU
         "gpu_metrics": gpu_metrics,
@@ -458,6 +461,10 @@ def collect_top_processes(n: int = 15, identify: bool = True) -> List[Dict[str, 
             seen.add(entry[1])
             selected.append(entry)
 
+    # Os pais dos mais pesados: quem abriu o programa diz se ele foi a pessoa
+    # (jogo aberto pelo launcher, compilação filha do editor) ou não
+    heaviest = {entry[1] for entry in by_cpu[:3]}
+
     result = []
     for proc, pid, cpu, mem in selected:
         try:
@@ -482,6 +489,12 @@ def collect_top_processes(n: int = 15, identify: bool = True) -> List[Dict[str, 
                     username = proc.username() or ""
                 except (psutil.AccessDenied, OSError):
                     username = ""
+                ancestors: List[int] = []
+                if pid in heaviest:
+                    try:
+                        ancestors = [p.pid for p in proc.parents()][:8]
+                    except (psutil.Error, OSError):
+                        ancestors = []
                 memory = proc.memory_info()
                 result.append({
                     "pid": pid,
@@ -497,6 +510,7 @@ def collect_top_processes(n: int = 15, identify: bool = True) -> List[Dict[str, 
                     "cmdline": cmdline,
                     "exe": exe,
                     "parent_name": parent_name,
+                    **({"ancestors": ancestors} if pid in heaviest else {}),
                 })
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass

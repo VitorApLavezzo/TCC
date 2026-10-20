@@ -12,7 +12,7 @@ import os
 import platform
 import subprocess
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import psutil
 
@@ -167,6 +167,34 @@ def idle_seconds() -> Optional[float]:
             if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
                 millis = ctypes.windll.kernel32.GetTickCount() - info.dwTime
                 return max(millis / 1000.0, 0.0)
+    except Exception:
+        pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Janela ativa
+# ---------------------------------------------------------------------------
+
+def foreground_process() -> Optional[Tuple[int, str]]:
+    """(pid, nome) do programa na janela da frente, ou None.
+
+    É o que separa um jogo de um minerador: os dois pesam igual, mas o jogo é
+    o programa que a pessoa está olhando. None quando não há janela na frente
+    (tela bloqueada, área de trabalho) ou fora do Windows.
+    """
+    try:
+        if IS_WINDOWS:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            hwnd = user32.GetForegroundWindow()
+            if not hwnd:
+                return None
+            pid = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value:
+                return int(pid.value), psutil.Process(pid.value).name()
     except Exception:
         pass
     return None

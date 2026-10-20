@@ -267,3 +267,83 @@ class TestCollectorPayload:
         for key in ("name", "pid", "exe", "parent_name", "cmdline"):
             assert key in procs[0]
         assert "_proc" not in procs[0], "o objeto psutil não pode vazar no envio"
+
+
+class _FakeUser32:
+    """Imita o pedaço da API do Windows que a janela ativa usa."""
+
+    def __init__(self, hwnd):
+        self.hwnd = hwnd
+
+    def GetForegroundWindow(self):
+        return self.hwnd
+
+    def GetWindowThreadProcessId(self, hwnd, ref):
+        # byref guarda o objeto original em _obj: é onde o Windows escreve o pid
+        ref._obj.value = os.getpid()
+        return 1
+
+
+class TestJanelaAtiva:
+    """Qual programa está na frente do usuário — a pista de "jogo × minerador"."""
+
+    def test_fora_do_windows_e_none(self, monkeypatch):
+        import sensors
+        monkeypatch.setattr(sensors, "IS_WINDOWS", False)
+        assert sensors.foreground_process() is None
+
+    def test_api_que_falha_vira_none(self, monkeypatch):
+        """No Linux não há ctypes.windll: a chamada levanta e o agente segue."""
+        import ctypes
+        import sensors
+        monkeypatch.setattr(sensors, "IS_WINDOWS", True)
+        monkeypatch.delattr(ctypes, "windll", raising=False)
+        assert sensors.foreground_process() is None
+
+    def test_sem_janela_na_frente_e_none(self, monkeypatch):
+        """Tela bloqueada ou área de trabalho: GetForegroundWindow devolve 0."""
+        import ctypes
+        import types
+        import sensors
+        monkeypatch.setattr(sensors, "IS_WINDOWS", True)
+        monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(user32=_FakeUser32(0)), raising=False)
+        assert sensors.foreground_process() is None
+
+    def test_janela_ativa_traz_pid_e_nome(self, monkeypatch):
+        import ctypes
+        import types
+        import psutil
+        import sensors
+        monkeypatch.setattr(sensors, "IS_WINDOWS", True)
+        monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(user32=_FakeUser32(1234)), raising=False)
+        assert sensors.foreground_process() == (os.getpid(), psutil.Process().name())
+
+
+class TestAscendencia:
+    """Quem abriu os programas mais pesados: compilação filha do editor, minerador filho do rundll32."""
+
+    def test_mais_pesados_trazem_os_pais(self):
+        import collector
+        procs = collector.collect_top_processes(n=5, identify=False)
+        top = sorted(procs, key=lambda p: p["cpu_percent"], reverse=True)[:3]
+        for p in top:
+            assert isinstance(p["ancestors"], list)
+            assert len(p["ancestors"]) <= 8
+            assert all(isinstance(pid, int) for pid in p["ancestors"])
+
+    def test_processo_que_some_fica_sem_pais(self, monkeypatch):
+        import psutil
+        import collector
+
+        def some(self):
+            raise psutil.NoSuchProcess(self.pid)
+
+        monkeypatch.setattr(psutil.Process, "parents", some)
+        procs = collector.collect_top_processes(n=5, identify=False)
+        top = sorted(procs, key=lambda p: p["cpu_percent"], reverse=True)[:3]
+        assert top and all(p["ancestors"] == [] for p in top)
+
+    def test_payload_traz_a_janela_ativa(self):
+        import collector
+        payload = collector.collect_metrics()
+        assert "foreground_pid" in payload and "foreground_name" in payload

@@ -40,7 +40,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("anomaly-agent")
 
-AGENT_VERSION = "2.0.0"
+AGENT_VERSION = "2.1.0"
 
 # Módulos extras (agente atualizado). A ausência de qualquer um só desliga a
 # funcionalidade correspondente.
