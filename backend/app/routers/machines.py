@@ -1,6 +1,7 @@
 import secrets
 from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.timeutil import aware, utcnow
@@ -338,6 +339,47 @@ def regenerate_token(machine_id: int, db: Session = Depends(get_db), current_use
     db.commit()
     db.refresh(machine)
     return machine
+
+
+class ActivityLabelIn(BaseModel):
+    label: str = Field(max_length=40)
+
+
+def _owned(db: Session, machine_id: int, user: User) -> Machine:
+    machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == user.id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    return machine
+
+
+@router.post("/{machine_id}/activity-label")
+def mark_activity_label(machine_id: int, body: ActivityLabelIn, db: Session = Depends(get_db),
+                        current_user: User = Depends(get_current_user)):
+    """Marca pelo painel o que está sendo feito na máquina (gabarito da avaliação)."""
+    from app.services import activity_labels
+    machine = _owned(db, machine_id, current_user)
+    try:
+        activity_labels.mark(db, machine, body.label, "panel")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    current = activity_labels.open_session(db, machine.id)
+    return {"open": activity_labels.serialize(current) if current else None}
+
+
+@router.get("/{machine_id}/activity-labels")
+def list_activity_labels(machine_id: int, days: int = 7, db: Session = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """Sessões rotuladas dos últimos dias, a aberta e o catálogo de rótulos."""
+    from app.services import activity_labels
+    machine = _owned(db, machine_id, current_user)
+    end = utcnow()
+    rows = activity_labels.sessions(db, machine.id, end - timedelta(days=max(1, min(days, 90))), end)
+    current = activity_labels.open_session(db, machine.id)
+    return {
+        "catalog": activity_labels.catalog(),
+        "open": activity_labels.serialize(current) if current else None,
+        "sessions": [activity_labels.serialize(r) for r in rows],
+    }
 
 
 @router.get("/{machine_id}/incidents")

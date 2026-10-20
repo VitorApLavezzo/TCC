@@ -25,6 +25,7 @@ from app.models.ledger import LedgerEntry
 from app.models.playbook import Playbook, PlaybookRun
 from app.models.push import PushSubscription
 from app.models.study import StudySession, StudyResponse
+from app.models.activity_label import ActivityLabel
 
 __all__ = [
     "HubInstallation", "HubContribution",
@@ -34,5 +35,5 @@ __all__ = [
     "ProcessBaseline", "EnrollmentCode", "DetectionRule", "DetectorCalibration", "AgentCommand",
     "Diagnostic", "ChatMessage", "Report", "InventorySnapshot", "ChangeEvent", "ProcessIdentity",
     "HashReputation", "BlackboxCapture", "Notification", "ShareLink", "DemoSession",
-    "BenchmarkRun",
+    "BenchmarkRun", "ActivityLabel",
 ]

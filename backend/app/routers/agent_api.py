@@ -24,7 +24,7 @@ from app.models.diagnostic import Diagnostic
 from app.models.machine import Machine
 from app.models.metric import Metric
 from app.schemas.metric import AgentEvent
-from app.services import agent_events, commands, diagnostics
+from app.services import activity_labels, agent_events, commands, diagnostics
 from app.services.anomaly_service import focus_mode_active
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -58,6 +58,10 @@ class Goodbye(BaseModel):
 class AgentFocus(BaseModel):
     minutes: int = Field(default=60, ge=0, le=720)
     reason: Optional[str] = Field(default=None, max_length=80)
+
+
+class ActivityLabelIn(BaseModel):
+    label: str = Field(max_length=40)
 
 
 def _state(machine: Machine) -> Dict[str, Any]:
@@ -155,3 +159,15 @@ def agent_focus_mode(body: AgentFocus, machine: Machine = Depends(get_machine_by
         machine.focus_mode_reason = body.reason or "pedido no próprio computador"
     db.commit()
     return _state(machine)
+
+
+@router.post("/activity-label")
+def agent_activity_label(body: ActivityLabelIn, machine: Machine = Depends(get_machine_by_token),
+                         db: Session = Depends(get_db)):
+    """Pela bandeja: "o que estou fazendo". Só gabarito da avaliação — não muda a detecção."""
+    try:
+        activity_labels.mark(db, machine, body.label, "tray")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    current = activity_labels.open_session(db, machine.id)
+    return {"open": activity_labels.serialize(current) if current else None}
