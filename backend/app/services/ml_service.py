@@ -54,8 +54,35 @@ FEATURES: List[Tuple[str, str, str]] = [
     ("hour_cos", "Horário", "time"),
     ("dow_sin", "Dia da semana", "time"),
     ("dow_cos", "Dia da semana", "time"),
+    # Opcionais: contexto da leitura (services/context.py). Só entram no
+    # modelo de uma máquina quando o histórico dela os tem (`available_features`)
+    ("user_presence", "Tempo sem teclado e mouse", "presence"),
+    ("top_proc_cpu", "Processador do programa dominante", "dominant_process"),
+    ("top_proc_user_driven", "Programa dominante na janela ativa", "dominant_process"),
+    ("top_proc_trust", "Confiança no programa dominante", "dominant_process"),
+    ("top_proc_known", "Programa dominante já conhecido", "dominant_process"),
+    ("cpu_std_10m", "Oscilação do processador", "stability"),
+    ("gpu_std_10m", "Oscilação da placa de vídeo", "stability"),
 ]
 FEATURE_KEYS = [k for k, _, _ in FEATURES]
+_FEATURE_META = {k: (label, group) for k, label, group in FEATURES}
+
+# Atributo opcional → coluna da leitura de onde ele sai. Os demais (os 17
+# originais) entram sempre.
+OPTIONAL_FEATURES: Dict[str, str] = {
+    "user_presence": "user_idle_seconds",
+    "top_proc_cpu": "top_proc_cpu",
+    "top_proc_user_driven": "top_proc_user_driven",
+    "top_proc_trust": "top_proc_trust",
+    "top_proc_known": "top_proc_known",
+    "cpu_std_10m": "cpu_std_10m",
+    "gpu_std_10m": "gpu_std_10m",
+}
+BASE_FEATURE_KEYS = [k for k in FEATURE_KEYS if k not in OPTIONAL_FEATURES]
+
+# Tempo ocioso acima de uma hora é "ninguém usando" — a diferença entre 2 e 9
+# horas não diz nada, e sem o teto ela dominaria a escala do atributo
+PRESENCE_CAP_SECONDS = 3600
 
 GROUP_LABELS = {
     "cpu": "Processador",
@@ -67,6 +94,9 @@ GROUP_LABELS = {
     "processes": "Quantidade de programas",
     "gpu": "Placa de vídeo",
     "time": "Horário incomum",
+    "presence": "Presença de quem usa",
+    "dominant_process": "Programa dominante",
+    "stability": "Estabilidade da carga",
 }
 
 # Grupo que mais pesou → tipo de aviso, quando nenhuma regra fixa classificou
@@ -102,7 +132,24 @@ def _local_clock(metric, offset_minutes: Optional[int]) -> datetime:
     return local_time(ts, offset)
 
 
-def _metric_to_vector(metric, offset_minutes: Optional[int] = None) -> list:
+def _optional_value(metric, key: str) -> Optional[float]:
+    raw = getattr(metric, OPTIONAL_FEATURES[key], None)
+    if raw is None:
+        return None
+    if key == "user_presence":
+        return math.log1p(min(max(float(raw), 0.0), PRESENCE_CAP_SECONDS))
+    return float(raw)
+
+
+def _metric_to_vector(metric, offset_minutes: Optional[int] = None, keys: Optional[List[str]] = None,
+                      fill: Optional[Dict[str, float]] = None) -> list:
+    """Vetor da leitura nos atributos `keys` (padrão: todos).
+
+    Opcional sem valor vira o preenchimento do treino (`fill`) — a mediana,
+    não zero: zero em "programa conhecido" diria "programa novo".
+    """
+    keys = FEATURE_KEYS if keys is None else keys
+    fill = fill or {}
     lt = _local_clock(metric, offset_minutes)
     hour = lt.hour + lt.minute / 60
     dow = lt.weekday()
@@ -125,7 +172,41 @@ def _metric_to_vector(metric, offset_minutes: Optional[int] = None) -> list:
         "dow_sin": math.sin(2 * math.pi * dow / 7),
         "dow_cos": math.cos(2 * math.pi * dow / 7),
     }
-    return [float(values[k]) for k in FEATURE_KEYS]
+    out = []
+    for k in keys:
+        if k in OPTIONAL_FEATURES:
+            v = _optional_value(metric, k)
+            out.append(float(fill.get(k, 0.0)) if v is None else v)
+        else:
+            out.append(float(values[k]))
+    return out
+
+
+def available_features(metrics) -> List[str]:
+    """Os atributos que o histórico desta máquina sustenta.
+
+    Os 17 originais sempre; cada opcional só com pelo menos
+    MIN_TRAINING_SAMPLES leituras preenchidas. Logo depois da atualização do
+    agente, toda leitura nova traria um valor que o modelo nunca viu — e a
+    máquina encheria de alarme por dias. No Linux, presença e janela ativa
+    nunca chegam, então nunca entram.
+    """
+    from app.services import context
+    keys = list(BASE_FEATURE_KEYS)
+    if not context.context_on():
+        return keys
+    metrics = list(metrics)
+    for key, column in OPTIONAL_FEATURES.items():
+        filled = sum(1 for m in metrics if getattr(m, column, None) is not None)
+        if filled >= settings.MIN_TRAINING_SAMPLES:
+            keys.append(key)
+    return keys
+
+
+def _compatible(bundle: Optional[dict]) -> bool:
+    """O modelo usa só atributos que esta versão conhece (a lista pode ser menor)."""
+    features = (bundle or {}).get("features")
+    return bool(features) and all(k in _FEATURE_META for k in features)
 
 
 def train_model(machine_id: int, db: Session) -> bool:
@@ -160,7 +241,13 @@ def train_model(machine_id: int, db: Session) -> bool:
     if len(metrics) < settings.MIN_TRAINING_SAMPLES:
         return False
 
-    X = np.array([_metric_to_vector(m, offset) for m in metrics], dtype=float)
+    keys = available_features(metrics)
+    fill = {}
+    for key in keys:
+        if key in OPTIONAL_FEATURES:
+            vals = [v for v in (_optional_value(m, key) for m in metrics) if v is not None]
+            fill[key] = float(np.median(vals))
+    X = np.array([_metric_to_vector(m, offset, keys, fill) for m in metrics], dtype=float)
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
@@ -176,7 +263,9 @@ def train_model(machine_id: int, db: Session) -> bool:
     bundle = {
         "model": model,
         "scaler": scaler,
-        "features": FEATURE_KEYS,
+        "features": keys,
+        # Mediana de cada opcional no treino: o valor de uma leitura que não o traz
+        "fill": fill,
         # Nunca acima de zero: a fronteira aprendida já é o teto do "normal"
         "threshold": min(float(np.percentile(train_scores, settings.ML_ALERT_PERCENTILE)), 0.0),
         "score_median": float(np.median(train_scores)),
@@ -236,12 +325,14 @@ def predict_anomaly(
     bundle = _load_bundle(machine_id)
     if bundle is None:
         return False, None
-    if bundle.get("features") != FEATURE_KEYS:
-        # Modelo de versão anterior (atributos diferentes) — descarta para retreinar
+    if not _compatible(bundle):
+        # Modelo com atributo que esta versão não conhece — descarta para retreinar
         _discard(machine_id)
         return False, None
     try:
-        X = bundle["scaler"].transform(np.array([_metric_to_vector(metric, offset_minutes)]))
+        X = bundle["scaler"].transform(np.array([
+            _metric_to_vector(metric, offset_minutes, bundle["features"], bundle.get("fill"))
+        ]))
         score = float(bundle["model"].decision_function(X)[0])
     except Exception:
         _discard(machine_id)
@@ -287,18 +378,20 @@ def explain_contributions(machine_id: int, metric, offset_minutes: Optional[int]
     contribuição daquele grupo. Grupos abaixo de 5% ficam de fora.
     """
     bundle = _load_bundle(machine_id)
-    if bundle is None or bundle.get("features") != FEATURE_KEYS:
+    if bundle is None or not _compatible(bundle):
         return []
 
-    x = np.array(_metric_to_vector(metric, offset_minutes), dtype=float)
+    keys = bundle["features"]
+    x = np.array(_metric_to_vector(metric, offset_minutes, keys, bundle.get("fill")), dtype=float)
     scaler = bundle["scaler"]
     xs = scaler.transform([x])[0]
 
     groups: List[str] = []
-    for _, _, g in FEATURES:
+    for k in keys:
+        g = _FEATURE_META[k][1]
         if g not in groups:
             groups.append(g)
-    indices = {g: [i for i, (_, _, gg) in enumerate(FEATURES) if gg == g] for g in groups}
+    indices = {g: [i for i, k in enumerate(keys) if _FEATURE_META[k][1] == g] for g in groups}
 
     variants = [xs.copy()]
     for g in groups:
@@ -319,7 +412,8 @@ def explain_contributions(machine_id: int, metric, offset_minutes: Optional[int]
         if pct < 5:
             continue
         idx = max(indices[g], key=lambda i: abs(xs[i]))
-        key, label, _ = FEATURES[idx]
+        key = keys[idx]
+        label = _FEATURE_META[key][0]
         item = {
             "group": g,
             "label": GROUP_LABELS[g],
@@ -332,6 +426,10 @@ def explain_contributions(machine_id: int, metric, offset_minutes: Optional[int]
         if g == "time":
             item["value"] = f"{lt.hour:02d}:{lt.minute:02d}"
             item["typical"] = None
+        elif key == "user_presence":
+            # De volta a segundos: o logaritmo não diz nada a quem lê
+            item["value"] = round(math.expm1(float(x[idx])))
+            item["typical"] = round(math.expm1(float(scaler.mean_[idx])))
         else:
             item["value"] = round(float(x[idx]), 2)
             item["typical"] = round(float(scaler.mean_[idx]), 2)
