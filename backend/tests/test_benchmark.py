@@ -254,6 +254,19 @@ class TestCenariosDeDadoReal:
         db.commit()
         return m
 
+    def test_dado_real_tambem_passa_pela_reconferencia_da_previsao(self, db, monkeypatch):
+        """Dado real é o único lugar onde a previsão de disco poderia dar falso
+        positivo: os cenários sintéticos não chegam ao meio dia de histórico.
+        Se o cenário real pulasse a reconferência, esse falso positivo não
+        apareceria na conta."""
+        from app.services import benchmark, forecasting
+        chamadas = []
+        monkeypatch.setattr(forecasting, "check_machine", lambda db, machine: chamadas.append(machine.id))
+        origem = self._maquina_com_historico(db)
+        r = benchmark.run_real_scenario(db, origem.id, origem.owner_id, minutes=600)
+        assert r.error is None, r.error
+        assert len(chamadas) == r.steps
+
     def test_replay_de_leituras_reais_vira_cenario(self, db):
         from app.services import benchmark
         origem = self._maquina_com_historico(db)

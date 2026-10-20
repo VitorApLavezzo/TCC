@@ -373,7 +373,7 @@ def _feed(db, machine, data: Dict[str, Any], procs: List[Dict], ts, extra: Dict[
     """Uma leitura pelo caminho real. Devolve as anomalias criadas."""
     from app.models.metric import Metric
     from app.services import agent_events
-    from app.services.anomaly_service import process_metric
+    from app.services.anomaly_service import detection_layer, process_metric
 
     metric = Metric(machine_id=machine.id, timestamp=ts, **data)
     db.add(metric)
@@ -392,10 +392,12 @@ def _feed(db, machine, data: Dict[str, Any], procs: List[Dict], ts, extra: Dict[
         criadas += agent_events.handle_events(db, machine, extra["events"], metric, ts)
     if extra.get("beacons"):
         criadas += agent_events.evaluate_beacons(db, machine, extra["beacons"], ts)
-    if extra.get("reconferir"):
+    if extra.get("reconferir") and detection_layer() == "ambas":
         # Em produção o agendador reconfere a previsão de disco a cada 15
         # minutos. O benchmark pulava esse caminho de código inteiro, e o
-        # cenário de disco enchendo não tinha como ser detectado.
+        # cenário de disco enchendo não tinha como ser detectado. Só no sistema
+        # completo: a previsão não é regra nem Isolation Forest, e na ablação
+        # ela inflava a linha "só Isolation Forest".
         from app.services import forecasting
         previsto = forecasting.check_machine(db, machine)
         if previsto is not None:
@@ -617,7 +619,11 @@ def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 
             # `aware`: a coluna é DateTime(timezone=True) e volta ingênua no
             # SQLite, com fuso no PostgreSQL — sem normalizar, a comparação
             # dentro dos detectores estoura em um dos dois bancos
-            criadas = _feed(db, machine, dados, procs, aware(leitura.timestamp), {})
+            # Nas leituras medidas, a mesma reconferência agendada dos cenários
+            # sintéticos: dado real é o único lugar onde a previsão de disco
+            # poderia dar falso positivo, e ele tem que aparecer na conta.
+            criadas = _feed(db, machine, dados, procs, aware(leitura.timestamp),
+                            {"reconferir": i >= WARMUP_STEPS})
             # As primeiras leituras são o aquecimento e não entram na medição
             if i >= WARMUP_STEPS:
                 if resultado.steps == 0:

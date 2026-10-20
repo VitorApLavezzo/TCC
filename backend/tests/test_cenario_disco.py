@@ -89,3 +89,18 @@ class TestFraseDaPrevisao:
     def test_duas_semanas(self):
         from app.services.forecasting import frase_previsao
         assert "das últimas duas semanas" in frase_previsao(span_dias=12, gb_por_dia=1.0, eta_dias=20)
+
+
+class TestAblacao:
+    def test_previsao_nao_e_creditada_a_uma_camada_so(self, db):
+        """A previsão de disco não é regra nem Isolation Forest: na tabela de
+        ablação do TCC ela só pode contar na linha do sistema completo."""
+        from app.services import anomaly_service, benchmark
+        u = _usuario(db)
+        for camada in ("ml", "regras"):
+            anterior = anomaly_service.set_detection_layer(camada)
+            try:
+                r = benchmark.run_scenario(db, "disk_filling", u.id)
+            finally:
+                anomaly_service.set_detection_layer(anterior)
+            assert "disk_forecast" not in r.detected, camada
