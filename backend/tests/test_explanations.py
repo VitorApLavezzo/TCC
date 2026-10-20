@@ -94,3 +94,60 @@ class TestStripCitations:
 
     def test_handles_none(self):
         assert strip_citations(None) is None
+
+
+def _cenario_contexto(db, sufixo, **contexto):
+    from app.core.security import get_password_hash
+    from app.models.anomaly import Anomaly
+    from app.models.machine import Machine
+    from app.models.metric import Metric
+    from app.models.user import User
+    u = User(email=f"ctx{sufixo}@t.com", username=f"ctx{sufixo}", hashed_password=get_password_hash("x"))
+    db.add(u)
+    db.flush()
+    m = Machine(name="PC", hostname="H", agent_token=f"tok-ctx-{sufixo}", owner_id=u.id, os_type="Windows")
+    db.add(m)
+    db.flush()
+    met = Metric(machine_id=m.id, cpu_percent=97, mem_percent=40, cpu_count_logical=8, **contexto)
+    db.add(met)
+    db.flush()
+    a = Anomaly(machine_id=m.id, metric_id=met.id, anomaly_type="background_load", severity="high",
+                responsible_process="svc_update.exe")
+    db.add(a)
+    db.commit()
+    return a, met, m
+
+
+class TestContextoNaExplicacao:
+    """A IA precisa saber se a pessoa estava usando o computador e se o programa pesado era o da tela."""
+
+    def _prompt(self, db, sufixo, **contexto):
+        from app.services.ai_service import build_context, build_prompt
+        a, met, m = _cenario_contexto(db, sufixo, **contexto)
+        return build_prompt(a, m, build_context(db, a, met, m), "leigo")
+
+    def test_segundo_plano_com_ninguem_usando(self, db):
+        prompt = self._prompt(db, "a", user_idle_seconds=900.0, top_proc_user_driven=0, top_proc_trust=0,
+                              top_proc_known=0)
+        linha = next(l for l in prompt.splitlines() if l.startswith("CONTEXTO DE USO:"))
+        assert "ninguém" in linha
+        assert "não era o que estava na tela" in linha
+        assert "nunca visto" in linha and "sem assinatura" in linha
+
+    def test_jogo_na_tela_com_alguem_usando(self, db):
+        prompt = self._prompt(db, "b", user_idle_seconds=4.0, top_proc_user_driven=1, top_proc_trust=2,
+                              top_proc_known=1)
+        linha = next(l for l in prompt.splitlines() if l.startswith("CONTEXTO DE USO:"))
+        assert "alguém estava usando" in linha
+        assert "era o que estava na tela" in linha and "não era" not in linha
+        assert "confiável" in linha and "já conhecido" in linha
+
+    def test_minutos_parado_viram_fato_citavel(self, db):
+        """Sem a chave, a verificação de números trataria '15 minutos' como invenção."""
+        from app.services.ai_service import build_context
+        a, met, m = _cenario_contexto(db, "c", user_idle_seconds=900.0)
+        fatos = build_context(db, a, met, m)["facts"]
+        assert fatos["parado_min"]["value"] == 15.0
+
+    def test_sem_contexto_a_linha_nao_aparece(self, db):
+        assert "CONTEXTO DE USO" not in self._prompt(db, "d")

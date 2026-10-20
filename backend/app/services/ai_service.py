@@ -204,6 +204,43 @@ def _num(v) -> Optional[float]:
     return None
 
 
+_TRUST_PHRASES = {
+    0: "sem assinatura reconhecida nem reputação",
+    1: "comum (assinado ou visto em outros computadores)",
+    2: "confiável (assinado e instalado no lugar certo)",
+    3: "um programa de segurança reconhecido",
+}
+
+
+def usage_context(metric: Optional[Metric]) -> Optional[str]:
+    """O contexto de uso da leitura em linguagem de leigo, ou None sem contexto.
+
+    Sem números de propósito: a verificação confere cada número da resposta
+    contra os fatos, e os minutos parado já vão como fato (`parado_min`).
+    """
+    if metric is None:
+        return None
+    partes = []
+    idle = metric.user_idle_seconds
+    if idle is not None:
+        partes.append("alguém estava usando o computador naquele momento" if idle < 120
+                      else "ninguém mexia no teclado nem no mouse havia alguns minutos")
+    if metric.top_proc_user_driven == 1:
+        partes.append("o programa mais pesado era o que estava na tela (ou foi aberto por ele)")
+    elif metric.top_proc_user_driven == 0:
+        partes.append("o programa mais pesado não era o que estava na tela: rodava em segundo plano")
+    sobre = []
+    if metric.top_proc_trust in _TRUST_PHRASES:
+        sobre.append(_TRUST_PHRASES[metric.top_proc_trust])
+    if metric.top_proc_known == 1:
+        sobre.append("já conhecido neste computador")
+    elif metric.top_proc_known == 0:
+        sobre.append("nunca visto antes neste computador")
+    if sobre:
+        partes.append("esse programa é " + ", ".join(sobre))
+    return "; ".join(partes) + "." if partes else None
+
+
 def build_context(db: Session, anomaly: Anomaly, metric: Optional[Metric], machine: Machine) -> Dict[str, Any]:
     if metric is None:
         metric = (
@@ -226,6 +263,8 @@ def build_context(db: Session, anomaly: Anomaly, metric: Optional[Metric], machi
         fact("temp_agora", "Temperatura do processador agora", cpu_temperature(metric), "°C")
         if metric.disk_free:
             fact("disco_livre_gb", "Espaço livre no disco", metric.disk_free / 1024 ** 3, "GB")
+        if metric.user_idle_seconds is not None:
+            fact("parado_min", "Minutos sem teclado e mouse", metric.user_idle_seconds / 60, "min")
 
     baseline = _baseline(db, machine.id, anomaly.detected_at or utcnow())
     if baseline:
@@ -275,6 +314,7 @@ def build_context(db: Session, anomaly: Anomaly, metric: Optional[Metric], machi
         "past_causes": causes,
         "chain": chain,
         "baseline": baseline,
+        "usage": usage_context(metric),
     }
 
 
@@ -424,6 +464,8 @@ def build_prompt(anomaly: Anomaly, machine: Machine, ctx: Dict[str, Any], level:
         extra.append(f"CAUSA REGISTRADA PELA PESSOA EM AVISOS PARECIDOS ({vezes}): \"{c['cause']}\"")
     if ctx["counterfactual"]:
         extra.append(f"CÁLCULO DO SISTEMA: {ctx['counterfactual']['sentence']}")
+    if ctx.get("usage"):
+        extra.append(f"CONTEXTO DE USO: {ctx['usage']}")
 
     return f"""Você explica problemas de computador para {LEVEL_AUDIENCE[level]}. Um sistema de monitoramento detectou algo anormal neste computador:
 
