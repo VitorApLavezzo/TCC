@@ -59,7 +59,12 @@ def on_anomaly(db: Session, anomaly: Anomaly) -> Notification:
         created_at=now,
     )
 
-    if anomaly.during_learning:
+    if (machine.name or "").startswith("[BENCH]"):
+        # Máquina efêmera do benchmark ou da reprodução de dado real: o aviso
+        # é medição, não acontecimento. A reprodução dura minutos e cada aviso
+        # reproduzido viraria mensagem de verdade no celular.
+        n.status, n.status_reason = "suppressed", "máquina efêmera de avaliação"
+    elif anomaly.during_learning:
         # Sem digest: um resumo diário cheio de ruído da fase de aprendizado
         # não é melhor que o ruído — é o mesmo ruído, adiado.
         progresso = learning.status(db, machine).phrase

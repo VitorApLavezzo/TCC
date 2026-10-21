@@ -9,6 +9,7 @@ registro ficar pronto.
 A fila de explicações de avisos continua separada e serial
 (`explanation_queue.py`): uma conversa não deve esperar atrás de dez avisos.
 """
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
@@ -28,9 +29,7 @@ def _session():
     return SessionLocal()
 
 
-def submit(fn: Callable, *args, **kwargs) -> None:
-    """Executa `fn(db, *args, **kwargs)` em segundo plano com sessão própria."""
-
+def _runner(fn: Callable, *args, **kwargs) -> Callable[[], None]:
     def run():
         db = _session()
         try:
@@ -43,8 +42,24 @@ def submit(fn: Callable, *args, **kwargs) -> None:
                 pass
         finally:
             db.close()
+    return run
 
+
+def submit(fn: Callable, *args, **kwargs) -> None:
+    """Executa `fn(db, *args, **kwargs)` em segundo plano com sessão própria."""
+    run = _runner(fn, *args, **kwargs)
     if RUN_INLINE:
         run()
     else:
         _executor.submit(run)
+
+
+def submit_long(fn: Callable, *args, **kwargs) -> None:
+    """Como `submit`, numa thread só dela: tarefas de dezenas de minutos (a
+    reprodução de dado real) não podem prender um dos poucos workers das
+    conversas e diagnósticos."""
+    run = _runner(fn, *args, **kwargs)
+    if RUN_INLINE:
+        run()
+    else:
+        threading.Thread(target=run, daemon=True, name="long-job").start()

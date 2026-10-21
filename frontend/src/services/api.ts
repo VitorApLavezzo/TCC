@@ -200,6 +200,10 @@ export const evaluationApi = {
   holdout: (machineId: number) => api.get(`/evaluation/holdout/${machineId}`),
   ablation: () => api.get("/evaluation/ablation"),
   runAblation: () => api.post("/evaluation/ablation"),
+  // Dado real: sessões marcadas × avisos, e a reprodução com e sem contexto
+  real: (machineId: number, days = 14) => api.get(`/evaluation/real/${machineId}`, { params: { days } }),
+  runRealReplay: (machineId: number, days = 14) =>
+    api.post(`/evaluation/real/${machineId}/replay`, null, { params: { days } }),
 };
 
 /** Deriva do modelo, risco de hardware e correlação de atualizações na frota. */

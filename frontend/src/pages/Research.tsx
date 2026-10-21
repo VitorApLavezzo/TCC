@@ -7,6 +7,7 @@ import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
 import { DetectionBenchmark } from "../components/research/DetectionBenchmark";
 import { ModelEvidence } from "../components/research/ModelEvidence";
+import { RealEvaluation } from "../components/research/RealEvaluation";
 import { HumanStudy } from "../components/research/HumanStudy";
 import { ExplanationFidelity } from "../components/research/ExplanationFidelity";
 
@@ -54,6 +55,8 @@ export function Research() {
           </select>
         }
       />
+
+      <RealEvaluation />
 
       <DetectionBenchmark />
 

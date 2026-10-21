@@ -15,6 +15,7 @@ Assim nenhuma origem nova esquece um desses passos.
 """
 from dataclasses import dataclass, field
 from datetime import timedelta
+import threading
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
@@ -80,20 +81,23 @@ def apply_confidence(severity: str, confidence: Optional[float]) -> str:
 # o que cada uma acrescenta. Mudar isso em produção degrada a detecção de
 # propósito — por isso fica aqui, explícito, e não escondido numa flag.
 DETECTION_LAYERS = ("ambas", "regras", "ml")
-_active_layer = "ambas"
+# Por thread: a ablação e a reprodução de dado real rodam em segundo plano por
+# minutos, e a coleta ao vivo (nas threads das requisições) não pode ficar com
+# meia detecção enquanto isso.
+_layer_local = threading.local()
 
 
 def set_detection_layer(layer: str) -> str:
-    """Troca a camada ativa e devolve a anterior (para restaurar depois)."""
-    global _active_layer
+    """Troca a camada ativa nesta thread e devolve a anterior (para restaurar depois)."""
     if layer not in DETECTION_LAYERS:
         raise ValueError(f"Camada desconhecida: {layer}")
-    anterior, _active_layer = _active_layer, layer
+    anterior = detection_layer()
+    _layer_local.layer = layer
     return anterior
 
 
 def detection_layer() -> str:
-    return _active_layer
+    return getattr(_layer_local, "layer", "ambas")
 
 
 @dataclass
@@ -431,11 +435,12 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
                            learning=learning.is_learning(db, machine, now))
 
     # 1. Análise comportamental (padrões avançados)
-    findings = analyze_behavior(metric, db, ctx) if _active_layer != "ml" else []
+    camada = detection_layer()
+    findings = analyze_behavior(metric, db, ctx) if camada != "ml" else []
 
     # O cadastro de programas conhecidos é aprendizado, não detector: na camada
     # "só ML" quem o atualiza (um detector) não roda
-    if _active_layer == "ml":
+    if camada == "ml":
         update_process_baseline(machine.id, db.query(ProcessSnapshot)
                                 .filter(ProcessSnapshot.metric_id == metric.id).all(), db)
 
@@ -463,7 +468,7 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
             .first()
         )
         is_statistical = bool(previous and previous[0] is not None and previous[0] < confirma_abaixo_de)
-    if _active_layer == "regras":
+    if camada == "regras":
         is_statistical = False
     db.commit()
 

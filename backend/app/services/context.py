@@ -10,6 +10,7 @@ As colunas são calculadas na chegada e gravadas com a leitura. Recalcular
 depois responderia com o conhecimento de hoje ("este programa é conhecido?")
 e o modelo nunca aprenderia como um programa novo se parece.
 """
+import threading
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -41,19 +42,21 @@ SHELL_PROCESSES = {
 }
 
 # Chave de reprodução: a avaliação roda o mesmo período com e sem contexto
-# para medir o que ele acrescenta. Em operação fica sempre ligada.
-_context_on = True
+# para medir o que ele acrescenta. Em operação fica sempre ligada. Vale só na
+# thread que a trocou: a reprodução leva minutos em segundo plano, e a coleta
+# ao vivo, nas outras threads, não pode ficar sem contexto enquanto isso.
+_local = threading.local()
 
 
 def set_context_mode(on: bool) -> bool:
-    """Liga ou desliga o contexto e devolve o valor anterior (para restaurar)."""
-    global _context_on
-    anterior, _context_on = _context_on, bool(on)
+    """Liga ou desliga o contexto nesta thread e devolve o valor anterior."""
+    anterior = context_on()
+    _local.on = bool(on)
     return anterior
 
 
 def context_on() -> bool:
-    return _context_on
+    return getattr(_local, "on", True)
 
 
 def is_user_driven(proc: Any, foreground_pid: Optional[int],
@@ -122,7 +125,7 @@ def _known(db: Session, machine_id: int, name: Optional[str]) -> int:
 def compute(db: Session, metric: Metric, processes: List[Any],
             trust_levels: Dict[Tuple[str, str], "trust.Trust"]) -> None:
     """Preenche as colunas de contexto da leitura (sem commit)."""
-    if not _context_on:
+    if not context_on():
         return
     dominante = dominant(processes)
     if dominante is None:

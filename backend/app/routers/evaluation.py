@@ -175,3 +175,52 @@ def _run_ablation(db, user_id: int):
 def ablation_result(user: User = Depends(get_current_user)):
     """Último resultado da ablação desta conta (fica em memória, como o estudo é pontual)."""
     return _ABLATION_CACHE.get(user.id, {"status": "none"})
+
+
+def _own_machine(db: Session, machine_id: int, user: User) -> Machine:
+    machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == user.id).first()
+    if not machine:
+        raise HTTPException(status_code=404, detail="Machine not found")
+    return machine
+
+
+# Última reprodução de dado real por (conta, máquina), em memória como a ablação
+_REAL_REPLAY_CACHE: dict = {}
+
+
+@router.get("/real/{machine_id}")
+def real_evaluation(machine_id: int, days: int = 14, db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    """Avaliação em dado real: sessões rotuladas × avisos de verdade, e a última reprodução."""
+    from app.services import real_eval
+    _own_machine(db, machine_id, user)
+    fim = utcnow()
+    inicio = fim - timedelta(days=max(1, min(days, 90)))
+    return {
+        "live": real_eval.live(db, machine_id, inicio, fim),
+        "replay": _REAL_REPLAY_CACHE.get((user.id, machine_id), {"status": "none"}),
+    }
+
+
+@router.post("/real/{machine_id}/replay")
+def start_real_replay(machine_id: int, days: int = 14, db: Session = Depends(get_db),
+                      user: User = Depends(get_current_user)):
+    """Reproduz as sessões com e sem contexto e por camada, em segundo plano (pode levar dezenas de minutos)."""
+    from app.services import jobs
+    _own_machine(db, machine_id, user)
+    jobs.submit_long(_run_real_replay, user.id, machine_id, max(1, min(days, 90)))
+    return {"started": True}
+
+
+def _run_real_replay(db, user_id: int, machine_id: int, days: int):
+    from app.services import real_eval
+    chave = (user_id, machine_id)
+    _REAL_REPLAY_CACHE[chave] = {"status": "running"}
+    fim = utcnow()
+    try:
+        _REAL_REPLAY_CACHE[chave] = {
+            "status": "done", "days": days,
+            **real_eval.replay(db, machine_id, user_id, fim - timedelta(days=days), fim),
+        }
+    except Exception as e:
+        _REAL_REPLAY_CACHE[chave] = {"status": "error", "detail": str(e)}

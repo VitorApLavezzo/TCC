@@ -449,7 +449,8 @@ def _snapshot_rows(metric_id: int, procs: List[Dict], now):
             cpu_percent=p.get("cpu_percent", 0), mem_percent=p.get("mem_percent", 0),
             mem_rss=p.get("mem_percent", 0) / 100 * 16 * 1024 ** 3, num_threads=8, status="running",
             username=p.get("username"), exe=p.get("exe"), signed=p.get("signed"),
-            publisher=p.get("publisher"), cmdline=p.get("cmdline"),
+            publisher=p.get("publisher"), cmdline=p.get("cmdline"), sha256=p.get("sha256"),
+            ppid=p.get("ppid"), parent_name=p.get("parent_name"),
         )
 
 
@@ -728,6 +729,107 @@ def run_real_scenario(db, source_machine_id: int, owner_id: int, minutes: int = 
         _drop_machine(db, machine_id)
 
     return resultado
+
+
+# Teto de leituras de uma reprodução: duas semanas de coleta a cada 30 s, com
+# folga. Acima disso a avaliação levaria horas.
+REPLAY_LIMIT = 60000
+
+_REPLAY_PROC_FIELDS = ("name", "pid", "ancestors", "cpu_percent", "mem_percent", "exe", "signed", "publisher",
+                       "username", "cmdline", "sha256", "ppid", "parent_name")
+
+
+def _replay_proc(snapshot) -> Dict[str, Any]:
+    """Um processo gravado, pronto para ser reproduzido — com pid e pais, que é
+    o que o contexto de uso precisa e o que só existe no momento da coleta."""
+    return {k: getattr(snapshot, k, None) for k in _REPLAY_PROC_FIELDS}
+
+
+def replay_window(db, source_machine_id: int, owner_id: int, start, end, warmup_hours: float = 6,
+                  limit: int = REPLAY_LIMIT) -> List[Dict[str, Any]]:
+    """Reproduz as leituras gravadas de [start - warmup, end] numa máquina efêmera.
+
+    Devolve os avisos que a reprodução produziu e que cruzam [start, end]. O
+    aquecimento existe para o modelo da máquina efêmera treinar antes da
+    primeira sessão medida; a camada de detecção e a chave de contexto ativas
+    nesta thread valem para a reprodução inteira — é assim que a avaliação
+    compara contexto ligado × desligado e camada por camada.
+
+    As colunas de contexto não são copiadas: o pipeline as recalcula a partir
+    da janela ativa e dos pais gravados (ou deixa vazias, com o contexto
+    desligado), como faria na chegada.
+    """
+    import secrets
+    from datetime import timedelta
+    from app.core.timeutil import aware
+    from app.models.anomaly import Anomaly
+    from app.models.machine import Machine
+    from app.models.metric import Metric
+    from app.models.process import ProcessSnapshot
+    from app.services import context
+
+    origem = db.query(Machine).filter(Machine.id == source_machine_id).first()
+    if origem is None:
+        return []
+    start, end = aware(start), aware(end)
+    leituras = (
+        db.query(Metric)
+        .filter(Metric.machine_id == source_machine_id,
+                Metric.timestamp >= start - timedelta(hours=warmup_hours), Metric.timestamp <= end)
+        .order_by(Metric.timestamp.asc())
+        .limit(limit)
+        .all()
+    )
+    if not leituras:
+        return []
+
+    fora = {"id", "machine_id", "timestamp", "ml_score", "excluded_from_training", *context.COLUMNS}
+    campos = [c.name for c in Metric.__table__.columns if c.name not in fora]
+
+    machine = Machine(
+        name=f"{BENCH_PREFIX} Reprodução de {origem.name}", hostname=f"bench-replay-{secrets.token_hex(2)}",
+        os_type=origem.os_type, os_version=origem.os_version, os_pretty=origem.os_pretty,
+        agent_token=secrets.token_urlsafe(24), owner_id=owner_id, is_active=True,
+        ai_privacy="no_ai", system_info=origem.system_info,
+    )
+    db.add(machine)
+    db.commit()
+    db.refresh(machine)
+    machine_id = machine.id  # ver o comentário em run_scenario
+
+    try:
+        # Em blocos: carregar os processos de duas semanas de uma vez não cabe
+        for i in range(0, len(leituras), 500):
+            bloco = leituras[i:i + 500]
+            snaps: Dict[int, List[Any]] = {}
+            for p in db.query(ProcessSnapshot).filter(ProcessSnapshot.metric_id.in_([m.id for m in bloco])).all():
+                snaps.setdefault(p.metric_id, []).append(_replay_proc(p))
+            for leitura in bloco:
+                ts = aware(leitura.timestamp)
+                _feed(db, machine, {c: getattr(leitura, c) for c in campos}, snaps.get(leitura.id, []), ts,
+                      {"reconferir": ts >= start})
+
+        avisos = []
+        for a in db.query(Anomaly).filter(Anomaly.machine_id == machine_id).all():
+            detectado = aware(a.detected_at)
+            ultimo = aware(a.last_seen_at) or detectado
+            if detectado is None or detectado > end or ultimo < start:
+                continue
+            avisos.append({
+                "type": a.anomaly_type,
+                "severity": a.severity,
+                "responsible": a.responsible_process,
+                "programas": list((a.affected_metrics or {}).get("programas") or []),
+                "detected_at": detectado,
+                "last_seen_at": ultimo,
+                "user_driven": bool(a.user_driven),
+                # O mesmo corte do benchmark: abaixo de `medium`, ou durante o
+                # aprendizado, o aviso fica no painel e não interrompe
+                "notifies": a.severity in NOTIFYING and not a.during_learning,
+            })
+        return avisos
+    finally:
+        _drop_machine(db, machine_id)
 
 
 BENCH_PREFIX = "[BENCH]"
