@@ -231,24 +231,35 @@ def replay(db: Session, machine_id: int, owner_id: int, start, end) -> Dict[str,
     fim = max(s["end"] for s in sessoes)
 
     configs = {}
+    truncated = False
+    covered_from = None
     for nome, (contexto, camada) in REPLAY_CONFIGS.items():
+        meta: Dict[str, Any] = {}
         ctx_anterior = context.set_context_mode(contexto)
         camada_anterior = anomaly_service.set_detection_layer(camada)
         try:
-            avisos = benchmark.replay_window(db, machine_id, owner_id, inicio, fim)
+            avisos = benchmark.replay_window(db, machine_id, owner_id, inicio, fim, meta=meta)
         finally:
             context.set_context_mode(ctx_anterior)
             anomaly_service.set_detection_layer(camada_anterior)
+        if meta.get("truncated"):
+            truncated = True
+            covered_from = meta.get("covered_from")
+        # Só pontua as sessões cujas leituras foram de fato reproduzidas: uma
+        # sessão cujas leituras caíram no corte não é "não detectada", é "não
+        # medida", e contá-la deturpa o número do TCC
+        cobertas = [s for s in sessoes if covered_from is None or s["start"] >= covered_from]
         normalizados = [{**a, "last_seen_at": a.get("last_seen_at") or a["detected_at"],
                          "interrupted_at": [a["detected_at"]] if a.get("notifies", True) else []}
                         for a in avisos]
-        resultado = score(sessoes, normalizados)
+        resultado = score(cobertas, normalizados)
         configs[nome] = {"label": REPLAY_LABELS[nome], "confusion": resultado["confusion"],
                          "benign": resultado["benign"], "tests": resultado["tests"]}
-    return {"configs": configs, "sentence": _replay_sentence(configs)}
+    return {"configs": configs, "truncated": truncated, "covered_from": covered_from,
+            "sentence": _replay_sentence(configs, truncated, covered_from)}
 
 
-def _replay_sentence(configs: Dict[str, Any]) -> str:
+def _replay_sentence(configs: Dict[str, Any], truncated: bool = False, covered_from=None) -> str:
     ligado, desligado = configs.get("contexto_ligado"), configs.get("contexto_desligado")
     if not ligado or not desligado:
         return "Não foi possível comparar com e sem contexto."
@@ -259,4 +270,7 @@ def _replay_sentence(configs: Dict[str, Any]) -> str:
     ml = configs.get("ml")
     if ml:
         frase += f" Só o Isolation Forest encontrou {ml['confusion']['true_positives']}."
+    if truncated and covered_from is not None:
+        frase += (f" Atenção: o período tem leituras demais para reproduzir inteiro; "
+                  f"só as sessões a partir de {covered_from:%d/%m %H:%M} entraram na conta.")
     return frase

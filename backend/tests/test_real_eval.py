@@ -10,7 +10,7 @@ from datetime import timedelta
 
 import pytest
 
-from app.core.timeutil import utcnow
+from app.core.timeutil import aware, utcnow
 from tests.test_trust import _machine
 
 
@@ -181,7 +181,7 @@ class TestReproducao:
         _marcar(db, m, "parar", t0 + timedelta(hours=1))
         vistos = []
 
-        def falso(db_, origem, dono, inicio, fim, warmup_hours=6):
+        def falso(db_, origem, dono, inicio, fim, warmup_hours=6, limit=None, meta=None):
             vistos.append((context.context_on(), anomaly_service.detection_layer()))
             if not context.context_on():
                 return [{"type": "high_cpu", "severity": "high", "responsible": "jogo.exe", "programas": [],
@@ -322,3 +322,68 @@ def test_tarefa_longa_nao_ocupa_a_fila_das_conversas(monkeypatch):
     feito = threading.Event()
     jobs.submit_long(lambda db: feito.set())
     assert feito.wait(5)
+
+
+class TestReproducaoCorte:
+    """Janela longa não pode descartar as sessões mais novas em silêncio."""
+
+    def test_replay_window_cobre_o_fim_e_sinaliza_o_corte(self, db):
+        from app.models.metric import Metric
+        from app.models.process import ProcessSnapshot
+        from app.services import benchmark
+        origem = _machine(db)
+        base = utcnow() - timedelta(hours=3)
+        passo = timedelta(minutes=1)
+        for i in range(30):
+            ts = base + passo * i
+            met = Metric(machine_id=origem.id, timestamp=ts, cpu_percent=15.0 + (i % 5), mem_percent=40.0,
+                         net_connections=50, process_count=190, cpu_count_logical=8,
+                         user_idle_seconds=5.0, foreground_pid=2500, foreground_name="chrome.exe")
+            db.add(met)
+            db.flush()
+            db.add(ProcessSnapshot(metric_id=met.id, pid=2500, name="chrome.exe", cpu_percent=8.0, mem_percent=10.0,
+                                   exe="C:\\x\\chrome.exe", signed="signed", ancestors=[1500]))
+        db.commit()
+        meta = {}
+        benchmark.replay_window(db, origem.id, origem.owner_id, base, base + passo * 29, warmup_hours=1,
+                                limit=10, meta=meta)
+        assert meta["truncated"] is True
+        # Mantém as 10 MAIS NOVAS (i=20..29): a cobertura começa na 20ª leitura
+        assert meta["covered_from"] == aware(base + passo * 20)
+
+    def test_sem_corte_nao_sinaliza(self, db):
+        from app.models.metric import Metric
+        from app.services import benchmark
+        origem = _machine(db)
+        base = utcnow() - timedelta(hours=2)
+        for i in range(5):
+            db.add(Metric(machine_id=origem.id, timestamp=base + timedelta(minutes=i), cpu_percent=15.0,
+                          mem_percent=40.0, cpu_count_logical=8))
+        db.commit()
+        meta = {}
+        benchmark.replay_window(db, origem.id, origem.owner_id, base, base + timedelta(minutes=4),
+                                warmup_hours=1, limit=10, meta=meta)
+        assert meta["truncated"] is False and meta["covered_from"] is None
+
+    def test_replay_exclui_sessoes_fora_da_cobertura(self, db, monkeypatch):
+        from app.services import benchmark, real_eval
+        m = _machine(db)
+        t0 = utcnow() - timedelta(hours=6)
+        _marcar(db, m, "jogando", t0)                                   # sessão perdida (antes do corte)
+        _marcar(db, m, "teste_minerador", t0 + timedelta(hours=3))      # sessão coberta
+        _marcar(db, m, "parar", t0 + timedelta(hours=4))
+        corte = t0 + timedelta(hours=2)
+
+        def falso(db_, origem, dono, inicio, fim, warmup_hours=6, limit=None, meta=None):
+            if meta is not None:
+                meta["truncated"] = True
+                meta["covered_from"] = corte
+            return []
+
+        monkeypatch.setattr(benchmark, "replay_window", falso)
+        r = real_eval.replay(db, m.id, m.owner_id, t0 - timedelta(hours=1), utcnow())
+        assert r["truncated"] is True and r["covered_from"] == corte
+        # A sessão de jogo (antes do corte) não entra na conta de nenhuma config
+        for cfg in r["configs"].values():
+            assert cfg["benign"]["sessions"] == 0
+            assert cfg["confusion"]["true_positives"] + cfg["confusion"]["false_negatives"] == 1

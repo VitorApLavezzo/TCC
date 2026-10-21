@@ -746,7 +746,7 @@ def _replay_proc(snapshot) -> Dict[str, Any]:
 
 
 def replay_window(db, source_machine_id: int, owner_id: int, start, end, warmup_hours: float = 6,
-                  limit: int = REPLAY_LIMIT) -> List[Dict[str, Any]]:
+                  limit: int = REPLAY_LIMIT, meta: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """Reproduz as leituras gravadas de [start - warmup, end] numa máquina efêmera.
 
     Devolve os avisos que a reprodução produziu e que cruzam [start, end]. O
@@ -776,12 +776,30 @@ def replay_window(db, source_machine_id: int, owner_id: int, start, end, warmup_
         db.query(Metric)
         .filter(Metric.machine_id == source_machine_id,
                 Metric.timestamp >= start - timedelta(hours=warmup_hours), Metric.timestamp <= end)
-        .order_by(Metric.timestamp.asc())
+        .order_by(Metric.timestamp.desc())
         .limit(limit)
         .all()
     )
+    leituras.reverse()  # mais antiga primeiro: aquecer e depois medir
     if not leituras:
+        if meta is not None:
+            meta["truncated"], meta["covered_from"] = False, None
         return []
+
+    # Estourou o teto: ficam as mais NOVAS (o fim da janela, com as sessões
+    # mais recentes). Sinaliza o corte e até onde a reprodução cobre, para o
+    # chamador não apresentar uma janela parcial como se fosse a inteira.
+    if meta is not None:
+        mais_antiga = aware(leituras[0].timestamp)
+        cortou = bool(
+            db.query(Metric.id).filter(
+                Metric.machine_id == source_machine_id,
+                Metric.timestamp >= start - timedelta(hours=warmup_hours),
+                Metric.timestamp < leituras[0].timestamp,
+            ).first()
+        )
+        meta["truncated"] = cortou
+        meta["covered_from"] = mais_antiga if cortou else None
 
     fora = {"id", "machine_id", "timestamp", "ml_score", "excluded_from_training", *context.COLUMNS}
     campos = [c.name for c in Metric.__table__.columns if c.name not in fora]
