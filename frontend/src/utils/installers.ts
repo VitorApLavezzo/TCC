@@ -113,7 +113,7 @@ for %%F in (${EXTRA_FILES.join(" ")}) do (
 
 rem --- 3. Instala dependencias ---
 echo Instalando dependencias (pode levar alguns minutos)...
-python -m pip install --quiet --disable-pip-version-check -r requirements.txt
+python -m pip install --quiet --disable-pip-version-check --no-warn-conflicts -r requirements.txt
 if errorlevel 1 goto :fail
 
 rem --- 4. Pareamento com o servidor ---
@@ -194,7 +194,7 @@ if python3 -m venv --system-site-packages venv 2>/dev/null; then
 else
     PY="python3"
 fi
-"$PY" -m pip install --quiet -r requirements.txt
+"$PY" -m pip install --quiet --disable-pip-version-check --no-warn-conflicts -r requirements.txt
 
 echo "Registrando esta máquina no painel..."
 AGENT_API_URL="$SERVER" ${authEnvSh(auth)} "$PY" agent.py --enroll-only
@@ -277,7 +277,7 @@ cd /d "%DIR%"
 for %%F in (${[...CORE_FILES, ...EXTRA_FILES].join(" ")}) do (
     curl -fsS "%SERVER%/api/agent/download/%%F" -o "%%F" >> "%LOG%" 2>&1
 )
-python -m pip install --quiet --disable-pip-version-check -r requirements.txt >> "%LOG%" 2>&1
+python -m pip install --quiet --disable-pip-version-check --no-warn-conflicts -r requirements.txt >> "%LOG%" 2>&1
 
 set "AGENT_API_URL=%SERVER%"
 ${authEnvBat(auth)}
@@ -328,7 +328,7 @@ $installScript = {
     foreach ($f in @(${[...CORE_FILES, ...EXTRA_FILES].map((f) => `"${f}"`).join(", ")})) {
         try { Invoke-WebRequest "$server/api/agent/download/$f" -OutFile $f -UseBasicParsing } catch {}
     }
-    python -m pip install --quiet --disable-pip-version-check -r requirements.txt
+    python -m pip install --quiet --disable-pip-version-check --no-warn-conflicts -r requirements.txt
 
     $env:AGENT_API_URL = $server
     $env:AGENT_ENROLL_CODE = $bulkKey

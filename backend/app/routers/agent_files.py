@@ -99,7 +99,11 @@ for f in sensors.py security.py inventory.py actions.py blackbox.py updater.py; 
     curl -fsS "$SERVER/api/agent/download/$f" -o "$f" 2>/dev/null || true
 done
 
-if python3 -m venv --system-site-packages venv 2>/dev/null; then
+# Ambiente isolado: sem bandeja aqui, não há por que enxergar os pacotes do
+# sistema — e enxergando, o pip acusava conflitos alheios (ex: "yt-dlp requires
+# websockets>=12") que pareciam falha da instalação. Rodar de novo sobre um venv
+# antigo também desliga a opção.
+if python3 -m venv venv 2>/dev/null; then
     PY="$DIR/venv/bin/python"
 else
     PY="python3"
@@ -118,14 +122,16 @@ if ! "$PY" -m pip --version >/dev/null 2>&1; then
     exit 1
 fi
 
-"$PY" -m pip install --quiet -r requirements.txt
+"$PY" -m pip install --quiet --disable-pip-version-check --no-warn-conflicts -r requirements.txt
 
 echo "Registrando esta máquina no painel..."
 AGENT_API_URL="$SERVER" {auth_env} "$PY" agent.py --enroll-only
 
 if command -v crontab >/dev/null 2>&1; then
     echo "Configurando início automático (cron @reboot)..."
-    ( crontab -l 2>/dev/null | grep -v "anomalydetect/agent.py" ; echo "@reboot cd $DIR && $PY $DIR/agent.py >/dev/null 2>&1" ) | crontab -
+    # O "|| true" é essencial: sem crontab anterior o grep sai com 1, o set -e
+    # encerrava o bloco antes do echo e uma crontab vazia era gravada.
+    {{ crontab -l 2>/dev/null | grep -v "anomalydetect/agent.py" || true; echo "@reboot cd $DIR && $PY $DIR/agent.py --no-tray >/dev/null 2>&1"; }} | crontab -
 else
     echo "Aviso: 'cron' não encontrado — pulando início automático no boot (instale cron e rode este script de novo para habilitar)."
 fi
