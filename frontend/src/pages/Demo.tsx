@@ -4,6 +4,7 @@ import { demoApi, errorMessage } from "../services/api";
 import { PageHeader, Section } from "../components/ui/Layout";
 import { Button, TextButton } from "../components/ui/Button";
 import { useToast } from "../components/ui/Toast";
+import { LoadError } from "../components/ui/LoadError";
 import { ANOMALY_TYPE_LABELS } from "../types";
 
 /**
@@ -20,9 +21,18 @@ export function Demo() {
   const [session, setSession] = useState<any | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  const loadScenarios = () => {
+    setLoadFailed(false);
+    demoApi
+      .scenarios()
+      .then((r) => setScenarios(r.data.scenarios))
+      .catch(() => setLoadFailed(true));
+  };
 
   useEffect(() => {
-    demoApi.scenarios().then((r) => setScenarios(r.data.scenarios)).catch(() => {});
+    loadScenarios();
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
@@ -69,6 +79,7 @@ export function Demo() {
 
       {!session ? (
         <Section title="Escolha um cenário">
+          {loadFailed && <LoadError what="os cenários de demonstração" onRetry={loadScenarios} />}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {scenarios.map((s) => (
               <button
@@ -105,9 +116,9 @@ export function Demo() {
 
           <Section title="O que o sistema detectou" description="Ao vivo, conforme as leituras chegam">
             {session.log?.length ? (
-              <ul className="space-y-1.5 font-mono text-xs text-fg-2">
+              <ul className="space-y-1.5 text-sm text-fg-2">
                 {session.log.map((l: string, i: number) => (
-                  <li key={i} className={l.includes("detectado") ? "text-crit" : "text-fg-3"}>{l}</li>
+                  <li key={i} className={l.includes("aviso:") ? "text-crit" : "text-fg-3"}>{l}</li>
                 ))}
               </ul>
             ) : (
@@ -117,7 +128,7 @@ export function Demo() {
 
           <div className="flex flex-wrap gap-2">
             {session.machine_ids?.[0] && (
-              <Button variant="primary" onClick={() => navigate(`/anomalies?machine_id=${session.machine_ids[0]}`)}>
+              <Button variant="primary" onClick={() => navigate(`/anomalies?computador=${session.machine_ids[0]}`)}>
                 Ver os avisos gerados
               </Button>
             )}

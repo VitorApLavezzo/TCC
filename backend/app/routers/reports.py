@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api", tags=["reports"])
 def _machine(db: Session, machine_id: int, user: User) -> Machine:
     m = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == user.id).first()
     if not m:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     return m
 
 

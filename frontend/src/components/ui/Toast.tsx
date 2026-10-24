@@ -45,8 +45,16 @@ const DOT: Record<Kind, "ok" | "crit" | "idle"> = {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Toast[]>([]);
   const seq = useRef(0);
+  // Prazo de cada aviso, para pausar enquanto o mouse ou o foco estão nele:
+  // um erro com instrução sumia no meio da leitura.
+  // `seguros` conta o que segura o aviso aberto (mouse em cima, foco dentro):
+  // só volta a contar quando os dois soltam.
+  const prazos = useRef(
+    new Map<number, { timer: ReturnType<typeof setTimeout> | null; ms: number; seguros: number }>()
+  );
 
   const dismiss = useCallback((id: number) => {
+    prazos.current.delete(id);
     setItems((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
@@ -57,10 +65,25 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       // Erros ficam mais tempo: costumam pedir leitura, não só ciência.
       // Com "desfazer", a janela é maior ainda: é o único momento em que a
       // volta existe.
-      setTimeout(() => dismiss(id), undo ? 10000 : kind === "error" ? 9000 : 5000);
+      const ms = undo ? 10000 : kind === "error" ? 9000 : 5000;
+      prazos.current.set(id, { timer: setTimeout(() => dismiss(id), ms), ms, seguros: 0 });
     },
     [dismiss]
   );
+
+  const pausar = (id: number) => {
+    const p = prazos.current.get(id);
+    if (!p) return;
+    if (p.timer) clearTimeout(p.timer);
+    p.timer = null;
+    p.seguros += 1;
+  };
+  const retomar = (id: number) => {
+    const p = prazos.current.get(id);
+    if (!p) return;
+    p.seguros = Math.max(0, p.seguros - 1);
+    if (p.seguros === 0 && !p.timer) p.timer = setTimeout(() => dismiss(id), p.ms);
+  };
 
   const toast = useCallback(
     (kind: Kind, message: string, hint?: string) => push(kind, message, hint),
@@ -81,20 +104,29 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={api}>
       {children}
+      {/* No celular, acima da barra inferior — no rodapé ele a cobria. */}
       <div
         aria-live="polite"
-        className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(21rem,calc(100vw-2rem))] flex-col gap-2"
+        className="pointer-events-none fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] right-4 z-50 flex w-[min(21rem,calc(100vw-2rem))] flex-col gap-2 lg:bottom-4"
       >
         {items.map((t) => (
           <div
             key={t.id}
+            role={t.kind === "error" ? "alert" : undefined}
+            onMouseEnter={() => pausar(t.id)}
+            onMouseLeave={() => retomar(t.id)}
+            onFocus={() => pausar(t.id)}
+            onBlur={() => retomar(t.id)}
             className={clsx(
               "pointer-events-auto flex animate-rise items-start gap-2.5 rounded-panel border border-edge bg-surface px-3.5 py-3 shadow-float"
             )}
           >
             <StatusDot tone={DOT[t.kind]} className="mt-1.5" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-fg">{t.message}</p>
+              <p className="text-sm font-medium text-fg">
+                {t.kind === "error" && <span className="sr-only">Erro: </span>}
+                {t.message}
+              </p>
               {t.hint && <p className="mt-1 text-xs leading-relaxed text-fg-2">{t.hint}</p>}
               {t.undo && (
                 <button

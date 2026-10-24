@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { decimal } from "../../lib/format";
 import { Line, LineChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { errorMessage, evaluationApi, machinesApi } from "../../services/api";
 import { Section, Panel } from "../ui/Layout";
@@ -18,7 +19,7 @@ type AblationRow = {
   false_positives: number;
 };
 
-const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+const pct = (v: number | null | undefined) => (v == null ? "—" : `${decimal(v * 100, 1)}%`);
 
 /**
  * A evidência sobre a parte de aprendizado de máquina.
@@ -167,6 +168,7 @@ export function ModelEvidence() {
         description="Treino na primeira parte do histórico, medição na parte final que ele nunca viu"
         actions={
           <select
+            aria-label="Computador usado na validação"
             value={machineId}
             onChange={(e) => rodarHoldout(e.target.value)}
             className="h-8 rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
@@ -194,17 +196,17 @@ export function ModelEvidence() {
               <dl className="mt-2 space-y-2 text-sm">
                 <div className="flex justify-between gap-4">
                   <dt className="text-fg-2">Área sob a curva — Isolation Forest</dt>
-                  <dd className="tnum font-mono text-fg">{holdout.auc_model.toFixed(3)}</dd>
+                  <dd className="tnum font-mono text-fg">{decimal(holdout.auc_model, 3)}</dd>
                 </div>
                 {holdout.auc_ocsvm != null && (
                   <div className="flex justify-between gap-4">
                     <dt className="text-fg-2">Área sob a curva — One-Class SVM</dt>
-                    <dd className="tnum font-mono text-fg">{holdout.auc_ocsvm.toFixed(3)}</dd>
+                    <dd className="tnum font-mono text-fg">{decimal(holdout.auc_ocsvm, 3)}</dd>
                   </div>
                 )}
                 <div className="flex justify-between gap-4">
                   <dt className="text-fg-2">Área sob a curva — limiar de 3 desvios</dt>
-                  <dd className="tnum font-mono text-fg">{holdout.auc_sigma_baseline.toFixed(3)}</dd>
+                  <dd className="tnum font-mono text-fg">{decimal(holdout.auc_sigma_baseline, 3)}</dd>
                 </div>
                 <div className="flex justify-between gap-4 border-t border-hairline pt-2">
                   <dt className="text-fg-2">Precisão no limiar em uso</dt>
@@ -291,7 +293,7 @@ export function ModelEvidence() {
                                   className={`tnum py-2 text-right font-mono ${
                                     l[d.chave] === melhor ? "font-semibold text-fg" : "text-fg-2"
                                   }`}>
-                                {l[d.chave].toFixed(3)}
+                                {decimal(l[d.chave], 3)}
                               </td>
                             ))}
                           </tr>

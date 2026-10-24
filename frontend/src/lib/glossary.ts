@@ -17,7 +17,7 @@ export const GLOSSARY: Record<string, string> = {
   temperatura:
     "Temperatura do processador. Acima de 88 °C ele se autolimita para não queimar, e o computador fica lento. Costuma ser poeira no ventilador.",
   load:
-    "Quantidade média de tarefas na fila do processador. Comparamos com o número de núcleos da sua máquina: mais tarefas do que núcleos significa fila de espera.",
+    "Quantidade média de tarefas na fila do processador. Comparamos com o número de núcleos do seu computador: mais tarefas do que núcleos significa fila de espera.",
   uptime: "Tempo desde a última vez que o computador foi ligado.",
   processos: "Quantos programas e serviços estão rodando neste momento, contando os invisíveis do sistema.",
   conexoes:
@@ -32,13 +32,13 @@ export const GLOSSARY: Record<string, string> = {
     "Quantas vezes a bateria foi carregada por completo. Baterias de notebook costumam durar entre 300 e 1000 ciclos.",
   particoes: "As divisões do seu disco. Cada uma enche de forma independente.",
   score:
-    "O quanto esta leitura fugiu do comportamento habitual desta máquina, medido pelo modelo estatístico. Quanto mais negativo, mais fora do padrão.",
+    "O quanto esta leitura fugiu do comportamento habitual deste computador, medido pelo modelo estatístico. Quanto mais negativo, mais fora do padrão.",
   aprendizado:
-    "Nas primeiras horas o sistema está conhecendo o que é normal neste computador: ele espera {aprendizado} acompanhando. Até lá, tudo que encontrar fica registrado aqui sem virar aviso — porque numa máquina recém-instalada todo programa parece novo, inclusive os que sempre estiveram nela. A exceção são os sinais que não dependem de histórico, como um programa disfarçado de arquivo do sistema ou um arquivo-isca mexido: esses interrompem você desde o primeiro minuto.",
+    "Nas primeiras horas o sistema está conhecendo o que é normal neste computador: ele espera {aprendizado} acompanhando. Até lá, tudo que encontrar fica registrado aqui sem virar aviso — porque num computador recém-instalado todo programa parece novo, inclusive os que sempre estiveram nele. A exceção são os sinais que não dependem de histórico, como um programa disfarçado de arquivo do sistema ou um arquivo-isca mexido: esses interrompem você desde o primeiro minuto.",
   ao_vivo:
     "O computador está enviando leituras neste momento, por conexão direta com o servidor. O ritmo se ajusta sozinho — {coleta} —, acelerando quando algo foge do normal.",
   agent_token:
-    "A senha que identifica este computador ao enviar dados. Quem tiver o token pode enviar leituras em nome desta máquina — trate como senha.",
+    "A senha que identifica este computador ao enviar dados. Quem tiver o token pode enviar leituras em nome deste computador — trate como senha.",
   chave_massa:
     "Uma chave reutilizável para instalar em muitos computadores de uma vez, sem digitar código em cada um.",
   codigo_pareamento:
@@ -57,16 +57,16 @@ export const ANOMALY_TYPE_HINTS: Record<string, string> = {
   high_memory: "A memória RAM encheu. Programas passam a fechar sozinhos ou travar.",
   resource_exhaustion: "Processador e memória saturaram juntos — o computador fica quase inutilizável.",
   disk_full: "O disco está perto de encher. Salvar arquivos e atualizar programas pode falhar.",
-  network_spike: "O tráfego de internet saltou muito acima do normal desta máquina.",
+  network_spike: "O tráfego de internet saltou muito acima do normal deste computador.",
   memory_leak: "Um programa vem acumulando memória sem devolver — é um defeito dele, não seu.",
   cpu_loop: "Um programa travou num laço e está consumindo processador sem fazer nada útil.",
   ddos_indicator: "Muitas conexões de rede abertas de uma vez, num padrão de ataque ou de abuso.",
   unknown_process: "Apareceu um programa que nunca havia rodado aqui, e ele está consumindo recursos.",
-  suspicious_process: "Um programa com nome conhecido de ameaça está rodando nesta máquina.",
+  suspicious_process: "Um programa com nome conhecido de ameaça está rodando neste computador.",
   malware_pattern: "A combinação de sinais bate com o comportamento típico de vírus.",
   resource_abuse: "Um programa conhecido está gastando muito mais do que ele mesmo costuma gastar.",
   behavioral_change: "Várias métricas mudaram de padrão ao mesmo tempo, sem causa aparente.",
-  behavioral_anomaly: "A leitura fugiu do padrão que o sistema aprendeu para esta máquina.",
+  behavioral_anomaly: "A leitura fugiu do padrão que o sistema aprendeu para este computador.",
   unknown: "O sistema detectou um desvio, mas não conseguiu classificá-lo.",
 };
 

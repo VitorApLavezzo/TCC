@@ -5,6 +5,7 @@ import { ptBR } from "date-fns/locale";
 import { AlertTriangle, Package, Play, Zap } from "lucide-react";
 import { reliabilityApi } from "../../services/api";
 import { Section, StatusDot } from "../ui/Layout";
+import { severityTone } from "../ui/Badge";
 import { Skeleton } from "../ui/Skeleton";
 import { EmptyState } from "../ui/EmptyState";
 import { LoadError } from "../ui/LoadError";
@@ -22,9 +23,6 @@ type Evento = {
 
 const ICONE = { anomaly: AlertTriangle, change: Package, action: Play, playbook: Zap };
 const ROTULO = { anomaly: "Aviso", change: "Mudança", action: "Ação", playbook: "Automação" };
-const TOM: Record<string, "ok" | "warn" | "crit" | "idle"> = {
-  critical: "crit", high: "warn", medium: "warn", low: "idle",
-};
 
 /**
  * Tudo o que aconteceu nesta máquina, num eixo só.
@@ -102,7 +100,7 @@ export function Timeline({ machineId }: { machineId: number }) {
               <li key={`${e.kind}-${e.id}`} className="relative py-3">
                 <span className="absolute -left-[26px] top-4 flex h-3 w-3 items-center justify-center rounded-full bg-canvas">
                   {e.severity ? (
-                    <StatusDot tone={TOM[e.severity] ?? "idle"} />
+                    <StatusDot tone={severityTone(e.severity)} />
                   ) : (
                     <Icone size={11} className="text-fg-3" aria-hidden="true" />
                   )}

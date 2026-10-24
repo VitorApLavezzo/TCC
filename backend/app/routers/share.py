@@ -20,7 +20,7 @@ def create_share(anomaly_id: int, hours: int = 72, db: Session = Depends(get_db)
     ids = [m.id for m in db.query(Machine.id).filter(Machine.owner_id == user.id).all()]
     anomaly = db.query(Anomaly).filter(Anomaly.id == anomaly_id, Anomaly.machine_id.in_(ids)).first()
     if not anomaly:
-        raise HTTPException(status_code=404, detail="Anomaly not found")
+        raise HTTPException(status_code=404, detail="Aviso não encontrado")
     link = share.create(db, anomaly, user.id, min(max(hours, 1), 720))
     base = settings.PUBLIC_BASE_URL.rstrip("/") if settings.PUBLIC_BASE_URL else ""
     return {"token": link.token, "url": f"{base}/compartilhado/{link.token}" if base else None,

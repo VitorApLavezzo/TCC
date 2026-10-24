@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Search } from "lucide-react";
 import { machinesApi, anomaliesApi } from "../../services/api";
 import { ANOMALY_TYPE_LABELS } from "../../types";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 type Item = { id: string; label: string; hint?: string; to: string };
 
@@ -12,9 +13,9 @@ const PAGINAS: Item[] = [
   { id: "p-avisos", label: "Avisos", to: "/anomalies" },
   { id: "p-pergunte", label: "Pergunte ao seu computador", to: "/pergunte" },
   { id: "p-conta", label: "Sua conta", to: "/account" },
-  { id: "p-pesquisa", label: "Pesquisa", hint: "avançado", to: "/pesquisa" },
-  { id: "p-demo", label: "Demonstração", hint: "avançado", to: "/demonstracao" },
-  { id: "p-estudo", label: "Estudo de compreensão", hint: "avançado", to: "/estudo" },
+  { id: "p-pesquisa", label: "Pesquisa", hint: "ferramenta do TCC", to: "/pesquisa" },
+  { id: "p-demo", label: "Demonstração", hint: "ferramenta do TCC", to: "/demonstracao" },
+  { id: "p-estudo", label: "Estudo de compreensão", hint: "ferramenta do TCC", to: "/estudo" },
 ];
 
 /**
@@ -32,12 +33,13 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const [dinamicos, setDinamicos] = useState<Item[]>([]);
   const [indice, setIndice] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(open, dialogRef, onClose, inputRef);
 
   useEffect(() => {
     if (!open) return;
     setBusca("");
     setIndice(0);
-    inputRef.current?.focus();
     // Carregado ao abrir, e não a cada tecla: a lista é curta e a busca
     // acontece na memória, sem ida ao servidor por caractere digitado.
     Promise.all([machinesApi.list(), anomaliesApi.list({ hours: 168, unresolved_only: true })])
@@ -77,7 +79,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-[12vh]"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div role="dialog" aria-modal="true" aria-label="Buscar no sistema"
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Buscar no sistema"
            className="w-full max-w-lg overflow-hidden rounded-panel border border-edge bg-surface shadow-float">
         <div className="flex items-center gap-2 border-b border-hairline px-3">
           <Search size={15} className="flex-shrink-0 text-fg-3" aria-hidden="true" />
@@ -89,22 +91,32 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
               if (e.key === "ArrowDown") { e.preventDefault(); setIndice((i) => Math.min(i + 1, itens.length - 1)); }
               if (e.key === "ArrowUp") { e.preventDefault(); setIndice((i) => Math.max(i - 1, 0)); }
               if (e.key === "Enter") { e.preventDefault(); ir(itens[indice]); }
-              if (e.key === "Escape") onClose();
             }}
             placeholder="Buscar computador, aviso ou tela..."
             aria-label="Buscar computador, aviso ou tela"
+            role="combobox"
+            aria-expanded={itens.length > 0}
+            aria-controls="paleta-resultados"
+            aria-activedescendant={itens[indice] ? `paleta-${itens[indice].id}` : undefined}
+            aria-autocomplete="list"
             className="h-12 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-fg-3"
           />
           <kbd className="hidden flex-shrink-0 rounded border border-edge px-1.5 py-0.5 font-mono text-micro text-fg-3 sm:block">
             esc
           </kbd>
         </div>
-        <ul className="max-h-[50vh] overflow-y-auto py-1">
-          {itens.length === 0 && <li className="px-4 py-6 text-center text-sm text-fg-3">Nada encontrado.</li>}
+        {itens.length === 0 && <p className="px-4 py-6 text-center text-sm text-fg-3">Nada encontrado.</p>}
+        {/* Lista de opções do campo: o foco fica no campo e as setas movem a
+            seleção, que o leitor de tela acompanha pelo activedescendant. */}
+        <ul id="paleta-resultados" role="listbox" aria-label="Resultados" className="max-h-[50vh] overflow-y-auto py-1">
           {itens.map((item, i) => (
-            <li key={item.id}>
+            <li key={item.id} role="presentation">
               <button
                 type="button"
+                id={`paleta-${item.id}`}
+                role="option"
+                aria-selected={i === indice}
+                tabIndex={-1}
                 onMouseEnter={() => setIndice(i)}
                 onClick={() => ir(item)}
                 className={`flex w-full items-baseline justify-between gap-3 px-4 py-2 text-left text-sm ${

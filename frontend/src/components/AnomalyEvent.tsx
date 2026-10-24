@@ -72,10 +72,12 @@ export function AnomalyEvent({
       </div>
 
       <div className="flex min-w-0 flex-1 items-start gap-3 py-2.5">
+        {/* Sem aria-label: o nome do botão sai do próprio conteúdo (tipo,
+            gravidade, resumo, computador). Um aria-label só com o tipo
+            escondia do leitor de tela a gravidade e o "Resolvido". */}
         <button
           type="button"
           onClick={onOpen}
-          aria-label={`Abrir o aviso ${label}${machineName ? ` de ${machineName}` : ""}`}
           className="-mx-2 min-w-0 flex-1 rounded-control px-2 py-1 text-left transition-colors hover:bg-raised"
         >
           <span className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
@@ -83,7 +85,7 @@ export function AnomalyEvent({
             {resolved ? (
               <span className="flex items-center gap-1.5 text-xs text-fg-3">
                 <StatusDot tone="idle" />
-                Resolvida
+                Resolvido
               </span>
             ) : (
               <Severity severity={anomaly.severity} />

@@ -21,7 +21,7 @@ def _owns(db: Session, anomaly_id: int, user: User) -> Anomaly:
     ids = [m.id for m in db.query(Machine.id).filter(Machine.owner_id == user.id).all()]
     anomaly = db.query(Anomaly).filter(Anomaly.id == anomaly_id, Anomaly.machine_id.in_(ids)).first()
     if not anomaly:
-        raise HTTPException(status_code=404, detail="Anomaly not found")
+        raise HTTPException(status_code=404, detail="Aviso não encontrado")
     return anomaly
 
 
@@ -147,7 +147,7 @@ def holdout(machine_id: int, db: Session = Depends(get_db),
     machine = db.query(Machine).filter(Machine.id == machine_id,
                                        Machine.owner_id == user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     return ml_eval.holdout(db, machine)
 
 
@@ -180,7 +180,7 @@ def ablation_result(user: User = Depends(get_current_user)):
 def _own_machine(db: Session, machine_id: int, user: User) -> Machine:
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     return machine
 
 

@@ -28,7 +28,9 @@
     --accent: 79 157 255;
     --ok: 61 214 140;
     --warn: 242 181 68;
-    --crit: 242 85 90;
+    /* Um degrau mais claro que o vermelho original: a pílula de gravidade
+       (texto sobre tinta de 14% do próprio vermelho) ficava em 4,15:1. */
+    --crit: 247 110 114;
     /* Séries de gráfico: identidade, não marca nem estado. Separadas do
        --accent porque no escuro o accent passa da faixa de luminosidade de um
        dado, e de --ok/--warn/--crit porque cor de estado não vira "série 2".
@@ -49,13 +51,16 @@
     --edge: 216 224 232;
     --fg: 15 27 38;
     --fg-2: 83 100 116;
-    --fg-3: 102 119 138;
+    --fg-3: 94 109 127;
     --inverse: 15 27 38;
     --inverse-fg: 242 245 248;
     --accent: 28 102 214;
-    --ok: 22 135 90;
-    --warn: 162 102 10;
-    --crit: 196 46 54;
+    /* Escurecidos para passar de 4,5:1 também como texto sobre a própria
+       tinta (as pílulas de estado) e sobre a superfície elevada; antes o
+       verde e o âmbar ficavam entre 3,6 e 4,3:1 nesses dois casos. */
+    --ok: 19 115 76;
+    --warn: 138 87 8;
+    --crit: 176 41 49;
     /* Séries de gráfico: identidade, não marca nem estado. Separadas do
        --accent porque no escuro o accent passa da faixa de luminosidade de um
        dado, e de --ok/--warn/--crit porque cor de estado não vira "série 2".
@@ -86,7 +91,10 @@
     font-variant-numeric: tabular-nums;
   }
 
-  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  /* O `<main>` recebe foco a cada troca de página (tabindex=-1), para o leitor
+     de tela começar do conteúdo; o anel nele só desenhava uma linha azul no
+     fim da página. */
+  :where(a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
     @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-canvas;
   }
 

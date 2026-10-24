@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { chatApi, machinesApi, errorMessage } from "../services/api";
 import { ChatMessage, Machine } from "../types";
 import { PageHeader } from "../components/ui/Layout";
 import { Button } from "../components/ui/Button";
 import { useToast } from "../components/ui/Toast";
 import { Disclosure } from "../components/ui/Disclosure";
+import { EmptyState } from "../components/ui/EmptyState";
 import { Send } from "lucide-react";
 
 /**
@@ -16,6 +18,7 @@ import { Send } from "lucide-react";
  */
 export function Chat() {
   const toast = useToast();
+  const navigate = useNavigate();
   const [machines, setMachines] = useState<Machine[]>([]);
   const [machineId, setMachineId] = useState<number | undefined>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -26,15 +29,23 @@ export function Chat() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const [machinesLoaded, setMachinesLoaded] = useState(false);
   useEffect(() => {
-    machinesApi.list().then((r) => setMachines(r.data)).catch(() => {});
+    machinesApi
+      .list()
+      .then((r) => {
+        setMachines(r.data);
+        setMachinesLoaded(true);
+      })
+      .catch(() => {});
   }, []);
   useEffect(() => {
     chatApi.suggestions(machineId).then((r) => setSuggestions(r.data.suggestions)).catch(() => {});
   }, [machineId]);
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const calmo = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    bottomRef.current?.scrollIntoView({ behavior: calmo ? "auto" : "smooth" });
   }, [messages]);
 
   const send = async (question: string) => {
@@ -69,14 +80,39 @@ export function Chat() {
     }
   };
 
+  // Sem computador não há histórico para consultar: a resposta seria vazia.
+  if (machinesLoaded && machines.length === 0) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <PageHeader
+          title="Pergunte ao seu computador"
+          description="Pergunte em português sobre o histórico — por que ficou lento, o que mudou, o que consome mais."
+        />
+        <EmptyState
+          title="Conecte um computador para começar"
+          body="As respostas saem do histórico de leituras. Assim que o primeiro computador enviar dados, você pode perguntar aqui."
+          action={
+            <Button variant="primary" onClick={() => navigate("/welcome")}>
+              Conectar um computador
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  // A altura desconta o que está em volta: no celular, o cabeçalho, a barra
+  // inferior e o respiro da página. Com 100vh-8rem fixo, o campo ficava
+  // embaixo da barra inferior e a página rolava duas vezes.
   return (
-    <div className="mx-auto flex h-[calc(100vh-8rem)] max-w-3xl flex-col">
+    <div className="mx-auto flex h-[calc(100dvh-12rem)] min-h-[22rem] max-w-3xl flex-col lg:h-[calc(100dvh-3.5rem)] min-[1500px]:h-[calc(100dvh-4rem)]">
       <PageHeader
         title="Pergunte ao seu computador"
         description="Pergunte em português sobre o histórico — por que ficou lento, o que mudou, o que consome mais."
         aside={
           machines.length > 0 ? (
             <select
+              aria-label="Sobre qual computador perguntar"
               value={machineId ?? ""}
               onChange={(e) => setMachineId(e.target.value ? Number(e.target.value) : undefined)}
               className="h-8 rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
@@ -90,7 +126,7 @@ export function Chat() {
         }
       />
 
-      <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1">
+      <div role="log" aria-live="polite" aria-label="Conversa" className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1">
         {messages.length === 0 && (
           <div className="space-y-3 pt-6">
             <p className="text-sm text-fg-3">Experimente perguntar:</p>
@@ -186,8 +222,9 @@ export function Chat() {
               }
             }}
             rows={1}
-            placeholder="Escreva sua pergunta…  (Enter envia, Shift+Enter quebra a linha)"
+            placeholder="Escreva sua pergunta…"
             aria-label="Sua pergunta"
+            aria-describedby="chat-dica"
             className="max-h-32 min-h-[40px] flex-1 resize-none rounded-control border border-edge bg-surface px-3 py-2 text-sm leading-relaxed text-fg placeholder:text-fg-3 focus:border-accent"
             style={{ height: `${Math.min(128, 40 + (input.match(/\n/g)?.length ?? 0) * 20)}px` }}
           />
@@ -195,6 +232,11 @@ export function Chat() {
             Enviar
           </Button>
         </div>
+        {/* Fora do placeholder: no celular a dica era cortada no meio, e o
+            teclado do celular nem tem Shift+Enter. */}
+        <p id="chat-dica" className="mt-1.5 hidden text-micro text-fg-3 sm:block">
+          Enter envia · Shift+Enter quebra a linha
+        </p>
       </form>
     </div>
   );

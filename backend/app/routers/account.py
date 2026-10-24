@@ -99,7 +99,7 @@ def privacy_view(machine_id: int, db: Session = Depends(get_db), user: User = De
     """"O que foi enviado sobre mim": tudo que saiu de um computador, do agente ao provedor de IA."""
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     from app.services import privacy_report
     return privacy_report.build(db, machine)
 

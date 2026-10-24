@@ -22,7 +22,7 @@ const DICIONARIO: Record<Locale, Record<string, string>> = {
     "nav.machines": "Computers",
     "nav.anomalies": "Alerts",
     "nav.ask": "Ask",
-    "nav.advanced": "Advanced",
+    "nav.advanced": "Thesis tools",
     "nav.research": "Research",
     "nav.demo": "Demo",
     "nav.study": "Study",
@@ -69,6 +69,11 @@ export function getLocale(): Locale {
   return atual;
 }
 
+/*
+ * O `lang` do documento fica em pt-BR mesmo com o inglês escolhido: só a
+ * navegação e as telas de entrada estão traduzidas, e com lang="en" o leitor
+ * de tela lia todo o resto, em português, com pronúncia de inglês.
+ */
 export function setLocale(locale: Locale): void {
   atual = locale;
   try {
@@ -76,7 +81,6 @@ export function setLocale(locale: Locale): void {
   } catch {
     /* navegação privativa: a escolha vale só nesta sessão */
   }
-  document.documentElement.lang = locale;
   ouvintes.forEach((fn) => fn());
 }
 

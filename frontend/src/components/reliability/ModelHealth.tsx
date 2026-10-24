@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { decimal } from "../../lib/format";
 import { reliabilityApi } from "../../services/api";
 import { Section, Panel, StatusDot } from "../ui/Layout";
 import { Skeleton } from "../ui/Skeleton";
@@ -42,7 +43,7 @@ export function ModelHealth({ machineId }: { machineId: number }) {
     };
   }, [machineId]);
 
-  if (erro) return <LoadError what="a saúde do modelo desta máquina" onRetry={() => window.location.reload()} />;
+  if (erro) return <LoadError what="a saúde do modelo deste computador" onRetry={() => window.location.reload()} />;
   if (loading) return <Skeleton className="h-24" />;
   // Sem medição ainda (histórico curto): a tela não precisa de uma caixa
   // dizendo que não sabe.
@@ -51,14 +52,14 @@ export function ModelHealth({ machineId }: { machineId: number }) {
   const mudaram = drift.per_feature.filter((f) => f.distance >= 0.1).slice(0, 3);
 
   return (
-    <Section className="animate-fade" title="O normal aprendido" description="Se o que o modelo aprendeu ainda descreve esta máquina">
+    <Section className="animate-fade" title="O normal aprendido" description="Se o que o modelo aprendeu ainda descreve este computador">
       <Panel className="p-4">
         <div className="flex items-baseline justify-between gap-4">
           <p className="flex items-center gap-2 font-display text-sm font-semibold text-fg">
             <StatusDot tone={TONE[drift.level] ?? "idle"} />
             {drift.label}
           </p>
-          <span className="tnum font-mono text-micro text-fg-3">distância {drift.distance.toFixed(2)}</span>
+          <span className="tnum font-mono text-micro text-fg-3">distância {decimal(drift.distance, 2)}</span>
         </div>
         <p className="mt-2 max-w-prose text-sm leading-relaxed text-fg-2">{drift.message}</p>
 

@@ -161,7 +161,7 @@ def list_machines(db: Session = Depends(get_db), current_user: User = Depends(ge
 def get_machine(machine_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     return machine
 
 
@@ -169,7 +169,7 @@ def get_machine(machine_id: int, db: Session = Depends(get_db), current_user: Us
 def update_machine(machine_id: int, update: MachineUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     for field, value in update.model_dump(exclude_unset=True).items():
         setattr(machine, field, value)
     db.commit()
@@ -182,7 +182,7 @@ def set_realtime(machine_id: int, body: RealtimeRequest, db: Session = Depends(g
                   current_user: User = Depends(get_current_user)):
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     machine.realtime_until = None if body.minutes == 0 else utcnow() + timedelta(minutes=body.minutes)
     db.commit()
     db.refresh(machine)
@@ -326,7 +326,7 @@ def _seal_removal(db: Session, machine_id: int, nome: Optional[str],
 def delete_machine(machine_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     delete_machine_cascade(machine_id, db)
 
 
@@ -334,7 +334,7 @@ def delete_machine(machine_id: int, db: Session = Depends(get_db), current_user:
 def regenerate_token(machine_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     machine.agent_token = secrets.token_urlsafe(32)
     db.commit()
     db.refresh(machine)
@@ -348,7 +348,7 @@ class ActivityLabelIn(BaseModel):
 def _owned(db: Session, machine_id: int, user: User) -> Machine:
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     return machine
 
 
@@ -389,7 +389,7 @@ def machine_incidents(machine_id: int, limit: int = 20, db: Session = Depends(ge
     from app.models.incident import Incident
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     rows = (
         db.query(Incident).filter(Incident.machine_id == machine_id)
         .order_by(Incident.last_activity_at.desc()).limit(limit).all()

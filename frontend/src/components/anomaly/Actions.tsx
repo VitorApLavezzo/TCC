@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Anomaly, Machine, SECURITY_TYPES } from "../../types";
 import { actionsApi, errorMessage } from "../../services/api";
 import { processName } from "../../lib/format";
+import { confirmBody } from "../../lib/actions";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
@@ -44,7 +45,7 @@ export function AnomalyActions({ anomaly, machine }: { anomaly: Anomaly; machine
     if (danger) {
       const ok = await confirm({
         title: `${label}?`,
-        body: `Esta ação será executada em ${machine?.name ?? "no computador"}. Você pode reverter depois pelo painel.`,
+        body: confirmBody(command, machine?.name),
         confirmLabel: label,
         destructive: true,
       });

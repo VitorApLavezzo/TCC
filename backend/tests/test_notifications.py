@@ -47,7 +47,7 @@ class TestPolicyAtCreation:
         db.commit()
         n = notifications.on_anomaly(db, make_anomaly(db, machine, "medium"))
         assert n.status == "suppressed"
-        assert "severidade" in (n.status_reason or "")
+        assert "gravidade mínima" in (n.status_reason or "")
 
     def test_low_goes_to_digest_when_enabled(self, db, scene):
         user, machine = scene

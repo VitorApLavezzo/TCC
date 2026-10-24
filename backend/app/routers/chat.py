@@ -31,7 +31,7 @@ def _serialize(m: ChatMessage) -> dict:
 def ask(body: AskBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if body.machine_id is not None:
         if not db.query(Machine.id).filter(Machine.id == body.machine_id, Machine.owner_id == user.id).first():
-            raise HTTPException(status_code=404, detail="Machine not found")
+            raise HTTPException(status_code=404, detail="Computador não encontrado")
     conversation_id = body.conversation_id or secrets.token_urlsafe(8)
     assistant = chat.ask(db, user, body.machine_id, conversation_id, body.question)
     return {"conversation_id": conversation_id, "message": _serialize(assistant)}

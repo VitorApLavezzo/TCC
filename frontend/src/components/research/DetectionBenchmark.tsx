@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { decimal } from "../../lib/format";
 import { evaluationApi, errorMessage } from "../../services/api";
 import { Section, Panel } from "../ui/Layout";
 import { Button, TextButton } from "../ui/Button";
@@ -23,7 +24,7 @@ const FAMILY_LABEL: Record<string, string> = {
   real: "normal real",
 };
 
-const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+const pct = (v: number | null | undefined) => (v == null ? "—" : `${decimal(v * 100, 1)}%`);
 
 /**
  * Benchmark de detecção.

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { anomaliesApi, machinesApi, errorMessage } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
@@ -17,10 +17,10 @@ import { X } from "lucide-react";
 const PAGE_SIZE = 25;
 
 const PERIODS = [
-  { value: 24, label: "24 horas" },
-  { value: 72, label: "3 dias" },
-  { value: 168, label: "1 semana" },
-  { value: 720, label: "1 mês" },
+  { value: 24, label: "Últimas 24 horas" },
+  { value: 72, label: "Últimos 3 dias" },
+  { value: 168, label: "Última semana" },
+  { value: 720, label: "Último mês" },
 ];
 
 const SEVERITIES = [
@@ -91,11 +91,18 @@ export function Anomalies() {
   }, []);
 
   // Mudança de filtro volta à primeira página, senão a pessoa fica numa página
-  // que já não existe no novo resultado.
+  // que já não existe no novo resultado. Só na mudança, não na montagem: na
+  // montagem isso zerava a página que veio no endereço (ao voltar de um aviso).
+  // Compara com os filtros anteriores em vez de marcar "já montou": o
+  // StrictMode roda o efeito duas vezes na montagem e enganaria a marca.
+  const filtros = JSON.stringify([machineId, hours, severity, unresolvedOnly, query]);
+  const filtrosAntes = useRef(filtros);
   useEffect(() => {
+    if (filtrosAntes.current === filtros) return;
+    filtrosAntes.current = filtros;
     setPage(1);
     setSelecionados([]);
-  }, [machineId, hours, severity, unresolvedOnly, query]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filtros]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -236,28 +243,28 @@ export function Anomalies() {
           quatro seletores lado a lado sem nome exigiam adivinhar pelo valor. */}
       <div className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1">
+          {/* O flex-1 fica no rótulo, não no campo: dentro da coluna do
+              rótulo ele encolhia a altura do campo em vez de alargá-lo. */}
+          <label className="flex min-w-[16rem] flex-1 flex-col gap-1">
             <span className="channel-label">Buscar</span>
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por tipo, programa ou computador"
-            aria-label="Buscar avisos"
-            className="h-8 min-w-[220px] flex-1 rounded-control border border-edge bg-surface px-2.5 text-sm text-fg placeholder:text-fg-3 focus:border-accent"
-          />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Tipo, programa ou computador"
+              className="h-8 w-full rounded-control border border-edge bg-surface px-2.5 text-sm text-fg placeholder:text-fg-3 focus:border-accent"
+            />
           </label>
           <label className="flex flex-col gap-1">
             <span className="channel-label">Período</span>
           <select
             value={hours}
             onChange={(e) => setHours(Number(e.target.value))}
-            aria-label="Período"
             className="h-8 rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
           >
             {PERIODS.map((p) => (
               <option key={p.value} value={p.value}>
-                Últimas {p.label}
+                {p.label}
               </option>
             ))}
           </select>
@@ -267,10 +274,9 @@ export function Anomalies() {
           <select
             value={severity}
             onChange={(e) => setSeverity(e.target.value)}
-            aria-label="Severidade"
             className="h-8 rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
           >
-            <option value="">Qualquer severidade</option>
+            <option value="">Qualquer gravidade</option>
             {SEVERITIES.map((s) => (
               <option key={s.value} value={s.value}>
                 {s.label}
@@ -284,7 +290,6 @@ export function Anomalies() {
             <select
               value={machineId ?? ""}
               onChange={(e) => setMachineId(e.target.value ? Number(e.target.value) : null)}
-              aria-label="Computador"
               className="h-8 rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
             >
               <option value="">Todos os computadores</option>
@@ -381,7 +386,7 @@ export function Anomalies() {
                 anomaly={a}
                 className={saindo.includes(a.id) ? "animate-collapse" : undefined}
                 machineName={machines.length > 1 ? machineName(a.machine_id) : undefined}
-                onOpen={() => navigate(`/anomalies/${a.id}`)}
+                onOpen={() => navigate(`/anomalies/${a.id}`, { state: { daLista: true } })}
                 action={
                   <div className="flex items-center gap-2">
                     <label className="flex cursor-pointer items-center p-1" onClick={(e) => e.stopPropagation()}>

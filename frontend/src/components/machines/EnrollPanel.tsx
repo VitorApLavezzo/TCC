@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useToast } from "../ui/Toast";
+import { copyText, COPY_FAILED } from "../../lib/clipboard";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { X } from "lucide-react";
@@ -21,11 +23,11 @@ export interface EnrollCode {
  */
 export function EnrollPanel({ enrollCode, onClose }: { enrollCode: EnrollCode; onClose: () => void }) {
   const [copied, setCopied] = useState<"code" | "cmd" | null>(null);
+  const toast = useToast();
 
   const copy = async (what: "code" | "cmd") => {
-    await navigator.clipboard.writeText(
-      what === "code" ? enrollCode.code : serverOneLiner({ code: enrollCode.code })
-    );
+    const ok = await copyText(what === "code" ? enrollCode.code : serverOneLiner({ code: enrollCode.code }));
+    if (!ok) return toast.error(...COPY_FAILED);
     setCopied(what);
     setTimeout(() => setCopied(null), 2000);
   };
@@ -43,11 +45,11 @@ export function EnrollPanel({ enrollCode, onClose }: { enrollCode: EnrollCode; o
       </div>
 
       {isLocalOrigin() && (
-        <p className="mt-4 max-w-prose rounded-panel border border-warn/30 bg-warn/8 px-3.5 py-2.5 text-xs leading-relaxed text-fg-2">
+        <p className="mt-4 max-w-prose rounded-panel border border-warn/30 bg-warn/[.08] px-3.5 py-2.5 text-xs leading-relaxed text-fg-2">
           <span className="font-medium text-warn">Você abriu o painel por “localhost”.</span> Esse endereço só funciona
           neste computador. Ao baixar o instalador, será pedido o endereço de rede do servidor — algo como{" "}
           <span className="font-mono text-fg">http://192.168.0.10:3000</span>. Para evitar o passo extra, acesse o
-          painel pelo IP da máquina.
+          painel pelo endereço de rede do servidor.
         </p>
       )}
 

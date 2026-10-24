@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { actionsApi, errorMessage } from "../services/api";
 import { Machine } from "../types";
 import { useToast } from "./ui/Toast";
@@ -16,6 +16,22 @@ export function FocusModeControl({ machine, onChange }: { machine: Machine; onCh
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const active = machine.focus_mode_until && new Date(machine.focus_mode_until) > new Date();
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Fecha com Esc ou clicando fora, como qualquer menu.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   const set = async (minutes: number) => {
     setBusy(true);
@@ -37,7 +53,7 @@ export function FocusModeControl({ machine, onChange }: { machine: Machine; onCh
         type="button"
         onClick={() => set(0)}
         disabled={busy}
-        className="inline-flex items-center gap-1.5 rounded-control border border-accent/40 bg-accent/8 px-2.5 py-1 text-xs text-accent transition-colors hover:bg-accent/12"
+        className="inline-flex items-center gap-1.5 rounded-control border border-accent/40 bg-accent/[.08] px-2.5 py-1 text-xs text-accent transition-colors hover:bg-accent/[.12]"
       >
         <Gamepad2 size={12} aria-hidden="true" />
         Modo atividade pesada ativo — desligar
@@ -46,10 +62,12 @@ export function FocusModeControl({ machine, onChange }: { machine: Machine; onCh
   }
 
   return (
-    <div className="relative">
+    <div ref={wrapRef} className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="true"
         className="inline-flex items-center gap-1.5 rounded-control border border-edge px-2.5 py-1 text-xs text-fg-2 transition-colors hover:bg-raised hover:text-fg"
       >
         <Gamepad2 size={12} aria-hidden="true" />

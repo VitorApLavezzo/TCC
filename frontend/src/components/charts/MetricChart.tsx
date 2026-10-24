@@ -14,6 +14,7 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Metric } from "../../types";
 import { Explain } from "../ui/Explain";
+import { prefersReducedMotion } from "../../lib/motion";
 
 interface MetricChartProps {
   metrics: Metric[];
@@ -98,7 +99,9 @@ export function MetricChart({
   const chart = (
     <>
       <ResponsiveContainer width="100%" height={bare ? 220 : 132}>
-        <AreaChart data={data} margin={{ top: 4, right: 4, left: -26, bottom: 0 }}>
+        {/* Margem à direita: o último horário é centrado na borda do gráfico e,
+            sem ela, aparecia cortado ("14:3"). */}
+        <AreaChart data={data} margin={{ top: 4, right: 18, left: -26, bottom: 0 }}>
           <defs>
             <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={line} stopOpacity={0.13} />
@@ -140,7 +143,14 @@ export function MetricChart({
           {markTime && <ReferenceLine x={markTime} stroke={accent} strokeWidth={1.25} />}
 
           <Tooltip content={<CustomTooltip />} cursor={{ stroke: grid }} />
-          <Area type="monotone" dataKey="value" stroke={line} strokeWidth={1.4} fill={`url(#${gradId})`} />
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke={line}
+            strokeWidth={1.4}
+            fill={`url(#${gradId})`}
+            isAnimationActive={!prefersReducedMotion()}
+          />
         </AreaChart>
       </ResponsiveContainer>
     </>

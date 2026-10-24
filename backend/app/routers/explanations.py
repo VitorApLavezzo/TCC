@@ -29,7 +29,7 @@ def _owned_anomaly(db: Session, anomaly_id: int, user: User) -> Anomaly:
     ids = [m.id for m in db.query(Machine.id).filter(Machine.owner_id == user.id).all()]
     anomaly = db.query(Anomaly).filter(Anomaly.id == anomaly_id, Anomaly.machine_id.in_(ids)).first()
     if not anomaly:
-        raise HTTPException(status_code=404, detail="Anomaly not found")
+        raise HTTPException(status_code=404, detail="Aviso não encontrado")
     return anomaly
 
 
@@ -63,7 +63,7 @@ def regenerate_explanation(anomaly_id: int, db: Session = Depends(get_db), curre
 
     data = ai_service.generate_explanation(anomaly, metric, machine, db)
     if not data:
-        raise HTTPException(status_code=500, detail="Failed to generate explanation")
+        raise HTTPException(status_code=500, detail="Não foi possível gerar a explicação agora. Tente de novo em instantes.")
 
     expl = db.query(AIExplanation).filter(AIExplanation.anomaly_id == anomaly_id).first()
     if not expl:

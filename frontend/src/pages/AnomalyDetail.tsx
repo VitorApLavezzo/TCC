@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useLocation, useParams, useNavigate } from "react-router-dom";
 import { anomaliesApi, explanationsApi, machinesApi, metricsApi, errorMessage } from "../services/api";
 import { Anomaly, Machine, Metric, Incident, ANOMALY_TYPE_LABELS, SECURITY_TYPES, LanguageLevel } from "../types";
 import { Severity } from "../components/ui/Badge";
@@ -10,10 +10,13 @@ import { RankedCauses } from "../components/AnomalyExplanation";
 import { Explain } from "../components/ui/Explain";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
+import { LoadError } from "../components/ui/LoadError";
+import { isNotFound } from "../lib/http";
+import { useDocumentTitle } from "../lib/title";
 import { MetricChart } from "../components/charts/MetricChart";
 import { useToast } from "../components/ui/Toast";
 import { ANOMALY_TYPE_HINTS, SEVERITY_URGENCY } from "../lib/glossary";
-import { processName } from "../lib/format";
+import { decimal, processName } from "../lib/format";
 import { health, LEVEL_CLASS, THRESHOLDS } from "../lib/health";
 import { Feedback, VerificationTag } from "../components/anomaly/Feedback";
 import { AdaptiveSteps } from "../components/anomaly/AdaptiveSteps";
@@ -48,6 +51,7 @@ const CHART_FOR: Record<string, { key: keyof Metric; label: string; term: string
 export function AnomalyDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const toast = useToast();
   const [anomaly, setAnomaly] = useState<Anomaly | null>(null);
   const [machine, setMachine] = useState<Machine | null>(null);
@@ -57,6 +61,9 @@ export function AnomalyDetail() {
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  useDocumentTitle(anomaly ? ANOMALY_TYPE_LABELS[anomaly.anomaly_type] ?? anomaly.anomaly_type : null);
+  const [attempt, setAttempt] = useState(0);
   const [level, setLevel] = useState<LanguageLevel>("leigo");
   const [variant, setVariant] = useState<any | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -69,6 +76,7 @@ export function AnomalyDetail() {
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
+    setLoadFailed(false);
     anomaliesApi
       .get(Number(id))
       .then((res) => {
@@ -91,13 +99,17 @@ export function AnomalyDetail() {
           .then((mr) => !cancelled && setContext(mr.data))
           .catch(() => {});
       })
-      .catch(() => !cancelled && setNotFound(true))
+      .catch((err) => {
+        if (cancelled) return;
+        if (isNotFound(err)) setNotFound(true);
+        else setLoadFailed(true);
+      })
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
       stopPolling();
     };
-  }, [id]);
+  }, [id, attempt]);
 
   useEffect(() => {
     if (!anomaly) return;
@@ -158,6 +170,20 @@ export function AnomalyDetail() {
     );
   }
 
+  if (loadFailed && !anomaly) {
+    return (
+      <div className="max-w-3xl">
+        <LoadError
+          what="este aviso"
+          onRetry={() => {
+            setLoading(true);
+            setAttempt((n) => n + 1);
+          }}
+        />
+      </div>
+    );
+  }
+
   if (notFound || !anomaly) {
     return (
       <div className="max-w-3xl">
@@ -182,7 +208,13 @@ export function AnomalyDetail() {
 
   return (
     <div className="max-w-3xl">
-      <TextButton onClick={() => navigate("/anomalies")} className="inline-flex items-center gap-1.5 text-fg-2">
+      {/* Vindo da lista, voltar pelo histórico preserva os filtros e a
+          página. De qualquer outro lugar (painel, sino, link) o botão faz o
+          que diz: abre a lista de avisos. */}
+      <TextButton
+        onClick={() => ((location.state as any)?.daLista ? navigate(-1) : navigate("/anomalies"))}
+        className="inline-flex items-center gap-1.5 text-fg-2"
+      >
         <ArrowLeft size={12} aria-hidden="true" />
         Todos os avisos
       </TextButton>
@@ -206,7 +238,7 @@ export function AnomalyDetail() {
           {anomaly.is_resolved ? (
             <span className="flex items-center gap-1.5 text-xs text-fg-3">
               <StatusDot tone="idle" />
-              Resolvida
+              Resolvido
             </span>
           ) : (
             <Severity severity={anomaly.severity} />
@@ -289,7 +321,6 @@ export function AnomalyDetail() {
               </span>
             </div>
 
-            <Feedback anomaly={anomaly} onChange={setAnomaly} />
           </>
         ) : (
           <EmptyState
@@ -333,6 +364,14 @@ export function AnomalyDetail() {
         </Section>
       )}
 
+      {/* Logo depois do que fazer: é a pergunta seguinte de quem leu os
+          passos. Antes ficava no fim, depois do gráfico e do replay. */}
+      {(shown?.possible_causes?.length ?? 0) > 0 && (
+        <Section className="mt-9" title="Por que isso pode ter acontecido" description="O sistema ordena por probabilidade">
+          <RankedCauses causes={shown!.possible_causes!} />
+        </Section>
+      )}
+
       {incident && incident.chain && incident.chain.nodes.length > 1 && (
         <Section className="mt-9" title="Como isso se encadeou" description="Sintomas que aconteceram juntos, ligados por causa e efeito">
           <IncidentChain incident={incident} />
@@ -362,12 +401,6 @@ export function AnomalyDetail() {
         <Replay anomaly={anomaly} blackboxId={blackboxId} />
       </Section>
 
-      {(shown?.possible_causes?.length ?? 0) > 0 && (
-        <Section className="mt-9" title="Por que isso pode ter acontecido" description="O sistema ordena por probabilidade">
-          <RankedCauses causes={shown!.possible_causes!} />
-        </Section>
-      )}
-
       <div className="mt-10">
         {shown?.detailed_explanation && (
           <Disclosure title="Entenda em detalhe" note="a análise completa">
@@ -386,8 +419,8 @@ export function AnomalyDetail() {
                   .map(([key, val]) => (
                     <DataRow
                       key={key}
-                      label={key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}
-                      value={typeof val === "number" ? (key.includes("percent") || key.includes("cpu") || key.includes("mem") ? `${val.toFixed(1)}%` : val.toFixed(1)) : String(val)}
+                      label={METRIC_LABELS[key] ?? key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())}
+                      value={metricValue(key, val)}
                     />
                   ))
               ) : (
@@ -395,7 +428,7 @@ export function AnomalyDetail() {
               )}
               {processName(anomaly) && <DataRow label="Programa responsável" value={processName(anomaly)!} mono />}
               {anomaly.anomaly_score != null && (
-                <DataRow label="Desvio do padrão" value={anomaly.anomaly_score.toFixed(4)} hint={<Explain term="score" />} />
+                <DataRow label="Desvio do padrão" value={decimal(anomaly.anomaly_score, 2)} hint={<Explain term="score" />} />
               )}
             </DataList>
           </Panel>
@@ -423,15 +456,51 @@ export function AnomalyDetail() {
         </Disclosure>
       </div>
 
-      <div className="mt-8 flex flex-wrap gap-2 border-t border-hairline pt-5">
-        <Button variant={anomaly.is_resolved ? "secondary" : "quiet"} onClick={handleResolveToggle}>
-          {anomaly.is_resolved ? "Reabrir aviso" : "Só marcar como resolvido"}
-        </Button>
-        {exp && <Button variant="quiet" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>Gerar nova explicação</Button>}
+      {/* Fechar o aviso vem por último, depois de agir. No alto da página,
+          o botão azul "resolvi" aparecia antes dos passos — convidava a
+          resolver sem ter feito nada. O "Era um problema — resolvi" já cobre
+          o "só marcar como resolvido", que repetia a mesma coisa. */}
+      <div className="mt-8">
+        <Feedback anomaly={anomaly} onChange={setAnomaly} />
+        <div className="mt-4 flex flex-wrap gap-2">
+          {anomaly.is_resolved && (
+            <Button variant="secondary" onClick={handleResolveToggle}>
+              Reabrir aviso
+            </Button>
+          )}
+          {exp && (
+            <Button variant="quiet" loading={regenerating} loadingLabel="Gerando..." onClick={handleRegenerate}>
+              Gerar nova explicação
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
+
+function metricValue(key: string, val: unknown) {
+  if (typeof val !== "number") return String(val);
+  if (key === "cpu_temp") return `${decimal(val, 0)} °C`;
+  if (key.includes("percent") || key.includes("cpu") || key.includes("mem")) return `${decimal(val, 1)}%`;
+  return decimal(val, 1);
+}
+
+/** Nomes das medidas como aparecem no resto do painel, em vez de "Cpu percent". */
+const METRIC_LABELS: Record<string, string> = {
+  cpu_percent: "Processador",
+  mem_percent: "Memória",
+  memory_percent: "Memória",
+  disk_percent: "Disco",
+  swap_percent: "Memória virtual",
+  net_connections: "Conexões abertas",
+  net_bytes_sent: "Enviando",
+  net_bytes_recv: "Recebendo",
+  process_count: "Programas rodando",
+  load_avg_1: "Fila do processador",
+  cpu_temp: "Temperatura",
+  gpu_percent: "Placa de vídeo",
+};
 
 /**
  * O que se sabe do programa acusado, na hora em que a pessoa está decidindo
@@ -473,7 +542,7 @@ function MlContributions({ anomaly }: { anomaly: Anomaly }) {
           </div>
         ))}
         <p className="pt-1 text-xs text-fg-3">
-          A leitura fugiu do padrão desta máquina; estas medidas foram as que mais pesaram nessa conclusão.
+          A leitura fugiu do padrão deste computador; estas medidas foram as que mais pesaram nessa conclusão.
         </p>
       </div>
     </Disclosure>

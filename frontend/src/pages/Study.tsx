@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { errorMessage, studyApi } from "../services/api";
+import { decimal } from "../lib/format";
 import { PageHeader, Section, Panel } from "../components/ui/Layout";
 import { Button } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
@@ -38,6 +39,23 @@ export function Study() {
   const [susItens, setSusItens] = useState<string[]>([]);
   const [susRespostas, setSusRespostas] = useState<number[]>([]);
   const [form, setForm] = useState({ participant_code: "", expertise: "leigo", items: 6 });
+  const [, setParams] = useSearchParams();
+
+  // Com o participante respondendo, a moldura some (o modo apresentação do
+  // AppShell): o comentário acima prometia "nada de menu", e a tela mostrava
+  // menu, sino e Ctrl+K.
+  useEffect(() => {
+    const emSessao = fase === "item" || fase === "sus";
+    setParams(
+      (atual) => {
+        const prox = new URLSearchParams(atual);
+        if (emSessao) prox.set("apresentacao", "1");
+        else prox.delete("apresentacao");
+        return prox;
+      },
+      { replace: true }
+    );
+  }, [fase, setParams]);
   const [resposta, setResposta] = useState({ cause: "", action: "", confidence: 0, helpful: 0 });
 
   useEffect(() => {
@@ -62,10 +80,12 @@ export function Study() {
         setResposta({ cause: "", action: "", confidence: 0, helpful: 0 });
         setFase("item");
       }
+    } catch (err) {
+      toast.error(errorMessage(err, "Não foi possível carregar o próximo aviso."));
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [toast]);
 
   async function comecar() {
     try {
@@ -181,7 +201,7 @@ export function Study() {
                   <div key={m.label} className="flex justify-between gap-4 py-2 text-sm">
                     <dt className="text-fg-2">{m.label}</dt>
                     <dd className="tnum font-mono text-fg">
-                      {m.value}
+                      {Number.isInteger(m.value) ? m.value : decimal(m.value, 1)}
                       {m.unit}
                     </dd>
                   </div>

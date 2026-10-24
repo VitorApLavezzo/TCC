@@ -3,6 +3,7 @@ import { Anomaly, SECURITY_TYPES } from "../../types";
 import { anomaliesApi, errorMessage } from "../../services/api";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
+import { useConfirm } from "../ui/ConfirmDialog";
 import { processName } from "../../lib/format";
 
 /**
@@ -15,12 +16,23 @@ import { processName } from "../../lib/format";
  */
 export function Feedback({ anomaly, onChange }: { anomaly: Anomaly; onChange: (a: Anomaly) => void }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
   const [showResolve, setShowResolve] = useState(false);
   const [cause, setCause] = useState("");
   const isSecurity = SECURITY_TYPES.has(anomaly.anomaly_type);
 
   const markNormal = async (scope: "process" | "type") => {
+    // Silenciar o tipo inteiro vale para todo programa, não só para este:
+    // é a única escolha daqui que pede confirmação.
+    if (scope === "type") {
+      const ok = await confirm({
+        title: "Silenciar todo aviso deste tipo?",
+        body: "Este computador deixa de mostrar avisos deste tipo, de qualquer programa — não só deste. Ainda não há como desfazer isso pelo painel.",
+        confirmLabel: "Silenciar este tipo",
+      });
+      if (!ok) return;
+    }
     setBusy("normal");
     try {
       const res = await anomaliesApi.feedback(anomaly.id, "normal", { scope });

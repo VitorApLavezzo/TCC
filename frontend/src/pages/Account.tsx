@@ -7,6 +7,8 @@ import { useTheme } from "../context/ThemeContext";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import { PageHeader, Section, Panel, DataList, DataRow } from "../components/ui/Layout";
 import { Button } from "../components/ui/Button";
+import { LoadError } from "../components/ui/LoadError";
+import { setResearchTools, useResearchTools } from "../lib/researchTools";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useToast } from "../components/ui/Toast";
 import { accountApi, errorMessage } from "../services/api";
@@ -36,13 +38,21 @@ const SEVERITIES = [
   { value: "critical", label: "Só crítica" },
 ];
 
+/*
+ * "Avisos" e "Avançado" eram também nomes do menu lateral, com outro
+ * sentido (a lista de anomalias; as telas do TCC). Aqui são as notificações
+ * e a automação, e passam a se chamar assim.
+ */
 const ABAS = [
   { id: "perfil", label: "Perfil" },
-  { id: "avisos", label: "Avisos" },
+  { id: "notificacoes", label: "Notificações" },
   { id: "privacidade", label: "Privacidade" },
-  { id: "avancado", label: "Avançado" },
+  { id: "automacao", label: "Automação" },
   { id: "ajuda", label: "Ajuda" },
 ];
+
+/** Endereços com os nomes antigos das abas continuam abrindo a certa. */
+const ABA_ANTIGA: Record<string, string> = { avisos: "notificacoes", avancado: "automacao" };
 
 export function Account() {
   const { user, logout } = useAuth();
@@ -54,13 +64,21 @@ export function Account() {
   const [channels, setChannels] = useState<any>({});
   const [telegramLinked, setTelegramLinked] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(() => {
-    accountApi.preferences().then((r) => {
-      setPrefs(r.data.preferences);
-      setChannels(r.data.channels_available);
-      setTelegramLinked(r.data.telegram_linked);
-    }).finally(() => setLoading(false));
+    setLoading(true);
+    setLoadFailed(false);
+    accountApi
+      .preferences()
+      .then((r) => {
+        setPrefs(r.data.preferences);
+        setChannels(r.data.channels_available);
+        setTelegramLinked(r.data.telegram_linked);
+      })
+      // Sem isto as abas que dependem das preferências ficavam em branco.
+      .catch(() => setLoadFailed(true))
+      .finally(() => setLoading(false));
   }, []);
   useEffect(load, [load]);
 
@@ -95,14 +113,21 @@ export function Account() {
   };
 
   const [params, setParams] = useSearchParams();
-  const aba = params.get("aba") || "perfil";
+  const pedida = params.get("aba") || "perfil";
+  const aba = ABA_ANTIGA[pedida] ?? pedida;
 
   const guarda = (conteudo: ReactElement) =>
-    loading ? <Skeleton className="h-40 w-full rounded-panel" /> : prefs ? conteudo : null;
+    loading ? (
+      <Skeleton className="h-40 w-full rounded-panel" />
+    ) : prefs ? (
+      conteudo
+    ) : loadFailed ? (
+      <LoadError what="suas preferências" onRetry={load} />
+    ) : null;
 
   return (
     <div className="max-w-2xl space-y-8">
-      <PageHeader title="Sua conta" description="Tudo o que é seu: identificação, avisos, privacidade e o que o sistema pode fazer sozinho." />
+      <PageHeader title="Sua conta" description="Tudo o que é seu: identificação, notificações, privacidade e o que o sistema pode fazer sozinho." />
 
       {/*
         Abas, e não uma rolagem só: esta página juntou onze seções, entre elas
@@ -139,6 +164,7 @@ export function Account() {
         </Panel>
       </Section>
           <Aparencia theme={theme} onToggleTheme={toggle} />
+          <FerramentasTcc />
 
           <Section title="Sessão">
             <Button variant="danger" onClick={handleLogout}>Sair da conta</Button>
@@ -146,7 +172,7 @@ export function Account() {
         </div>
       )}
 
-      {aba === "avisos" && (
+      {aba === "notificacoes" && (
         <div className="space-y-8">
           {guarda(
             <div className="space-y-8">
@@ -157,6 +183,7 @@ export function Account() {
                   key={lvl}
                   type="button"
                   onClick={() => update({ language_level: lvl })}
+                  aria-pressed={prefs.language_level === lvl}
                   className={`px-3 py-1.5 text-sm transition-colors ${prefs.language_level === lvl ? "bg-raised font-medium text-fg" : "text-fg-3 hover:bg-raised"}`}
                 >
                   {LANGUAGE_LEVEL_LABELS[lvl]}
@@ -202,7 +229,18 @@ export function Account() {
                     <p className="text-xs text-fg-3">Receba os avisos e responda por botões (encerrar, é normal).</p>
                   </div>
                   {telegramLinked ? (
-                    <Button variant="secondary" onClick={() => accountApi.telegramUnlink().then(() => { setTelegramLinked(false); toast.success("Telegram desconectado."); })}>
+                    <Button
+                      variant="secondary"
+                      onClick={() =>
+                        accountApi
+                          .telegramUnlink()
+                          .then(() => {
+                            setTelegramLinked(false);
+                            toast.success("Telegram desconectado.");
+                          })
+                          .catch((err) => toast.error(errorMessage(err, "Não foi possível desconectar o Telegram.")))
+                      }
+                    >
                       Desconectar
                     </Button>
                   ) : (
@@ -244,8 +282,9 @@ export function Account() {
                 ) : (
                   <div>
                     <p className="text-sm text-fg-2">E-mail · <span className="text-fg-3">não configurado</span></p>
-                    <p className="text-xs text-fg-3">
-                      Preencha SMTP_HOST, SMTP_USER, SMTP_PASSWORD e SMTP_FROM no .env e rode docker compose up -d backend.
+                    <p className="max-w-prose text-xs leading-relaxed text-fg-3">
+                      O envio de e-mail ainda não foi ligado neste servidor. Quem administra o sistema liga isso
+                      preenchendo os dados de SMTP no arquivo <code className="font-mono">.env</code>.
                     </p>
                   </div>
                 )}
@@ -287,7 +326,7 @@ export function Account() {
         </div>
       )}
 
-      {aba === "avancado" && (
+      {aba === "automacao" && (
         <div className="space-y-8">
           <Playbooks />
           <AuditLedger />
@@ -350,6 +389,24 @@ function Toggle({ label, hint, checked, onChange }: { label: string; hint?: stri
  * área — e a interface é compacta de propósito para quem acompanha uma dúzia
  * de máquinas. Quem tem uma e enxerga mal de perto precisa do contrário.
  */
+/** Liga as telas do TCC no menu. Escondidas por padrão: não são do dia a dia. */
+function FerramentasTcc() {
+  const ligado = useResearchTools();
+  return (
+    <Section title="Ferramentas do TCC" description="Pesquisa, Demonstração e Estudo de compreensão">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-prose text-sm text-fg-2">
+          Telas usadas no trabalho de conclusão de curso, não no acompanhamento do dia a dia. Mesmo escondidas do
+          menu, a busca (Ctrl K) chega nelas.
+        </p>
+        <Button variant="secondary" aria-pressed={ligado} onClick={() => setResearchTools(!ligado)}>
+          {ligado ? "Esconder do menu" : "Mostrar no menu"}
+        </Button>
+      </div>
+    </Section>
+  );
+}
+
 function Aparencia({ theme, onToggleTheme }: { theme: string; onToggleTheme: () => void }) {
   const [display, setDisplay] = useState(getDisplay());
   const locale = useLocale();
@@ -412,7 +469,7 @@ function Aparencia({ theme, onToggleTheme }: { theme: string; onToggleTheme: () 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-sm text-fg-2">Idioma da interface</span>
           <div className={grupo}>
-            {([["pt-BR", "Português"], ["en", "English"]] as const).map(([valor, rotulo]) => (
+            {([["pt-BR", "Português"], ["en", "English (parcial)"]] as const).map(([valor, rotulo]) => (
               <button
                 key={valor}
                 type="button"

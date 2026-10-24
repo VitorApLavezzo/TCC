@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  insightsApi, reportsApi, reputationApi, accountApi, machinesExtraApi, machinesApi, errorMessage,
+  insightsApi, reportsApi, reputationApi, accountApi, machinesExtraApi, machinesApi, anomaliesApi, errorMessage,
 } from "../services/api";
-import { Machine } from "../types";
-import { PageHeader, Section, Panel, DataList, DataRow } from "../components/ui/Layout";
+import { Anomaly, ANOMALY_TYPE_LABELS, Machine } from "../types";
+import { PageHeader, Section, Panel, DataList, DataRow, StatusDot } from "../components/ui/Layout";
+import { Severity } from "../components/ui/Badge";
+import { FreshnessTag } from "../components/FreshnessTag";
+import { decimal, pluralize } from "../lib/format";
+import { statusByMachine } from "../lib/machineStatus";
+import { useDocumentTitle } from "../lib/title";
 import { Button, TextButton } from "../components/ui/Button";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EmptyState } from "../components/ui/EmptyState";
+import { LoadError } from "../components/ui/LoadError";
 import { useToast } from "../components/ui/Toast";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -17,32 +23,103 @@ import { HardwareRisk } from "../components/reliability/HardwareRisk";
 import { Timeline } from "../components/reliability/Timeline";
 import { ActivityLabelControl } from "../components/machines/ActivityLabelControl";
 
-/** A história desta máquina: avisos, mudanças, ações e automações juntos. */
-function TimelineTab({ machineId }: { machineId: number }) {
-  return <Timeline machineId={machineId} />;
-}
-
+/**
+ * Cinco abas, uma por pergunta que a pessoa faz sobre o computador. Eram nove
+ * (três linhas no celular), e Saúde, Previsões, Diário e Mudanças se
+ * sobrepunham: para saber "vai dar problema?" era preciso abrir três.
+ */
 const TABS = [
-  { id: "linha", label: "Linha do tempo" },
-  { id: "previsoes", label: "Previsões" },
-  { id: "saude", label: "Saúde" },
-  { id: "diario", label: "Diário" },
-  { id: "energia", label: "Energia" },
-  { id: "mudancas", label: "Mudanças" },
-  { id: "upgrade", label: "Upgrade" },
-  { id: "programas", label: "Programas" },
+  { id: "resumo", label: "Resumo" },
+  { id: "saude", label: "Saúde e previsões" },
+  { id: "diario", label: "Diário e mudanças" },
+  { id: "programas", label: "Programas e energia" },
   { id: "privacidade", label: "Privacidade" },
 ];
 
+/** Endereços das abas antigas continuam abrindo o conteúdo certo. */
+const ABA_ANTIGA: Record<string, string> = {
+  linha: "resumo",
+  previsoes: "saude",
+  upgrade: "saude",
+  mudancas: "diario",
+  energia: "programas",
+};
+
+/** O estado agora e o que aconteceu, num lugar só. */
+function SummaryTab({ machineId, machine }: { machineId: number; machine: Machine | null }) {
+  const navigate = useNavigate();
+  // O id vem do endereço, não do computador carregado: sem isso a primeira
+  // busca saía sem filtro (todos os computadores) e, se o computador não
+  // carregasse, a aba inteira ficava em branco.
+  const { data, loading, error, reload } = useAsync<Anomaly[]>(
+    () => anomaliesApi.list({ machine_id: machineId, hours: 720, unresolved_only: true, limit: 500 }),
+    [machineId]
+  );
+  const status = data ? statusByMachine(data)[machineId] ?? { open: 0, worst: null } : null;
+
+  return (
+    <div className="space-y-8">
+      {loading ? (
+        <Skeleton className="h-24 w-full rounded-panel" />
+      ) : error ? (
+        <LoadError what="os avisos deste computador" onRetry={reload} />
+      ) : (
+        status && (
+          <Panel className="flex flex-wrap items-center justify-between gap-4 p-5">
+            <div className="min-w-0 space-y-2">
+              {status.open === 0 ? (
+                <p className="flex items-center gap-2 text-md font-medium text-fg">
+                  <StatusDot tone="ok" />
+                  Nenhum aviso em aberto
+                </p>
+              ) : (
+                <p className="flex flex-wrap items-center gap-2 text-md font-medium text-fg">
+                  <Severity severity={status.worst!.severity} />
+                  {pluralize(status.open, "aviso em aberto", "avisos em aberto")}
+                </p>
+              )}
+              {status.worst && (
+                <p className="text-sm text-fg-2">
+                  O mais grave: {ANOMALY_TYPE_LABELS[status.worst.anomaly_type] ?? status.worst.anomaly_type}
+                </p>
+              )}
+              {machine && (
+                <FreshnessTag lastMetricAt={machine.last_seen} wsStatus="idle" paused={!machine.is_active} />
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {status.worst && (
+                <Button variant="primary" onClick={() => navigate(`/anomalies/${status.worst!.id}`)}>
+                  Ver o que aconteceu
+                </Button>
+              )}
+              <Button variant="secondary" onClick={() => navigate(`/?computador=${machineId}`)}>
+                Ver ao vivo no painel
+              </Button>
+            </div>
+          </Panel>
+        )
+      )}
+      <Timeline machineId={machineId} />
+    </div>
+  );
+}
+
 /**
- * Saúde: as duas perguntas de confiabilidade que nenhuma tela respondia.
- * O modelo ainda entende esta máquina? As peças dela vão durar?
+ * Saúde e previsões: o que vai acontecer com este computador. Junta o que
+ * antes eram três abas — previsões, saúde das peças e se vale trocar alguma.
  */
 function HealthTab({ machineId }: { machineId: number }) {
   return (
     <div className="space-y-8">
-      <ModelHealth machineId={machineId} />
+      <Section title="Previsões" description="Para onde o disco, a bateria e a memória estão indo">
+        <ForecastTab machineId={machineId} />
+      </Section>
       <HardwareRisk machineId={machineId} />
+      <Section title="Vale trocar alguma peça?" description="Pelo histórico de avisos deste computador">
+        <UpgradeTab machineId={machineId} />
+      </Section>
+      <ModelHealth machineId={machineId} />
     </div>
   );
 }
@@ -52,8 +129,10 @@ export function MachineDetail() {
   const machineId = Number(id);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const tab = params.get("aba") || "linha";
+  const pedida = params.get("aba") || "resumo";
+  const tab = ABA_ANTIGA[pedida] ?? (TABS.some((t) => t.id === pedida) ? pedida : "resumo");
   const [machine, setMachine] = useState<Machine | null>(null);
+  useDocumentTitle(machine?.name);
 
   useEffect(() => {
     machinesApi.get(machineId).then((r) => setMachine(r.data)).catch(() => {});
@@ -61,11 +140,23 @@ export function MachineDetail() {
 
   const setTab = (t: string) => setParams({ aba: t }, { replace: true });
 
+  // Setas trocam de aba, como em qualquer lista de abas: só a ativa entra
+  // na ordem do Tab, as outras se alcançam pelas setas.
+  const onTabKey = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const i = TABS.findIndex((t) => t.id === tab);
+    const prox = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
+    setTab(prox.id);
+    requestAnimationFrame(() => document.getElementById(`aba-${prox.id}`)?.focus());
+  };
+
   return (
     <div className="space-y-6">
-      <TextButton onClick={() => navigate("/")} className="inline-flex items-center gap-1.5 text-fg-2">
+      {/* A página mora em Computadores (é o item aceso no menu): voltar leva
+          para lá, e não para o Painel. */}
+      <TextButton onClick={() => navigate("/machines")} className="inline-flex items-center gap-1.5 text-fg-2">
         <ArrowLeft size={12} aria-hidden="true" />
-        Painel
+        Computadores
       </TextButton>
       <PageHeader
         title={machine?.name ?? "Computador"}
@@ -73,13 +164,25 @@ export function MachineDetail() {
         aside={machine ? <ActivityLabelControl machineId={machineId} /> : undefined}
       />
 
-      <div className="flex flex-wrap gap-1 border-b border-hairline">
+      {/* Rola de lado no celular em vez de quebrar em várias linhas. */}
+      <div
+        role="tablist"
+        aria-label="Seções do computador"
+        onKeyDown={onTabKey}
+        className="-mx-4 flex gap-1 overflow-x-auto border-b border-hairline px-4 sm:mx-0 sm:px-0"
+      >
         {TABS.map((t) => (
           <button
             key={t.id}
+            id={`aba-${t.id}`}
             type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            tabIndex={tab === t.id ? 0 : -1}
             onClick={() => setTab(t.id)}
-            className={`relative px-3 py-2 text-sm transition-colors ${tab === t.id ? "font-medium text-fg" : "text-fg-3 hover:text-fg-2"}`}
+            className={`relative flex-shrink-0 whitespace-nowrap px-3 py-2 text-sm transition-colors ${
+              tab === t.id ? "font-medium text-fg" : "text-fg-3 hover:text-fg-2"
+            }`}
           >
             {t.label}
             {tab === t.id && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent" />}
@@ -87,29 +190,56 @@ export function MachineDetail() {
         ))}
       </div>
 
-      {tab === "linha" && <TimelineTab machineId={machineId} />}
-      {tab === "previsoes" && <ForecastTab machineId={machineId} />}
-      {tab === "saude" && <HealthTab machineId={machineId} />}
-      {tab === "diario" && <DiaryTab machineId={machineId} />}
-      {tab === "energia" && <EnergyTab machineId={machineId} />}
-      {tab === "mudancas" && <ChangesTab machineId={machineId} />}
-      {tab === "upgrade" && <UpgradeTab machineId={machineId} />}
-      {tab === "programas" && <ProgramsTab machineId={machineId} />}
-      {tab === "privacidade" && <PrivacyTab machineId={machineId} machine={machine} onChange={setMachine} />}
+      <div role="tabpanel" aria-labelledby={`aba-${tab}`}>
+        {tab === "resumo" && <SummaryTab machineId={machineId} machine={machine} />}
+        {tab === "saude" && <HealthTab machineId={machineId} />}
+        {tab === "diario" && (
+          <div className="space-y-10">
+            <DiaryTab machineId={machineId} />
+            <Section title="Instalações e atualizações" description="O que mudou no sistema e o efeito que teve">
+              <ChangesTab machineId={machineId} />
+            </Section>
+          </div>
+        )}
+        {tab === "programas" && (
+          <div className="space-y-10">
+            <Section title="Programas instalados" description="Com a reputação de cada um">
+              <ProgramsTab machineId={machineId} />
+            </Section>
+            <Section title="Energia" description="Quanto este computador consome e custa por mês">
+              <EnergyTab machineId={machineId} />
+            </Section>
+          </div>
+        )}
+        {tab === "privacidade" && <PrivacyTab machineId={machineId} machine={machine} onChange={setMachine} />}
+      </div>
     </div>
   );
 }
 
+/**
+ * Busca de uma aba. `error` separa "não carregou" de "não tem nada": antes as
+ * duas coisas viravam o estado vazio, e uma rede caída aparecia como "sem
+ * previsões ainda".
+ */
 function useAsync<T>(fn: () => Promise<{ data: T }>, deps: any[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const run = useCallback(() => {
     setLoading(true);
-    fn().then((r) => setData(r.data)).catch(() => setData(null)).finally(() => setLoading(false));
+    setError(false);
+    fn()
+      .then((r) => setData(r.data))
+      .catch(() => {
+        setData(null);
+        setError(true);
+      })
+      .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   useEffect(run, [run]);
-  return { data, loading, reload: run };
+  return { data, loading, error, reload: run };
 }
 
 function Loading() {
@@ -127,8 +257,9 @@ function Big({ title, sentence, tone }: { title: string; sentence?: string; tone
 }
 
 function ForecastTab({ machineId }: { machineId: number }) {
-  const { data, loading } = useAsync<any>(() => insightsApi.forecast(machineId), [machineId]);
+  const { data, loading, error, reload } = useAsync<any>(() => insightsApi.forecast(machineId), [machineId]);
   if (loading) return <Loading />;
+  if (error) return <LoadError what="as previsões" onRetry={reload} />;
   if (!data) return <EmptyState title="Sem previsões ainda" body="São precisas algumas leituras para projetar tendências." />;
   return (
     <div className="space-y-4">
@@ -151,7 +282,7 @@ function ForecastTab({ machineId }: { machineId: number }) {
 
 function DiaryTab({ machineId }: { machineId: number }) {
   const toast = useToast();
-  const { data, loading, reload } = useAsync<any>(() => reportsApi.list(machineId), [machineId]);
+  const { data, loading, error, reload } = useAsync<any>(() => reportsApi.list(machineId), [machineId]);
   const [gen, setGen] = useState(false);
   const generate = async () => {
     setGen(true);
@@ -165,6 +296,7 @@ function DiaryTab({ machineId }: { machineId: number }) {
     }
   };
   if (loading) return <Loading />;
+  if (error) return <LoadError what="os diários" onRetry={reload} />;
   const reports = data?.reports ?? [];
   return (
     <div className="space-y-5">
@@ -197,8 +329,9 @@ function DiaryTab({ machineId }: { machineId: number }) {
 }
 
 function EnergyTab({ machineId }: { machineId: number }) {
-  const { data, loading } = useAsync<any>(() => insightsApi.energy(machineId), [machineId]);
+  const { data, loading, error, reload } = useAsync<any>(() => insightsApi.energy(machineId), [machineId]);
   if (loading) return <Loading />;
+  if (error) return <LoadError what="o consumo de energia" onRetry={reload} />;
   if (!data?.ready) return <EmptyState title="Sem estimativa ainda" body={data?.reason ?? "São precisas algumas leituras."} />;
   return (
     <div className="space-y-4">
@@ -206,7 +339,7 @@ function EnergyTab({ machineId }: { machineId: number }) {
       <Panel className="px-4 py-2">
         <DataList>
           <DataRow label="Consumo no mês (estimado)" value={`${data.monthly_kwh} kWh`} />
-          <DataRow label="Custo no mês" value={`R$ ${data.monthly_cost?.toFixed(2)}`} />
+          <DataRow label="Custo no mês" value={data.monthly_cost != null ? `R$ ${decimal(data.monthly_cost, 2)}` : "--"} />
           <DataRow label="CO₂ no mês" value={`${data.monthly_co2_kg} kg`} />
           <DataRow label="Parte medida (não estimada)" value={`${data.measured_share_pct}%`} />
         </DataList>
@@ -226,7 +359,7 @@ function EnergyTab({ machineId }: { machineId: number }) {
         <Panel className="px-4 py-2">
           <DataList>
             {data.top_processes.map((p: any) => (
-              <DataRow key={p.name} label={p.name} value={`${p.kwh} kWh · R$ ${p.cost?.toFixed(2)}`} mono />
+              <DataRow key={p.name} label={p.name} value={`${p.kwh} kWh · R$ ${p.cost != null ? decimal(p.cost, 2) : "--"}`} mono />
             ))}
           </DataList>
         </Panel>
@@ -236,8 +369,9 @@ function EnergyTab({ machineId }: { machineId: number }) {
 }
 
 function ChangesTab({ machineId }: { machineId: number }) {
-  const { data, loading } = useAsync<any>(() => insightsApi.changes(machineId), [machineId]);
+  const { data, loading, error, reload } = useAsync<any>(() => insightsApi.changes(machineId), [machineId]);
   if (loading) return <Loading />;
+  if (error) return <LoadError what="as mudanças no sistema" onRetry={reload} />;
   const changes = data?.changes ?? [];
   if (changes.length === 0) return <EmptyState title="Nada mudou por aqui" body="Instalações, atualizações e drivers novos aparecem nesta linha do tempo, com o efeito que tiveram." />;
   const KIND: Record<string, string> = {
@@ -265,11 +399,12 @@ function ChangesTab({ machineId }: { machineId: number }) {
 }
 
 function UpgradeTab({ machineId }: { machineId: number }) {
-  const { data, loading } = useAsync<any>(() => insightsApi.upgrade(machineId), [machineId]);
+  const { data, loading, error, reload } = useAsync<any>(() => insightsApi.upgrade(machineId), [machineId]);
   if (loading) return <Loading />;
+  if (error) return <LoadError what="as recomendações de peças" onRetry={reload} />;
   if (!data?.ready) return <EmptyState title="Sem recomendações ainda" body={data?.reason ?? "São precisos alguns dias de uso."} />;
   const recs = data.recommendations ?? [];
-  if (recs.length === 0) return <EmptyState title="Nenhum upgrade recomendado" body="Pelo histórico, o hardware dá conta do seu uso. Nada a trocar por ora." />;
+  if (recs.length === 0) return <EmptyState title="Nenhuma troca recomendada" body="Pelo histórico, as peças dão conta do seu uso. Nada a trocar por ora." />;
   return (
     <div className="space-y-3">
       <p className="text-sm text-fg-3">Com base nos avisos dos últimos {data.period_days} dias:</p>
@@ -287,9 +422,17 @@ function UpgradeTab({ machineId }: { machineId: number }) {
 }
 
 function ProgramsTab({ machineId }: { machineId: number }) {
-  const { data, loading } = useAsync<any>(() => reputationApi.programs(machineId), [machineId]);
+  const { data, loading, error, reload } = useAsync<any>(() => reputationApi.programs(machineId), [machineId]);
   if (loading) return <Loading />;
+  if (error) return <LoadError what="a lista de programas" onRetry={reload} />;
   const programs = data?.programs ?? [];
+  if (programs.length === 0)
+    return (
+      <EmptyState
+        title="Nenhum programa listado ainda"
+        body="A lista aparece depois que o agente faz o primeiro inventário deste computador."
+      />
+    );
   const tone: Record<string, string> = {
     suspeito: "text-crit", "comum e sem queixas": "text-ok", raro: "text-warn", "sem opinião formada": "text-fg-3",
   };
@@ -314,7 +457,7 @@ function ProgramsTab({ machineId }: { machineId: number }) {
 
 function PrivacyTab({ machineId, machine, onChange }: { machineId: number; machine: Machine | null; onChange: (m: Machine) => void }) {
   const toast = useToast();
-  const { data, loading } = useAsync<any>(() => accountApi.privacy(machineId), [machineId]);
+  const { data, loading, error, reload } = useAsync<any>(() => accountApi.privacy(machineId), [machineId]);
   const [saving, setSaving] = useState(false);
 
   const setPrivacy = async (value: string) => {
@@ -331,6 +474,7 @@ function PrivacyTab({ machineId, machine, onChange }: { machineId: number; machi
   };
 
   if (loading) return <Loading />;
+  if (error) return <LoadError what="as preferências de privacidade" onRetry={reload} />;
   const current = machine?.ai_privacy ?? data?.ai_privacy ?? "any";
 
   return (

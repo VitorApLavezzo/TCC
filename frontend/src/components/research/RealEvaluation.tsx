@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { decimal } from "../../lib/format";
 import { errorMessage, evaluationApi, machinesApi } from "../../services/api";
 import { Section, Panel, DataList, DataRow } from "../ui/Layout";
 import { Button } from "../ui/Button";
@@ -36,7 +37,7 @@ type TestRow = {
 
 type Score = { confusion: Confusion; benign: Benign; tests: Record<string, TestRow> };
 
-const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
+const pct = (v: number | null | undefined) => (v == null ? "—" : `${decimal(v * 100, 1)}%`);
 const num = (v: number, casas = 1) => v.toLocaleString("pt-BR", { maximumFractionDigits: casas });
 const tempo = (s: number | null) => (s == null ? "—" : s < 120 ? `${Math.round(s)} s` : `${num(s / 60)} min`);
 

@@ -4,6 +4,8 @@ import { accountApi } from "../services/api";
 import { Notification } from "../types";
 import { usePolling } from "../hooks/usePolling";
 import { Bell } from "lucide-react";
+import { StatusDot } from "./ui/Layout";
+import { severityTone } from "./ui/Badge";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -16,7 +18,10 @@ import { ptBR } from "date-fns/locale";
  * Sem isso, a pessoa não teria como saber que existe uma decisão sendo tomada
  * em nome dela.
  */
-export function NotificationsBell() {
+export function NotificationsBell({ placement = "up" }: { placement?: "up" | "down" }) {
+  // "up" é a lateral do desktop, onde o sino fica no rodapé; "down" é o
+  // cabeçalho do celular, onde abrir para cima jogava o painel fora da tela.
+  const down = placement === "down";
   const navigate = useNavigate();
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -69,14 +74,20 @@ export function NotificationsBell() {
         onClick={openPanel}
         aria-label={unread > 0 ? `${unread} notificações não lidas` : "Notificações"}
         aria-expanded={open}
-        className="relative flex h-7 w-7 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-raised hover:text-fg"
+        className={`relative flex items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-raised hover:text-fg ${
+          down ? "h-9 w-9" : "h-7 w-7"
+        }`}
       >
-        <Bell size={14} aria-hidden="true" />
+        <Bell size={down ? 16 : 14} aria-hidden="true" />
         {unread > 0 && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-accent" />}
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 z-40 mb-2 w-80 max-w-[90vw] overflow-hidden rounded-panel border border-edge bg-surface shadow-float">
+        <div
+          className={`z-40 overflow-hidden rounded-panel border border-edge bg-surface shadow-float ${
+            down ? "fixed inset-x-3 top-[3.75rem]" : "absolute bottom-full left-0 mb-2 w-80 max-w-[90vw]"
+          }`}
+        >
           <p className="border-b border-hairline px-3.5 py-2.5 text-xs font-medium text-fg">Notificações</p>
           <div className="max-h-96 overflow-y-auto">
             {items.length === 0 ? (
@@ -90,11 +101,7 @@ export function NotificationsBell() {
                   className="block w-full border-b border-hairline px-3.5 py-2.5 text-left transition-colors last:border-0 hover:bg-raised"
                 >
                   <span className="flex items-start gap-2">
-                    <span
-                      className={`mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full ${
-                        n.severity === "critical" ? "bg-crit" : n.severity === "high" ? "bg-warn" : "bg-fg-3"
-                      }`}
-                    />
+                    <StatusDot tone={severityTone(n.severity)} className="mt-1.5" />
                     <span className="min-w-0 flex-1">
                       <span className="block text-xs font-medium text-fg">{n.title}</span>
                       {n.body && <span className="clamp-2 mt-0.5 block text-micro leading-relaxed text-fg-2">{n.body}</span>}

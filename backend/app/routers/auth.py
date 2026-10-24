@@ -89,9 +89,9 @@ def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
              dependencies=[Depends(limit("register", 5, 3600))])
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user_in.email).first():
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=400, detail="Já existe uma conta com este e-mail")
     if db.query(User).filter(User.username == user_in.username).first():
-        raise HTTPException(status_code=400, detail="Username already taken")
+        raise HTTPException(status_code=400, detail="Este nome de usuário já está em uso")
     user = User(
         email=user_in.email,
         username=user_in.username,
@@ -109,7 +109,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Usuário ou senha incorretos",
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = create_access_token(data={"sub": str(user.id)})

@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.labels import ANOMALY_TYPE_LABELS, SEVERITY_LABELS
 from app.core.timeutil import utcnow
 from app.models.demo import DemoSession
 from app.models.machine import Machine
@@ -170,7 +171,7 @@ def start(db: Session, user: User, scenario: str) -> DemoSession:
     db.flush()
     session = DemoSession(user_id=user.id, scenario=scenario, status="running", machine_ids=[machine.id],
                           total_steps=spec["warmup"] + spec["attack"], state={"machine_id": machine.id},
-                          log=[f"Máquina de demonstração criada: {machine.name}"])
+                          log=[f"Computador de demonstração criado: {machine.name}"])
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -235,7 +236,11 @@ def step(db: Session, session: DemoSession) -> Dict[str, Any]:
 
     log = list(session.log or [])
     for anomaly in created:
-        log.append(f"Passo {k + 1}: detectado {anomaly.anomaly_type} ({anomaly.severity})")
+        # O log aparece na tela da demonstração, na frente da banca: nome do aviso
+        # como a pessoa o vê, não o identificador interno.
+        label = ANOMALY_TYPE_LABELS.get(anomaly.anomaly_type, anomaly.anomaly_type)
+        sev = SEVERITY_LABELS.get(anomaly.severity, anomaly.severity).lower()
+        log.append(f"Leitura {k + 1} · aviso: {label} (gravidade {sev})")
 
     # Broadcast em tempo real, como uma máquina real
     try:

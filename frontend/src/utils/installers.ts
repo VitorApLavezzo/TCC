@@ -49,9 +49,9 @@ function resolveServerUrl(interactive: boolean): string | null {
   if (!interactive) return saved || origin;
 
   const input = window.prompt(
-    "Você está acessando o painel por 'localhost', mas a máquina que vai receber o agente " +
+    "Você está acessando o painel por 'localhost', mas o computador que vai receber o agente " +
       "precisa do endereço de REDE deste servidor.\n\n" +
-      "Digite o endereço que as outras máquinas usarão (ex: http://192.168.0.10:3000):",
+      "Digite o endereço que os outros computadores usarão (ex: http://192.168.0.10:3000):",
     saved || `http://${window.location.hostname}:${window.location.port || "3000"}`
   );
   if (!input) return null;

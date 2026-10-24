@@ -66,7 +66,7 @@ def _own_machine(db: Session, machine_id: Optional[int], user: User) -> None:
     if machine_id is None:
         return
     if not db.query(Machine.id).filter(Machine.id == machine_id, Machine.owner_id == user.id).first():
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
 
 
 @router.get("")

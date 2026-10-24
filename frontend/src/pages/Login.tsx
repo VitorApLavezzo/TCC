@@ -1,13 +1,18 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
+import { pageTitle } from "../lib/title";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { authApi, errorMessage } from "../services/api";
+import { loginErrorMessage } from "../lib/session";
 import { useT } from "../lib/i18n";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { Wordmark } from "../components/ui/SignalMark";
 
 export function Login() {
+  useEffect(() => {
+    document.title = pageTitle(window.location.pathname);
+  }, []);
   const { login, loginWithToken } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -48,10 +53,12 @@ export function Login() {
               }
             },
           });
+          // Mesma largura do botão "Entrar" (o Google aceita de 200 a 400 px).
+          const largura = Math.round(Math.min(400, Math.max(200, googleBtnRef.current.offsetWidth || 320)));
           g.accounts.id.renderButton(googleBtnRef.current, {
             theme: "outline",
             size: "large",
-            width: 320,
+            width: largura,
             text: "signin_with",
             locale: "pt-BR",
           });
@@ -83,11 +90,7 @@ export function Login() {
       await login(username, password);
       navigate("/");
     } catch (err: any) {
-      setError(
-        err?.response
-          ? "Usuário ou senha incorretos."
-          : "Não conseguimos falar com o servidor. Verifique se ele está ligado."
-      );
+      setError(loginErrorMessage(err?.response?.status));
     } finally {
       setLoading(false);
     }
@@ -115,7 +118,7 @@ export function Login() {
         </header>
 
         {justRegistered && (
-          <p className="mb-4 rounded-panel border border-ok/30 bg-ok/8 px-3.5 py-2.5 text-sm text-ok">
+          <p className="mb-4 rounded-panel border border-ok/30 bg-ok/[.08] px-3.5 py-2.5 text-sm text-ok">
             Conta criada. Entre com o usuário e a senha que você acabou de escolher.
           </p>
         )}
@@ -155,7 +158,6 @@ export function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 className="field pr-10"
-                placeholder="••••••••"
               />
               <button
                 type="button"
@@ -169,7 +171,7 @@ export function Login() {
           </div>
 
           {error && (
-            <p role="alert" className="rounded-control border border-crit/30 bg-crit/8 px-3 py-2 text-xs text-crit">
+            <p role="alert" className="rounded-control border border-crit/30 bg-crit/[.08] px-3 py-2 text-xs text-crit">
               {error}
             </p>
           )}
@@ -178,7 +180,7 @@ export function Login() {
             Entrar
           </Button>
 
-          <div ref={googleBtnRef} className="flex justify-center" />
+          <div ref={googleBtnRef} className="flex w-full justify-center" />
 
           <p className="pt-1 text-center text-xs text-fg-3">
             Não tem conta?{" "}

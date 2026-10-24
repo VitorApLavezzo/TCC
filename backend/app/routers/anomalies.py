@@ -33,7 +33,7 @@ def _owned(db: Session, anomaly_id: int, user: User) -> Anomaly:
         .first()
     )
     if not anomaly:
-        raise HTTPException(status_code=404, detail="Anomaly not found")
+        raise HTTPException(status_code=404, detail="Aviso não encontrado")
     return anomaly
 
 

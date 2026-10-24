@@ -19,7 +19,7 @@ export function StaleBanner({ onRetry }: { onRetry?: () => void }) {
   const offline = !online;
 
   return (
-    <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-panel border border-warn/30 bg-warn/8 px-4 py-3">
+    <div role="status" className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-panel border border-warn/30 bg-warn/[.08] px-4 py-3">
       <StatusDot tone="warn" className="mt-1.5 self-start" />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-warn">

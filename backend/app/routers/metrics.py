@@ -37,7 +37,7 @@ async def ingest_metrics(
 def _owned_machine(db: Session, machine_id: int, user: User) -> Machine:
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == user.id).first()
     if not machine:
-        raise HTTPException(status_code=404, detail="Machine not found")
+        raise HTTPException(status_code=404, detail="Computador não encontrado")
     return machine
 
 
@@ -88,7 +88,7 @@ def get_latest_metric(
         .first()
     )
     if not metric:
-        raise HTTPException(status_code=404, detail="No metrics yet")
+        raise HTTPException(status_code=404, detail="Este computador ainda não enviou leituras")
     return metric
 
 

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from "react";
 import { Button } from "./Button";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 interface Request {
   title: string;
@@ -40,39 +41,8 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
 
   // Foco inicial no "Cancelar" e Esc cancela: numa ação destrutiva o caminho
   // seguro precisa ser o padrão. O Tab fica preso dentro do diálogo e o foco
-  // volta para o botão que o abriu quando ele fecha — sem isso, quem navega
-  // por teclado sai para a página atrás, que está inerte, e se perde.
-  useEffect(() => {
-    if (!request) return;
-    const anterior = document.activeElement as HTMLElement | null;
-    cancelRef.current?.focus();
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        settle(false);
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const foco = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      if (!foco || foco.length === 0) return;
-      const primeiro = foco[0];
-      const ultimo = foco[foco.length - 1];
-      if (e.shiftKey && document.activeElement === primeiro) {
-        e.preventDefault();
-        ultimo.focus();
-      } else if (!e.shiftKey && document.activeElement === ultimo) {
-        e.preventDefault();
-        primeiro.focus();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      anterior?.focus?.();
-    };
-  }, [request, settle]);
+  // volta para o botão que o abriu quando ele fecha.
+  useDialogFocus(!!request, dialogRef, () => settle(false), cancelRef);
 
   return (
     <ConfirmCtx.Provider value={confirm}>

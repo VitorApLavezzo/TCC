@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { decimal } from "../../lib/format";
 import { AIExplanation, Anomaly, Counterfactual, LanguageLevel, LANGUAGE_LEVEL_LABELS, Verification } from "../../types";
 import { explanationsApi, errorMessage } from "../../services/api";
 import { useToast } from "../ui/Toast";
@@ -18,7 +19,7 @@ export function CounterfactualCard({ cf, onAct }: { cf: Counterfactual; onAct?: 
           Memória <span className="tnum font-mono text-fg-2">{cf.mem_now.toFixed(0)}%</span> →{" "}
           <span className="tnum font-mono text-ok">{cf.mem_after.toFixed(0)}%</span>
         </span>
-        {cf.mem_freed_gb > 0.1 && <span>Libera ~{cf.mem_freed_gb.toFixed(1)} GB</span>}
+        {cf.mem_freed_gb > 0.1 && <span>Libera ~{decimal(cf.mem_freed_gb, 1)} GB</span>}
       </div>
       {onAct && (
         <button type="button" onClick={onAct} className="mt-2 rounded text-xs font-medium text-accent hover:underline">
@@ -107,6 +108,7 @@ export function LanguageLevelSwitch({
           type="button"
           onClick={() => pick(level)}
           disabled={loading !== null}
+          aria-pressed={level === current}
           className={`px-2.5 py-1 text-xs transition-colors ${
             level === current ? "bg-raised font-medium text-fg" : "text-fg-3 hover:bg-raised hover:text-fg-2"
           }`}
@@ -124,15 +126,26 @@ export function RatingButtons({ anomaly }: { anomaly: Anomaly }) {
   const [rating, setRating] = useState<number | undefined>(anomaly.explanation?.user_rating);
 
   const rate = async (value: 1 | -1) => {
+    const anterior = rating;
     const next = rating === value ? undefined : value;
     setRating(next);
+    // Desmarcar só limpa a tela: não há como apagar a nota no servidor, e
+    // agradecer por um clique que desfez a escolha não fazia sentido.
+    if (!next) return;
     try {
-      if (next) await explanationsApi.rate(anomaly.id, value);
+      await explanationsApi.rate(anomaly.id, value);
       toast.success(value === 1 ? "Obrigado! Que bom que ajudou." : "Obrigado pelo retorno.");
-    } catch {
-      /* silencioso: avaliação é secundária */
+    } catch (err) {
+      setRating(anterior);
+      toast.error(errorMessage(err, "Não foi possível registrar a avaliação."));
     }
   };
+
+  // Escolhido = fundo tingido, e não só a cor do ícone; alvo de 32 px.
+  const estilo = (ativo: boolean, tom: string) =>
+    `flex h-8 w-8 items-center justify-center rounded-control transition-colors hover:bg-raised ${
+      ativo ? tom : "text-fg-3"
+    }`;
 
   return (
     <span className="inline-flex items-center gap-1">
@@ -141,7 +154,8 @@ export function RatingButtons({ anomaly }: { anomaly: Anomaly }) {
         type="button"
         onClick={() => rate(1)}
         aria-label="Ajudou"
-        className={`flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-raised ${rating === 1 ? "text-ok" : "text-fg-3"}`}
+        aria-pressed={rating === 1}
+        className={estilo(rating === 1, "bg-ok/[.14] text-ok")}
       >
         <ThumbsUp size={12} aria-hidden="true" />
       </button>
@@ -149,7 +163,8 @@ export function RatingButtons({ anomaly }: { anomaly: Anomaly }) {
         type="button"
         onClick={() => rate(-1)}
         aria-label="Não ajudou"
-        className={`flex h-6 w-6 items-center justify-center rounded transition-colors hover:bg-raised ${rating === -1 ? "text-crit" : "text-fg-3"}`}
+        aria-pressed={rating === -1}
+        className={estilo(rating === -1, "bg-crit/[.14] text-crit")}
       >
         <ThumbsDown size={12} aria-hidden="true" />
       </button>

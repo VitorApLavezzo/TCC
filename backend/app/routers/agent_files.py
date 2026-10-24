@@ -60,7 +60,7 @@ def agent_manifest():
 @router.get("/download/{filename}")
 def download_agent_file(filename: str):
     if filename not in ALLOWED_FILES:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
     path = os.path.join(_dist_dir, filename)
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="Arquivo do agente não disponível no servidor")

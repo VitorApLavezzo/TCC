@@ -53,7 +53,7 @@ def on_anomaly(db: Session, anomaly: Anomaly) -> Notification:
         kind="anomaly",
         severity=anomaly.severity,
         title=f"{label} em {machine.name}",
-        body=f"Severidade {SEVERITY_LABELS.get(anomaly.severity, anomaly.severity).lower()}"
+        body=f"Gravidade {SEVERITY_LABELS.get(anomaly.severity, anomaly.severity).lower()}"
              + (f" · programa {anomaly.responsible_process}" if anomaly.responsible_process else ""),
         link=f"/anomalies/{anomaly.id}",
         created_at=now,
@@ -74,7 +74,7 @@ def on_anomaly(db: Session, anomaly: Anomaly) -> Notification:
         if prefs["digest"]["enabled"]:
             n.status, n.status_reason = "held", "vai no resumo diário"
         else:
-            n.status, n.status_reason = "suppressed", "abaixo da severidade mínima escolhida"
+            n.status, n.status_reason = "suppressed", "abaixo da gravidade mínima escolhida"
     else:
         n.status = "pending"
         delay = timedelta(minutes=max(int(prefs.get("persist_minutes") or 0), 0))

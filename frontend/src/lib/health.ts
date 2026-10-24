@@ -33,9 +33,9 @@ export const LEVEL_CLASS: Record<
   Level,
   { text: string; bg: string; border: string; borderStrong: string; fill: string }
 > = {
-  ok: { text: "text-ok", bg: "bg-ok/8", border: "border-ok/30", borderStrong: "border-ok", fill: "bg-ok" },
-  warn: { text: "text-warn", bg: "bg-warn/8", border: "border-warn/30", borderStrong: "border-warn", fill: "bg-warn" },
-  crit: { text: "text-crit", bg: "bg-crit/8", border: "border-crit/30", borderStrong: "border-crit", fill: "bg-crit" },
+  ok: { text: "text-ok", bg: "bg-ok/[.08]", border: "border-ok/30", borderStrong: "border-ok", fill: "bg-ok" },
+  warn: { text: "text-warn", bg: "bg-warn/[.08]", border: "border-warn/30", borderStrong: "border-warn", fill: "bg-warn" },
+  crit: { text: "text-crit", bg: "bg-crit/[.08]", border: "border-crit/30", borderStrong: "border-crit", fill: "bg-crit" },
   unknown: {
     text: "text-fg-2",
     bg: "bg-sunken",

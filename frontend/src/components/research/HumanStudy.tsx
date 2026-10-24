@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { decimal } from "../../lib/format";
 import { Link } from "react-router-dom";
 import { errorMessage, studyApi } from "../../services/api";
 import { Section, Panel } from "../ui/Layout";
@@ -124,8 +125,8 @@ export function HumanStudy() {
           <p className="mt-4 max-w-prose text-sm leading-relaxed text-fg-2">{results!.sentence}</p>
           <p className="mt-2 text-micro text-fg-3">
             {results!.participantes} participante(s), {results!.concluidos} concluído(s)
-            {results!.p_acerto != null && ` · p (acerto) = ${results!.p_acerto.toFixed(3)}`}
-            {results!.p_tempo != null && ` · p (tempo) = ${results!.p_tempo.toFixed(3)}`}
+            {results!.p_acerto != null && ` · p (acerto) = ${decimal(results!.p_acerto, 3)}`}
+            {results!.p_tempo != null && ` · p (tempo) = ${decimal(results!.p_tempo, 3)}`}
             {results!.sus_media != null && ` · SUS ${results!.sus_media} (n = ${results!.sus_n})`}
           </p>
         </>

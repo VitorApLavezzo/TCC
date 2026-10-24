@@ -1,4 +1,4 @@
-import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { clsx } from "clsx";
 import { Sun, Moon, LayoutGrid, Monitor, Bell, MessageSquare, Search } from "lucide-react";
@@ -12,7 +12,10 @@ import { SignalMark } from "./ui/SignalMark";
 import { NotificationsBell } from "./NotificationsBell";
 import { CommandPalette } from "./ui/CommandPalette";
 import { ShortcutsSheet } from "./ui/ShortcutsSheet";
+import { useConfirm } from "./ui/ConfirmDialog";
 import { useT } from "../lib/i18n";
+import { useResearchTools } from "../lib/researchTools";
+import { pageTitle } from "../lib/title";
 
 /**
  * Navegação principal: quatro destinos, os que se usa todo dia.
@@ -37,6 +40,7 @@ const AVANCADO = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
+  const confirm = useConfirm();
   const { reachable } = useStatus();
   const { theme, toggle } = useTheme();
   const location = useLocation();
@@ -49,6 +53,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const mainRef = useRef<HTMLElement>(null);
   const anterior = useRef(0);
   const [anuncio, setAnuncio] = useState("");
+
+  const researchTools = useResearchTools();
 
   // Modo apresentação: sem menu, sem e-mail na tela, tipografia maior. Para
   // projetar na banca sem mostrar a moldura do produto.
@@ -75,8 +81,17 @@ export function AppShell({ children }: { children: ReactNode }) {
     mainRef.current?.focus();
   }, [location.pathname]);
 
+  // Layout effect: roda antes dos efeitos das páginas, então o nome que uma
+  // página de detalhe põe no título (o computador, o aviso) não é sobrescrito.
+  useLayoutEffect(() => {
+    document.title = pageTitle(location.pathname);
+  }, [location.pathname]);
+
   useEffect(() => {
     let ultimaTecla = "";
+    // No modo apresentação (banca, participante do estudo) não há atalhos:
+    // um "/" digitado sem querer abriria a busca no meio da tela.
+    if (apresentacao) return;
     const onKey = (e: KeyboardEvent) => {
       const alvo = e.target as HTMLElement;
       const digitando = /^(INPUT|TEXTAREA|SELECT)$/.test(alvo?.tagName || "") || alvo?.isContentEditable;
@@ -99,97 +114,225 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate]);
+  }, [navigate, apresentacao]);
 
-  const handleLogout = () => {
+  // Mesma confirmação da página da conta: as duas portas de saída agiam
+  // diferente, e a frase tranquiliza quem acha que sair desliga o monitoramento.
+  const handleLogout = async () => {
+    const ok = await confirm({
+      title: "Sair da conta?",
+      body: "Seus computadores continuam sendo monitorados. Você só precisará entrar de novo para ver o painel.",
+      confirmLabel: "Sair da conta",
+    });
+    if (!ok) return;
     logout();
     navigate("/login");
   };
 
   const isActive = (to: string) => (to === "/" ? location.pathname === "/" : location.pathname.startsWith(to));
+  // Chegando numa delas pelo Ctrl+K, o grupo aparece para o menu mostrar onde
+  // a pessoa está.
+  const mostrarPesquisa = researchTools || AVANCADO.some((a) => isActive(a.to));
 
-  if (apresentacao) {
-    return (
-      <div className="min-h-screen bg-canvas" data-present="1">
-        <main id="conteudo" className="mx-auto w-full max-w-5xl px-6 py-10 text-[1.08rem]">
-          {children}
-        </main>
-      </div>
-    );
-  }
-
+  // Uma árvore só para os dois modos, escondendo a moldura no modo
+  // apresentação. Antes ele devolvia outra estrutura, e o React desmontava a
+  // página inteira na troca: o Estudo perdia a sessão ao entrar no modo e
+  // voltava para a tela inicial, criando sessões vazias a cada tentativa.
   return (
-    <div className="min-h-screen bg-canvas">
-      <a
-        href="#conteudo"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-control focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-canvas"
-      >
-        {t("nav.skip", "Ir para o conteúdo")}
-      </a>
-      <p aria-live="polite" className="sr-only">{anuncio}</p>
+    <div className="min-h-screen bg-canvas" data-present={apresentacao ? "1" : undefined}>
+      {!apresentacao && (
+        <a
+          href="#conteudo"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-control focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-canvas"
+        >
+          {t("nav.skip", "Ir para o conteúdo")}
+        </a>
+      )}
+      <p aria-live="polite" className="sr-only">
+        {anuncio}
+      </p>
 
-      <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-hairline bg-surface px-4 lg:hidden">
-        <SignalMark />
-        <span className="font-display text-sm font-semibold tracking-tight text-fg">AnomalyDetect</span>
-        {pending > 0 && (
-          <span className="tnum ml-1 rounded-full bg-warn/15 px-2 py-0.5 font-mono text-micro font-medium text-warn">
-            {pending > 99 ? "99+" : pending}
-          </span>
-        )}
-        <span className="flex-1" />
-        <button
-          type="button"
-          onClick={() => setPalette(true)}
-          aria-label={t("action.search", "Buscar")}
-          className="flex h-9 w-9 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-raised hover:text-fg"
-        >
-          <Search size={16} aria-hidden="true" />
-        </button>
-        <NotificationsBell />
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label={theme === "dark" ? t("shell.theme.toLight", "Usar o tema claro") : t("shell.theme.toDark", "Usar o tema escuro")}
-          className="flex h-9 w-9 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-raised hover:text-fg"
-        >
-          {theme === "dark" ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
-        </button>
-        <Link
-          to="/account"
-          aria-label={t("nav.account", "Sua conta")}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-sunken text-xs font-semibold text-fg-2"
-        >
-          {user?.username?.[0]?.toUpperCase()}
-        </Link>
-      </header>
+      {!apresentacao && (
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-hairline bg-surface px-4 lg:hidden">
+          <SignalMark />
+          <span className="font-display text-sm font-semibold tracking-tight text-fg">AnomalyDetect</span>
+          {/* Sem contador aqui: a barra inferior já mostra o mesmo número em
+            "Avisos", e os dois lado a lado pareciam coisas diferentes. */}
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={() => setPalette(true)}
+            aria-label={t("action.search", "Buscar")}
+            className="flex h-9 w-9 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-raised hover:text-fg"
+          >
+            <Search size={16} aria-hidden="true" />
+          </button>
+          <NotificationsBell placement="down" />
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={
+              theme === "dark"
+                ? t("shell.theme.toLight", "Usar o tema claro")
+                : t("shell.theme.toDark", "Usar o tema escuro")
+            }
+            className="flex h-9 w-9 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-raised hover:text-fg"
+          >
+            {theme === "dark" ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
+          </button>
+          <Link
+            to="/account"
+            aria-label={t("nav.account", "Sua conta")}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-sunken text-xs font-semibold text-fg-2"
+          >
+            {user?.username?.[0]?.toUpperCase()}
+          </Link>
+        </header>
+      )}
 
-      {reachable === false && (
+      {!apresentacao && reachable === false && (
         <p className="flex items-center gap-2 border-b border-hairline bg-warn/10 px-4 py-1.5 text-xs text-warn lg:hidden">
           <StatusDot tone="warn" />
           {t("shell.offline", "Servidor fora de contato")}
         </p>
       )}
 
-      <aside
-        className="fixed inset-y-0 left-0 z-20 hidden w-[232px] flex-col gap-1 border-r border-hairline bg-surface p-3 lg:flex"
-        aria-label="Navegação"
-      >
-        <div className="flex items-center gap-2.5 px-2 pb-4 pt-1">
-          <SignalMark />
-          <span className="font-display text-[17px] font-bold tracking-tight text-fg">AnomalyDetect</span>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setPalette(true)}
-          className="mb-2 flex items-center gap-2 rounded-control border border-edge px-2.5 py-1.5 text-xs text-fg-3 transition-colors hover:border-fg-3 hover:text-fg-2"
+      {!apresentacao && (
+        <aside
+          className="fixed inset-y-0 left-0 z-20 hidden w-[232px] flex-col gap-1 border-r border-hairline bg-surface p-3 lg:flex"
+          aria-label="Navegação"
         >
-          <Search size={13} aria-hidden="true" />
-          <span className="flex-1 text-left">{t("action.search", "Buscar")}</span>
-          <kbd className="rounded border border-edge px-1 font-mono text-[10px]">Ctrl K</kbd>
-        </button>
+          <div className="flex items-center gap-2.5 px-2 pb-4 pt-1">
+            <SignalMark />
+            <span className="font-display text-[17px] font-bold tracking-tight text-fg">AnomalyDetect</span>
+          </div>
 
-        <nav aria-label={t("nav.sections", "Seções")} className="flex flex-1 flex-col gap-0.5">
+          <button
+            type="button"
+            onClick={() => setPalette(true)}
+            className="mb-2 flex items-center gap-2 rounded-control border border-edge px-2.5 py-1.5 text-xs text-fg-3 transition-colors hover:border-fg-3 hover:text-fg-2"
+          >
+            <Search size={13} aria-hidden="true" />
+            <span className="flex-1 text-left">{t("action.search", "Buscar")}</span>
+            <kbd className="rounded border border-edge px-1 font-mono text-[10px]">Ctrl K</kbd>
+          </button>
+
+          <nav aria-label={t("nav.sections", "Seções")} className="flex flex-1 flex-col gap-0.5">
+            {NAV.map(({ to, key, label, icon: Icon }) => {
+              const active = isActive(to);
+              const badge = to === "/anomalies" && pending > 0 ? pending : null;
+              return (
+                <Link
+                  key={to}
+                  to={to}
+                  aria-current={active ? "page" : undefined}
+                  className={clsx(
+                    "flex items-center gap-3 rounded-control px-2.5 py-2 text-sm font-medium transition-colors duration-150",
+                    active ? "bg-accent/[.14] text-fg" : "text-fg-2 hover:bg-raised hover:text-fg"
+                  )}
+                >
+                  <Icon size={19} className={active ? "text-accent" : "text-fg-3"} aria-hidden="true" />
+                  <span className="flex-1">{t(key, label)}</span>
+                  {badge !== null && (
+                    <span
+                      className="tnum font-mono text-micro font-medium text-warn"
+                      aria-label={`${badge} ${t("shell.open", "em aberto")}`}
+                    >
+                      {badge > 99 ? "99+" : badge}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+
+            {mostrarPesquisa && <p className="channel-label mt-5 px-2.5">{t("nav.advanced", "Ferramentas do TCC")}</p>}
+            {mostrarPesquisa &&
+              AVANCADO.map(({ to, key, label }) => (
+                <Link
+                  key={to}
+                  to={to}
+                  aria-current={isActive(to) ? "page" : undefined}
+                  className={clsx(
+                    "rounded-control px-2.5 py-1.5 text-xs transition-colors",
+                    isActive(to) ? "bg-raised text-fg" : "text-fg-3 hover:bg-raised hover:text-fg-2"
+                  )}
+                >
+                  {t(key, label)}
+                </Link>
+              ))}
+          </nav>
+
+          <div className="flex-shrink-0 border-t border-hairline pt-2">
+            {reachable === false && (
+              <p className="mb-1 flex items-center gap-2 px-2.5 py-1.5 text-xs text-warn">
+                <StatusDot tone="warn" />
+                {t("shell.offline", "Servidor fora de contato")}
+              </p>
+            )}
+            <Link
+              to="/account"
+              className={clsx(
+                "flex items-center gap-2.5 rounded-control px-2.5 py-2 transition-colors hover:bg-raised",
+                location.pathname === "/account" && "bg-raised"
+              )}
+            >
+              <span className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full bg-sunken font-display text-[13px] font-semibold text-fg-2">
+                {user?.username?.[0]?.toUpperCase()}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium text-fg">{user?.username}</span>
+                <span className="block truncate text-micro text-fg-3">{user?.email}</span>
+              </span>
+            </Link>
+            <div className="mt-1 flex items-center gap-1 px-0.5">
+              <NotificationsBell />
+              <button
+                type="button"
+                onClick={toggle}
+                aria-label={
+                  theme === "dark"
+                    ? t("shell.theme.toLight", "Usar o tema claro")
+                    : t("shell.theme.toDark", "Usar o tema escuro")
+                }
+                className="flex h-8 w-8 items-center justify-center rounded-control border border-edge text-fg-2 transition-colors hover:bg-raised hover:text-fg"
+              >
+                {theme === "dark" ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex-1 rounded-control px-2 py-1.5 text-left text-xs text-fg-3 transition-colors hover:bg-raised hover:text-fg"
+              >
+                {t("nav.logout", "Sair da conta")}
+              </button>
+            </div>
+          </div>
+        </aside>
+      )}
+
+      {/* tabIndex -1: alvo do foco a cada troca de rota, sem entrar na ordem do Tab. */}
+      <main
+        ref={mainRef}
+        id="conteudo"
+        tabIndex={-1}
+        className={apresentacao ? "outline-none" : "pb-20 outline-none lg:pb-0 lg:pl-[232px]"}
+      >
+        <div
+          className={
+            apresentacao
+              ? "mx-auto w-full max-w-5xl px-6 py-10 text-[1.08rem]"
+              : "mx-auto w-full px-4 py-7 sm:px-8 min-[1500px]:px-10 min-[1500px]:py-8"
+          }
+        >
+          {children}
+        </div>
+      </main>
+
+      {!apresentacao && (
+        <nav
+          aria-label={t("nav.sections", "Seções")}
+          className="fixed inset-x-0 bottom-0 z-30 flex items-stretch justify-around border-t border-hairline bg-surface pb-[env(safe-area-inset-bottom)] lg:hidden"
+        >
           {NAV.map(({ to, key, label, icon: Icon }) => {
             const active = isActive(to);
             const badge = to === "/anomalies" && pending > 0 ? pending : null;
@@ -199,116 +342,25 @@ export function AppShell({ children }: { children: ReactNode }) {
                 to={to}
                 aria-current={active ? "page" : undefined}
                 className={clsx(
-                  "flex items-center gap-3 rounded-control px-2.5 py-2 text-sm font-medium transition-colors duration-150",
-                  active ? "bg-accent/[.14] text-fg" : "text-fg-2 hover:bg-raised hover:text-fg"
+                  "relative flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[11px] font-medium",
+                  active ? "text-accent" : "text-fg-3"
                 )}
               >
-                <Icon size={19} className={active ? "text-accent" : "text-fg-3"} aria-hidden="true" />
-                <span className="flex-1">{t(key, label)}</span>
+                <Icon size={19} aria-hidden="true" />
+                <span className="truncate">{t(key, label)}</span>
                 {badge !== null && (
-                  <span className="tnum font-mono text-micro font-medium text-warn" aria-label={`${badge} ${t("shell.open", "em aberto")}`}>
+                  <span
+                    className="tnum absolute right-2 top-1 rounded-full bg-warn/15 px-1 font-mono text-[10px] font-medium text-warn"
+                    aria-label={`${badge} ${t("shell.open", "em aberto")}`}
+                  >
                     {badge > 99 ? "99+" : badge}
                   </span>
                 )}
               </Link>
             );
           })}
-
-          <p className="channel-label mt-5 px-2.5">{t("nav.advanced", "Avançado")}</p>
-          {AVANCADO.map(({ to, key, label }) => (
-            <Link
-              key={to}
-              to={to}
-              aria-current={isActive(to) ? "page" : undefined}
-              className={clsx(
-                "rounded-control px-2.5 py-1.5 text-xs transition-colors",
-                isActive(to) ? "bg-raised text-fg" : "text-fg-3 hover:bg-raised hover:text-fg-2"
-              )}
-            >
-              {t(key, label)}
-            </Link>
-          ))}
         </nav>
-
-        <div className="flex-shrink-0 border-t border-hairline pt-2">
-          {reachable === false && (
-            <p className="mb-1 flex items-center gap-2 px-2.5 py-1.5 text-xs text-warn">
-              <StatusDot tone="warn" />
-              {t("shell.offline", "Servidor fora de contato")}
-            </p>
-          )}
-          <Link
-            to="/account"
-            className={clsx(
-              "flex items-center gap-2.5 rounded-control px-2.5 py-2 transition-colors hover:bg-raised",
-              location.pathname === "/account" && "bg-raised"
-            )}
-          >
-            <span className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-full bg-sunken font-display text-[13px] font-semibold text-fg-2">
-              {user?.username?.[0]?.toUpperCase()}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs font-medium text-fg">{user?.username}</span>
-              <span className="block truncate text-micro text-fg-3">{user?.email}</span>
-            </span>
-          </Link>
-          <div className="mt-1 flex items-center gap-1 px-0.5">
-            <NotificationsBell />
-            <button
-              type="button"
-              onClick={toggle}
-              aria-label={theme === "dark" ? t("shell.theme.toLight", "Usar o tema claro") : t("shell.theme.toDark", "Usar o tema escuro")}
-              className="flex h-8 w-8 items-center justify-center rounded-control border border-edge text-fg-2 transition-colors hover:bg-raised hover:text-fg"
-            >
-              {theme === "dark" ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
-            </button>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="flex-1 rounded-control px-2 py-1.5 text-left text-xs text-fg-3 transition-colors hover:bg-raised hover:text-fg"
-            >
-              {t("nav.logout", "Sair da conta")}
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      {/* tabIndex -1: alvo do foco a cada troca de rota, sem entrar na ordem do Tab. */}
-      <main ref={mainRef} id="conteudo" tabIndex={-1} className="pb-20 outline-none lg:pb-0 lg:pl-[232px]">
-        <div className="mx-auto w-full px-4 py-7 sm:px-8 min-[1500px]:px-10 min-[1500px]:py-8">{children}</div>
-      </main>
-
-      <nav
-        aria-label={t("nav.sections", "Seções")}
-        className="fixed inset-x-0 bottom-0 z-30 flex items-stretch justify-around border-t border-hairline bg-surface pb-[env(safe-area-inset-bottom)] lg:hidden"
-      >
-        {NAV.map(({ to, key, label, icon: Icon }) => {
-          const active = isActive(to);
-          const badge = to === "/anomalies" && pending > 0 ? pending : null;
-          return (
-            <Link
-              key={to}
-              to={to}
-              aria-current={active ? "page" : undefined}
-              className={clsx(
-                "relative flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[11px] font-medium",
-                active ? "text-accent" : "text-fg-3"
-              )}
-            >
-              <Icon size={19} aria-hidden="true" />
-              <span className="truncate">{t(key, label)}</span>
-              {badge !== null && (
-                <span
-                  className="tnum absolute right-2 top-1 rounded-full bg-warn/15 px-1 font-mono text-[10px] font-medium text-warn"
-                  aria-label={`${badge} ${t("shell.open", "em aberto")}`}
-                >
-                  {badge > 99 ? "99+" : badge}
-                </span>
-              )}
-            </Link>
-          );
-        })}
-      </nav>
+      )}
 
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
       <ShortcutsSheet open={shortcuts} onClose={() => setShortcuts(false)} />

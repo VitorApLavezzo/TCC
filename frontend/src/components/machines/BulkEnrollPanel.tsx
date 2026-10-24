@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { copyText, COPY_FAILED } from "../../lib/clipboard";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Ban, ChevronDown } from "lucide-react";
@@ -88,7 +89,7 @@ export function BulkEnrollPanel() {
   };
 
   const copyCommand = async (key: BulkKey) => {
-    await navigator.clipboard.writeText(serverOneLiner({ code: key.code }));
+    if (!(await copyText(serverOneLiner({ code: key.code })))) return toast.error(...COPY_FAILED);
     setCopiedId(key.id);
     setTimeout(() => setCopiedId(null), 2000);
   };

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { usePolicy } from "../../context/PolicyContext";
 import { GLOSSARY } from "../../lib/glossary";
 import { fillPolicy } from "../../lib/policy";
@@ -34,6 +34,26 @@ export function Explain({ term, text, className }: { term?: string; text?: strin
     };
   }, [open]);
 
+  // Centralizado no "?", o balão de 16rem saía da tela quando o "?" ficava
+  // perto da borda (comum no celular). Mede ao abrir e empurra para dentro.
+  const bubbleRef = useRef<HTMLSpanElement>(null);
+  // Perto do pé da tela (no celular, atrás da barra inferior) abre para cima.
+  const [shift, setShift] = useState(0);
+  const [up, setUp] = useState(false);
+  useLayoutEffect(() => {
+    if (!open || !bubbleRef.current) {
+      setShift(0);
+      setUp(false);
+      return;
+    }
+    const r = bubbleRef.current.getBoundingClientRect();
+    const margem = 12;
+    if (r.left < margem) setShift(margem - r.left);
+    else if (r.right > window.innerWidth - margem) setShift(window.innerWidth - margem - r.right);
+    const rodape = window.innerWidth < 1024 ? 72 : margem;
+    if (r.bottom > window.innerHeight - rodape && r.top - r.height - 24 > 0) setUp(true);
+  }, [open]);
+
   if (!body) return null;
 
   return (
@@ -53,9 +73,11 @@ export function Explain({ term, text, className }: { term?: string; text?: strin
 
       {open && (
         <span
+          ref={bubbleRef}
           id={id}
           role="tooltip"
-          className="absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 rounded-panel border border-edge bg-surface px-3.5 py-3 text-sm font-normal leading-relaxed text-fg-2 shadow-float"
+          style={{ transform: `translateX(calc(-50% + ${shift}px))` }}
+          className={`absolute left-1/2 z-40 w-64 ${up ? "bottom-full mb-2" : "top-full mt-2"} max-w-[calc(100vw-1.5rem)] rounded-panel border border-edge bg-surface px-3.5 py-3 text-sm font-normal leading-relaxed text-fg-2 shadow-float`}
         >
           {body}
         </span>

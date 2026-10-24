@@ -1,9 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import { anomaliesApi, metricsApi, machinesApi } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
 import { stillLearning } from "../lib/learning";
+import { isNotFound } from "../lib/http";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { Machine, Metric, Anomaly, LearningStatus, LearnedBaseline } from "../types";
 import { Verdict } from "../components/Verdict";
@@ -21,9 +22,10 @@ import { Button, TextButton } from "../components/ui/Button";
 import { DiagnoseButton } from "../components/DiagnoseButton";
 import { FocusModeControl } from "../components/FocusModeControl";
 import { EmptyState } from "../components/ui/EmptyState";
+import { LoadError } from "../components/ui/LoadError";
 import { VitalsSkeleton, Skeleton } from "../components/ui/Skeleton";
 import { health, toneOf, worstLevel, bandFor, THRESHOLDS, Level } from "../lib/health";
-import { bytesPerSec, formatUptime, gigabytes, pluralize } from "../lib/format";
+import { bytesPerSec, decimal, formatUptime, gigabytes, pluralize } from "../lib/format";
 import { useStatus } from "../context/StatusContext";
 
 // A coleta vai de 10 a 60 s; abaixo disso a busca seria mais frequente que o
@@ -36,13 +38,23 @@ export function Dashboard() {
   const navigate = useNavigate();
   const { now } = useStatus();
   const [machines, setMachines] = useState<Machine[]>([]);
-  const [selectedMachine, setSelectedMachine] = useState<number | null>(null);
+  // `?computador=` abre o painel já num computador — é o "Ver ao vivo" da
+  // página de detalhe.
+  const [params] = useSearchParams();
+  const [selectedMachine, setSelectedMachine] = useState<number | null>(() => {
+    const pedido = Number(params.get("computador"));
+    return Number.isFinite(pedido) && pedido > 0 ? pedido : null;
+  });
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [latestMetric, setLatestMetric] = useState<Metric | null>(null);
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [learning, setLearning] = useState<LearningStatus | null>(null);
   const [baseline, setBaseline] = useState<LearnedBaseline | null>(null);
   const [switching, setSwitching] = useState(false);
+  // Falha de verdade (rede, servidor), separada do 404 de "ainda sem leitura".
+  // Antes as duas viravam "este computador ainda não enviou leituras".
+  const [metricsFailed, setMetricsFailed] = useState(false);
+  const [metricsAttempt, setMetricsAttempt] = useState(0);
   const selectedRef = useRef<number | null>(null);
   selectedRef.current = selectedMachine;
 
@@ -52,8 +64,9 @@ export function Dashboard() {
     setMachines(machineList);
     setAnomalies(anomRes.data);
 
-    const first = selectedRef.current ?? machineList.find((m) => m.is_active)?.id ?? machineList[0]?.id ?? null;
-    if (!selectedRef.current && first) setSelectedMachine(first);
+    const atual = machineList.some((m) => m.id === selectedRef.current) ? selectedRef.current : null;
+    const first = atual ?? machineList.find((m) => m.is_active)?.id ?? machineList[0]?.id ?? null;
+    if (atual === null && first) setSelectedMachine(first);
   }, []);
 
   const poll = usePolling(fetchAll, 60000);
@@ -68,10 +81,15 @@ export function Dashboard() {
     setLatestMetric(null);
     setLearning(null);
     setBaseline(null);
+    setMetricsFailed(false);
+    let failed = false;
 
     Promise.all([
       metricsApi.list(selectedMachine, 3).catch(() => ({ data: [] })),
-      metricsApi.latest(selectedMachine).catch(() => ({ data: null })),
+      metricsApi.latest(selectedMachine).catch((err) => {
+        if (!isNotFound(err)) failed = true;
+        return { data: null };
+      }),
       metricsApi.learning(selectedMachine).catch(() => ({ data: null })),
       metricsApi.baseline(selectedMachine).catch(() => ({ data: null })),
     ])
@@ -81,13 +99,14 @@ export function Dashboard() {
         setLatestMetric(lRes.data);
         setLearning(learnRes.data);
         setBaseline(baseRes.data?.ready ? baseRes.data : null);
+        setMetricsFailed(failed);
       })
       .finally(() => !cancelled && setSwitching(false));
 
     return () => {
       cancelled = true;
     };
-  }, [selectedMachine]);
+  }, [selectedMachine, metricsAttempt]);
 
   // Quanto falta de aprendizado é todo derivado no servidor: leituras que
   // faltam, horas que faltam, se cada régua já fechou. O cliente não tem como
@@ -190,7 +209,7 @@ export function Dashboard() {
           ...bandOf("cpu", "cpu", cpu),
           live: liveHead,
           pulseKey,
-          detail: lm.cpu_freq_current ? `${(lm.cpu_freq_current / 1000).toFixed(1)} GHz` : undefined,
+          detail: lm.cpu_freq_current ? `${decimal(lm.cpu_freq_current / 1000, 1)} GHz` : undefined,
         },
         {
           label: "Memória",
@@ -331,25 +350,25 @@ export function Dashboard() {
           com dois ou mais — com um, o painel abaixo já responde. */}
       <FleetOverview onSelect={setSelectedMachine} />
 
-      <NextSteps />
-
       <PageHeader
         title="Painel"
         aside={
           machines.length > 1 ? (
-            <label className="flex items-center gap-2 text-xs text-fg-2">
+            <label className="flex w-full min-w-0 items-center gap-2 text-xs text-fg-2 sm:w-auto">
               <span className="sr-only sm:not-sr-only">Computador</span>
+              {/* Largura limitada: com nome longo, o seletor passava da borda
+                  da tela no celular. */}
               <select
                 value={selectedMachine ?? ""}
                 onChange={(e) => setSelectedMachine(Number(e.target.value))}
-                className="h-8 rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
+                className="h-8 w-full min-w-0 max-w-full rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent sm:w-auto sm:max-w-sm"
               >
                 {machines.map((m) => {
                   const pend = anomalies.filter((a) => a.machine_id === m.id && !a.is_resolved).length;
                   return (
                     <option key={m.id} value={m.id}>
                       {m.name}
-                      {pend > 0 ? ` (${pend})` : ""}
+                      {pend > 0 ? ` · ${pluralize(pend, "aviso", "avisos")}` : ""}
                     </option>
                   );
                 })}
@@ -361,7 +380,15 @@ export function Dashboard() {
 
       <div className="space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-          <p className="text-sm font-medium text-fg">{machine?.name}</p>
+          {/* Com o seletor no cabeçalho, o nome aqui só repetia a escolha. */}
+          <p className="flex flex-wrap items-baseline gap-x-3 text-sm font-medium text-fg">
+            {machines.length <= 1 && <span>{machine?.name}</span>}
+            {machine && (
+              <Link to={`/machines/${machine.id}`} className="text-xs font-normal text-accent hover:underline">
+                Histórico e análises deste computador
+              </Link>
+            )}
+          </p>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             {machine && <FocusModeControl machine={machine} onChange={poll.refresh} />}
             <FreshnessTag
@@ -378,19 +405,16 @@ export function Dashboard() {
           learning={learning}
           driver={driver}
           onOpenAnomaly={(id) => navigate(`/anomalies/${id}`)}
-          onSeeAll={() => navigate("/anomalies")}
+          onSeeAll={() =>
+            navigate(machine ? `/anomalies?computador=${machine.id}&abertos=1&periodo=24` : "/anomalies")
+          }
           actions={
             machine && lm ? (
-              <>
-                <DiagnoseButton
-                  machineId={machine.id}
-                  online={wsStatus === "open" || (!!lm && Date.now() - new Date(lm.timestamp).getTime() < 150000)}
-                  variant="primary"
-                />
-                <Button variant="secondary" onClick={() => navigate(`/machines/${machine.id}`)}>
-                  Ver análises deste computador
-                </Button>
-              </>
+              <DiagnoseButton
+                machineId={machine.id}
+                online={wsStatus === "open" || (!!lm && Date.now() - new Date(lm.timestamp).getTime() < 150000)}
+                variant={openAnomalies.length ? "secondary" : "primary"}
+              />
             ) : undefined
           }
         />
@@ -410,7 +434,11 @@ export function Dashboard() {
         <PendingRuns />
       </div>
 
-      {!switching && !lm && (
+      {!switching && !lm && metricsFailed && (
+        <LoadError what="as leituras deste computador" onRetry={() => setMetricsAttempt((n) => n + 1)} />
+      )}
+
+      {!switching && !lm && !metricsFailed && (
         <EmptyState
           title="Este computador ainda não enviou leituras"
           body="Confira se ele está ligado, com internet, e se o agente foi instalado. A primeira leitura chega em até 30 segundos depois disso."
@@ -421,6 +449,10 @@ export function Dashboard() {
           }
         />
       )}
+
+      {/* Depois do estado do computador, não antes: no alto ele empurrava o
+          veredito para baixo — no celular, para fora da primeira tela. */}
+      <NextSteps />
 
       {lm && !switching && metrics.length > 1 ? (
         <div className="grid grid-cols-1 gap-4 min-[1081px]:grid-cols-3">
@@ -459,7 +491,7 @@ export function Dashboard() {
                   />
                   <DataRow
                     label="Fila do processador"
-                    value={lm.load_avg_1?.toFixed(2) ?? "--"}
+                    value={lm.load_avg_1 != null ? decimal(lm.load_avg_1, 2) : "--"}
                     note={load.label}
                     tone={toneOf(load)}
                     hint={<Explain term="load" />}

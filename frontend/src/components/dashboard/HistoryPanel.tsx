@@ -64,10 +64,20 @@ export function HistoryPanel({
             {metrics.length} leituras · a mais recente {timeAgo(lastTimestamp, now)}
           </p>
         </div>
+        {/* Só a aba ativa entra no Tab; as outras se alcançam pelas setas —
+            sem o tratamento das setas, pelo teclado não dava para trocar. */}
         <div
           role="tablist"
           aria-label="Medida do gráfico"
-          className="inline-flex flex-wrap gap-0.5 rounded-control border border-hairline bg-canvas p-1"
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+            e.preventDefault();
+            const prox = (tab + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
+            setTab(prox);
+            const botoes = e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+            requestAnimationFrame(() => botoes[prox]?.focus());
+          }}
+          className="inline-flex max-w-full gap-0.5 overflow-x-auto rounded-control border border-hairline bg-canvas p-1"
         >
           {tabs.map((t, i) => (
             <button
@@ -78,7 +88,7 @@ export function HistoryPanel({
               tabIndex={i === tab ? 0 : -1}
               onClick={() => setTab(i)}
               className={clsx(
-                "rounded-[7px] px-3 py-1.5 text-xs font-medium transition-colors",
+                "flex-shrink-0 whitespace-nowrap rounded-[7px] px-3 py-1.5 text-xs font-medium transition-colors",
                 i === tab ? "bg-surface text-fg shadow-raise" : "text-fg-2 hover:text-fg"
               )}
             >

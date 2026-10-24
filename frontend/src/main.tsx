@@ -3,12 +3,10 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { applyDisplay } from "./lib/display";
-import { getLocale } from "./lib/i18n";
 
-// Antes da primeira pintura: densidade, tamanho da letra e idioma escolhidos
-// entram como atributo do documento, sem piscar o padrão antes.
+// Antes da primeira pintura: densidade e tamanho da letra escolhidos entram
+// como atributo do documento, sem piscar o padrão antes.
 applyDisplay();
-document.documentElement.lang = getLocale();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -1,15 +1,34 @@
 /** Formatadores compartilhados — antes estavam duplicados dentro das páginas. */
 
+const formatos = new Map<number, Intl.NumberFormat>();
+
+/**
+ * Número com vírgula decimal, como se escreve em português. Sem separador de
+ * milhar: os valores aparecem em colunas estreitas, ao lado de unidade.
+ */
+export function decimal(val: number, digits = 1) {
+  let f = formatos.get(digits);
+  if (!f) {
+    f = new Intl.NumberFormat("pt-BR", {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+      useGrouping: false,
+    });
+    formatos.set(digits, f);
+  }
+  return f.format(val);
+}
+
 export function bytesPerSec(val?: number | null) {
   if (!val) return "0 B/s";
-  if (val < 1024) return `${val.toFixed(0)} B/s`;
-  if (val < 1024 * 1024) return `${(val / 1024).toFixed(1)} KB/s`;
-  return `${(val / 1024 / 1024).toFixed(1)} MB/s`;
+  if (val < 1024) return `${decimal(val, 0)} B/s`;
+  if (val < 1024 * 1024) return `${decimal(val / 1024, 1)} KB/s`;
+  return `${decimal(val / 1024 / 1024, 1)} MB/s`;
 }
 
 export function gigabytes(bytes?: number | null, digits = 1) {
   if (bytes === null || bytes === undefined) return "--";
-  return `${(bytes / 1024 ** 3).toFixed(digits)} GB`;
+  return `${decimal(bytes / 1024 ** 3, digits)} GB`;
 }
 
 export function formatUptime(seconds?: number | null) {

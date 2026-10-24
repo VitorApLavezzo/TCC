@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { copyText, COPY_FAILED } from "../../lib/clipboard";
 import { shareApi, errorMessage } from "../../services/api";
 import { Button, TextButton } from "../ui/Button";
 import { useToast } from "../ui/Toast";
@@ -19,12 +20,11 @@ export function ShareButton({ anomalyId }: { anomalyId: number }) {
       const res = await shareApi.create(anomalyId, 72);
       const url = res.data.url ?? `${window.location.origin}/compartilhado/${res.data.token}`;
       setLink(url);
-      try {
-        await navigator.clipboard.writeText(url);
-        toast.success("Link copiado. Válido por 72 horas, somente leitura.");
-      } catch {
-        toast.success("Link criado. Válido por 72 horas, somente leitura.");
-      }
+      toast.success(
+        (await copyText(url))
+          ? "Link copiado. Válido por 72 horas, somente leitura."
+          : "Link criado. Válido por 72 horas, somente leitura."
+      );
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
@@ -37,11 +37,14 @@ export function ShareButton({ anomalyId }: { anomalyId: number }) {
       <div className="flex flex-wrap items-center gap-2">
         <input
           readOnly
+          aria-label="Link para o técnico"
           value={link}
           onFocus={(e) => e.currentTarget.select()}
           className="min-w-0 flex-1 rounded-control border border-edge bg-sunken px-2.5 py-1.5 font-mono text-micro text-fg-2"
         />
-        <TextButton onClick={() => navigator.clipboard.writeText(link).then(() => toast.success("Copiado."))}>
+        <TextButton
+          onClick={async () => ((await copyText(link)) ? toast.success("Copiado.") : toast.error(...COPY_FAILED))}
+        >
           Copiar
         </TextButton>
       </div>

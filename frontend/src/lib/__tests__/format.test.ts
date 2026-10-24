@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatUptime, pluralize, processName, timeAgo } from "../format";
+import { bytesPerSec, decimal, formatUptime, gigabytes, pluralize, processName, timeAgo } from "../format";
 import { health, worstLevel } from "../health";
 
 /**
@@ -55,5 +55,22 @@ describe("health", () => {
     expect(worstLevel(["ok", "warn"])).toBe("warn");
     expect(worstLevel(["unknown", "ok"])).toBe("ok");
     expect(worstLevel([])).toBe("unknown");
+  });
+});
+
+/**
+ * Número em português usa vírgula. O painel misturava "12.4 GB" e "R$ 12.34"
+ * com "96,5%" — o ponto decimal é convenção do inglês.
+ */
+describe("decimal", () => {
+  it("usa vírgula e a quantidade de casas pedida", () => {
+    expect(decimal(12.345, 1)).toBe("12,3");
+    expect(decimal(8, 2)).toBe("8,00");
+    expect(decimal(1234.5, 1)).toBe("1234,5");
+  });
+
+  it("vale também para tamanhos e velocidades", () => {
+    expect(gigabytes(12.4 * 1024 ** 3)).toBe("12,4 GB");
+    expect(bytesPerSec(2.5 * 1024)).toBe("2,5 KB/s");
   });
 });

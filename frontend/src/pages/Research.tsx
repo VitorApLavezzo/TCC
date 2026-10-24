@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { decimal } from "../lib/format";
 import { useNavigate } from "react-router-dom";
 import { evaluationApi } from "../services/api";
 import { PageHeader, Section, Panel } from "../components/ui/Layout";
@@ -44,15 +45,19 @@ export function Research() {
         title="Pesquisa"
         description="Medidas sobre o próprio sistema: qualidade das explicações por provedor de IA e o modo demonstração."
         aside={
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="h-8 rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
-          >
-            <option value={7}>7 dias</option>
-            <option value={30}>30 dias</option>
-            <option value={90}>90 dias</option>
-          </select>
+          // Rótulo visível: sozinho no canto, "30 dias" não dizia o que filtrava.
+          <label className="flex items-center gap-2 text-xs text-fg-2">
+            Período das medidas
+            <select
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              className="h-8 rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
+            >
+              <option value={7}>7 dias</option>
+              <option value={30}>30 dias</option>
+              <option value={90}>90 dias</option>
+            </select>
+          </label>
         }
       />
 
@@ -110,7 +115,7 @@ export function Research() {
                       {v.thumbs_up + v.thumbs_down > 0 ? `${v.thumbs_up}👍 ${v.thumbs_down}👎` : "—"}
                     </td>
                     <td className="tnum px-4 py-2.5 text-right font-mono text-xs text-fg-2">
-                      {v.avg_duration_ms != null ? `${(v.avg_duration_ms / 1000).toFixed(1)} s` : "—"}
+                      {v.avg_duration_ms != null ? `${decimal(v.avg_duration_ms / 1000, 1)} s` : "—"}
                     </td>
                   </tr>
                 ))}

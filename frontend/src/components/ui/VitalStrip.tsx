@@ -161,18 +161,14 @@ function Vital({ item }: { item: VitalItem }) {
   return (
       <article
         key={item.label}
-        role="meter"
-        aria-valuemin={0}
-        aria-valuemax={max}
-        aria-valuenow={Number.isFinite(raw) ? raw : undefined}
-        aria-label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}${
-          item.bandLabel ? `. ${item.bandLabel}` : ""
-        }`}
+        aria-label={item.label}
         className="flex min-w-0 flex-col gap-2.5 rounded-panel border border-hairline bg-surface px-4 pb-3.5 pt-3.5"
       >
-        <header className="flex items-center justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-semibold text-fg">
-            {item.label}
+        <header className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+          {/* O truncate fica só no nome: com ele no conjunto, o balão do "?"
+              nascia dentro de um overflow escondido e não aparecia. */}
+          <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-fg">
+            <span className="truncate">{item.label}</span>
             {item.term && <Explain term={item.term} />}
           </span>
           <span className={clsx("flex-shrink-0 text-xs font-semibold", TONE[item.reading.level])}>
@@ -187,7 +183,20 @@ function Vital({ item }: { item: VitalItem }) {
           {item.unit && <span className="text-base text-fg-3">{item.unit}</span>}
         </p>
 
-        <Segments value={animado} max={max} limit={item.limit} crit={item.critAt} />
+        {/* O papel de medidor fica na barra, não no cartão: num `meter` os
+            filhos viram decoração, e o "?" do cabeçalho sumia para o leitor
+            de tela. */}
+        <div
+          role="meter"
+          aria-valuemin={0}
+          aria-valuemax={max}
+          aria-valuenow={Number.isFinite(raw) ? raw : undefined}
+          aria-label={`${item.label}: ${item.value}${item.unit ?? ""}, ${item.reading.label}${
+            item.bandLabel ? `. ${item.bandLabel}` : ""
+          }`}
+        >
+          <Segments value={animado} max={max} limit={item.limit} crit={item.critAt} />
+        </div>
 
         <div className="flex items-center justify-between gap-2 text-xs text-fg-2">
           <span className="tnum truncate font-mono" title={item.detail}>

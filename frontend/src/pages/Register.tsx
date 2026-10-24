@@ -1,6 +1,8 @@
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useEffect } from "react";
+import { pageTitle } from "../lib/title";
 import { useNavigate, Link } from "react-router-dom";
 import { authApi, errorMessage } from "../services/api";
+import { useAuth } from "../context/AuthContext";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { Wordmark } from "../components/ui/SignalMark";
@@ -8,7 +10,11 @@ import { Wordmark } from "../components/ui/SignalMark";
 const MIN_PASSWORD = 8;
 
 export function Register() {
+  useEffect(() => {
+    document.title = pageTitle(window.location.pathname);
+  }, []);
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -37,11 +43,20 @@ export function Register() {
     setLoading(true);
     try {
       await authApi.register(email, username, password);
-      // Antes a pessoa era mandada para /login sem nenhum aviso e achava que
-      // havia dado erro. Agora o login explica que a conta foi criada.
-      navigate("/login?conta=criada");
     } catch (err) {
       setError(errorMessage(err, "Não foi possível criar a conta."));
+      setLoading(false);
+      return;
+    }
+    // Conta criada: entra direto e vai conectar o primeiro computador. Pedir
+    // de novo a senha que acabou de ser digitada era um passo sem motivo — e
+    // o acolhimento em /welcome nunca era visto, porque o login levava ao
+    // painel vazio.
+    try {
+      await login(username, password);
+      navigate("/welcome");
+    } catch {
+      navigate("/login?conta=criada");
     } finally {
       setLoading(false);
     }
@@ -132,7 +147,7 @@ export function Register() {
           </div>
 
           {error && (
-            <p role="alert" className="rounded-control border border-crit/30 bg-crit/8 px-3 py-2 text-xs text-crit">
+            <p role="alert" className="rounded-control border border-crit/30 bg-crit/[.08] px-3 py-2 text-xs text-crit">
               {error}
             </p>
           )}

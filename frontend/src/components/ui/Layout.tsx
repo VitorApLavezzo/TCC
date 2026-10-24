@@ -35,7 +35,9 @@ export function PageHeader({
           {description && <p className="mt-1 max-w-prose text-sm leading-relaxed text-fg-2">{description}</p>}
         </div>
         {(actions || aside) && (
-          <div className="flex flex-shrink-0 items-center gap-2">
+          // max-w-full: quando quebra para a linha de baixo (celular), um
+          // seletor com nome comprido não passa da borda da tela.
+          <div className="flex min-w-0 max-w-full flex-shrink-0 items-center gap-2">
             {aside}
             {actions}
           </div>

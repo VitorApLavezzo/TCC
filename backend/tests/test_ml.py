@@ -316,7 +316,7 @@ class TestSegundoPlano:
     def test_tipo_registrado_onde_os_tipos_de_carga_estao(self):
         from app.core import labels
         from app.services import anomaly_service, incidents
-        assert labels.ANOMALY_TYPE_LABELS["background_load"] == "Programa Pesado Rodando em Segundo Plano"
+        assert labels.ANOMALY_TYPE_LABELS["background_load"] == "Programa pesado rodando em segundo plano"
         assert "background_load" in labels.PERFORMANCE_TYPES
         assert "background_load" not in labels.SECURITY_TYPES
         assert "background_load" in labels.COUNTERFACTUAL_TYPES

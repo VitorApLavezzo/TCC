@@ -5,7 +5,8 @@ import { Level } from "../lib/health";
 import { Anomaly, ANOMALY_TYPE_LABELS, LearningStatus } from "../types";
 import { pluralize } from "../lib/format";
 import { stillLearning } from "../lib/learning";
-import { TextButton } from "./ui/Button";
+import { verdictTone } from "../lib/verdict";
+import { Button, TextButton } from "./ui/Button";
 import { Explain } from "./ui/Explain";
 import { StatusDot } from "./ui/Layout";
 
@@ -55,8 +56,8 @@ function LearningCriterion({
 /** As três zonas do estado, na ordem em que a máquina caminha entre elas. */
 const ZONES: { level: Exclude<Level, "unknown">; label: string }[] = [
   { level: "ok", label: "normal" },
-  { level: "warn", label: "sob pressão" },
-  { level: "crit", label: "problema" },
+  { level: "warn", label: "atenção" },
+  { level: "crit", label: "crítico" },
 ];
 
 const ZONE_FILL: Record<string, string> = {
@@ -123,7 +124,7 @@ export function Verdict({
   const critical = openAnomalies.some((a) => a.severity === "critical");
   const high = openAnomalies.some((a) => a.severity === "high");
 
-  const tone: Level = critical ? "crit" : high || openAnomalies.length ? "warn" : level;
+  const tone = verdictTone(level, openAnomalies);
 
   const headline = critical
     ? "Precisa da sua atenção agora"
@@ -193,14 +194,24 @@ export function Verdict({
             )}
           </p>
 
-          {top && (
-            <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1.5">
-              <TextButton onClick={() => onOpenAnomaly(top.id)}>Ver o que aconteceu</TextButton>
-              {openAnomalies.length > 1 && <TextButton onClick={onSeeAll}>Ver todos</TextButton>}
+          {/* Com aviso em aberto, a ação principal é abrir o aviso; o resto
+              (diagnóstico) vem como secundário. Antes eram quatro ações do
+              mesmo peso disputando o olhar. */}
+          {(top || actions) && (
+            <div className="mt-[18px] flex flex-wrap items-center gap-2.5">
+              {top && (
+                <Button variant="primary" onClick={() => onOpenAnomaly(top.id)}>
+                  Ver o que aconteceu
+                </Button>
+              )}
+              {actions}
+              {openAnomalies.length > 1 && (
+                <TextButton onClick={onSeeAll} className="ml-1">
+                  Ver os {openAnomalies.length} avisos
+                </TextButton>
+              )}
             </div>
           )}
-
-          {actions && <div className="mt-[18px] flex flex-wrap gap-2.5">{actions}</div>}
         </div>
 
         {/*

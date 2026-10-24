@@ -469,7 +469,7 @@ def build_prompt(anomaly: Anomaly, machine: Machine, ctx: Dict[str, Any], level:
 
     return f"""Você explica problemas de computador para {LEVEL_AUDIENCE[level]}. Um sistema de monitoramento detectou algo anormal neste computador:
 
-PROBLEMA DETECTADO: {type_label} | Severidade: {severity}
+PROBLEMA DETECTADO: {type_label} | Gravidade: {severity}
 COMPUTADOR: {machine.name}
 PROGRAMA ENVOLVIDO: {anomaly.responsible_process or "não identificado"}
 {os_guidance(machine)}
@@ -491,7 +491,7 @@ REGRAS DE ESCRITA (siga TODAS):
 - Se houver HISTÓRICO, mencione-o no segundo parágrafo
 - Os passos devem ser deste SISTEMA específico descrito acima
 - NUNCA invente números. Use só os FATOS MEDIDOS e escreva a chave entre colchetes duplos logo depois de cada número, ex: "a memória está em 91% [[ram_agora]]". Sem fato para algo, descreva sem número
-- severity_justification: 1 frase dizendo o nível de urgência em linguagem cotidiana. Ex: "Severidade alta: vale resolver ainda hoje, pois o computador pode travar" """
+- severity_justification: 1 frase dizendo o nível de urgência em linguagem cotidiana. Ex: "Gravidade alta: vale resolver ainda hoje, pois o computador pode travar" """
 
 
 # ---------------------------------------------------------------------------
@@ -928,7 +928,7 @@ def _generate_fallback_explanation(anomaly: Anomaly, metric: Optional[Metric], m
     if cf:
         recs.insert(0, cf["sentence"])
 
-    process_text = f" O processo {anomaly.responsible_process} foi identificado como responsável." if anomaly.responsible_process else ""
+    process_text = f" O programa {anomaly.responsible_process} parece ser o responsável." if anomaly.responsible_process else ""
     sev_label = SEVERITY_LABELS.get(anomaly.severity, anomaly.severity)
 
     reading = ""
@@ -951,11 +951,13 @@ def _generate_fallback_explanation(anomaly: Anomaly, metric: Optional[Metric], m
         detailed += f"\n\n{history}"
 
     return {
-        "summary": f"{type_label} detectado com severidade {sev_label}.{process_text}",
+        # O rótulo já é uma frase ("Programa desconhecido detectado"): somar
+        # "detectado com severidade" repetia a palavra e trazia jargão.
+        "summary": f"{type_label}, com gravidade {sev_label.lower()}.{process_text}",
         "detailed_explanation": detailed,
         "possible_causes": causes[:5],
         "recommendations": recs[:5],
-        "severity_justification": f"Classificado como severidade {sev_label} com base nos valores das métricas e no desvio em relação ao comportamento histórico desta máquina.",
+        "severity_justification": f"Gravidade {sev_label.lower()}: definida pelos valores medidos e pelo quanto eles se afastam do normal deste computador.",
         "model_used": "análise local",
         "verification": None,
     }

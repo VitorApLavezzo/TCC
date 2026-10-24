@@ -1,5 +1,6 @@
 import axios from "axios";
 import { reportFailure, reportSuccess } from "../lib/connection";
+import { sessionExpired } from "../lib/session";
 
 const api = axios.create({
   baseURL: "/api",
@@ -20,10 +21,11 @@ api.interceptors.response.use(
   },
   (err) => {
     if (err.response?.status === 401) {
+      const hadToken = Boolean(err.config?.headers?.Authorization);
       localStorage.removeItem("token");
       // `sessao=expirada` faz o login explicar por que a pessoa voltou pra cá,
       // em vez de simplesmente aparecer na tela de login sem motivo.
-      if (!window.location.pathname.startsWith("/login")) {
+      if (sessionExpired({ hadToken, pathname: window.location.pathname })) {
         window.location.href = "/login?sessao=expirada";
       }
       return Promise.reject(err);
@@ -108,7 +110,7 @@ export const explanationsApi = {
 export const anomaliesApi = {
   list: (params?: {
     machine_id?: number; hours?: number; severity?: string; anomaly_type?: string; source?: string;
-    unresolved_only?: boolean; security_only?: boolean; incident_id?: number;
+    unresolved_only?: boolean; security_only?: boolean; incident_id?: number; limit?: number;
   }) => api.get("/anomalies", { params }),
   get: (id: number) => api.get(`/anomalies/${id}`),
   context: (id: number) => api.get(`/anomalies/${id}/context`),

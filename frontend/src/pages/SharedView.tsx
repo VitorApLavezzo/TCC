@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { pageTitle } from "../lib/title";
 import { useParams } from "react-router-dom";
 import { shareApi } from "../services/api";
 import { Panel, DataList, DataRow } from "../components/ui/Layout";
@@ -7,13 +8,16 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { SignalMark } from "../components/ui/SignalMark";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { processName } from "../lib/format";
+import { processName, decimal } from "../lib/format";
 
 /**
  * Página pública do pacote para o técnico. Sem login: quem recebeu o link vê
  * o incidente completo, somente leitura. É o outro lado do "gerar link".
  */
 export function SharedView() {
+  useEffect(() => {
+    document.title = pageTitle(window.location.pathname);
+  }, []);
   const { token } = useParams<{ token: string }>();
   const [pkg, setPkg] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -52,7 +56,7 @@ function SharedContent({ pkg }: { pkg: any }) {
         <p className="channel-label">Detectado em {a.detected_at && format(new Date(a.detected_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
         <h1 className="mt-1.5 text-lg font-semibold text-fg">{a.type_label}</h1>
         <p className="mt-1 text-sm text-fg-3">
-          {pkg.machine.name} · {pkg.machine.os} · severidade {a.severity_label}
+          {pkg.machine.name} · {pkg.machine.os} · gravidade {a.severity_label}
           {processName(a) && <> · <span className="font-mono text-fg-2">{processName(a)}</span></>}
         </p>
       </header>
@@ -105,7 +109,7 @@ function SharedContent({ pkg }: { pkg: any }) {
                   <tr key={i} className="border-t border-hairline">
                     <td className="py-1 pr-4">{p.name}</td>
                     <td className="py-1 pr-4">{p.cpu?.toFixed(0)}%</td>
-                    <td className="py-1 pr-4">{p.mem?.toFixed(1)}%</td>
+                    <td className="py-1 pr-4">{p.mem != null ? `${decimal(p.mem, 1)}%` : "--"}</td>
                     <td className="py-1">{p.signed ?? "?"}</td>
                   </tr>
                 ))}

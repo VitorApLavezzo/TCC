@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { machinesApi, errorMessage } from "../services/api";
+import { anomaliesApi, machinesApi, errorMessage } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
 import { Machine } from "../types";
 import { Button } from "../components/ui/Button";
@@ -14,6 +14,7 @@ import { BulkEnrollPanel } from "../components/machines/BulkEnrollPanel";
 import { MachineCard } from "../components/machines/MachineCard";
 import { FleetCompare } from "../components/machines/FleetCompare";
 import { pluralize } from "../lib/format";
+import { statusByMachine, MachineStatus } from "../lib/machineStatus";
 
 export function Machines() {
   const toast = useToast();
@@ -23,9 +24,19 @@ export function Machines() {
   const [generating, setGenerating] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
 
+  const [status, setStatus] = useState<Record<number, MachineStatus> | null>(null);
+
   const fetchMachines = useCallback(async () => {
     const res = await machinesApi.list();
     setMachines(res.data);
+    // A saúde de cada linha sai dos avisos em aberto. Se não vier, a lista
+    // continua útil sem ela — não vale derrubar a página por isso.
+    anomaliesApi
+      // O servidor devolve 50 por padrão, do mais novo para o mais antigo: um
+      // computador barulhento esgotava a cota e os outros apareciam "sem aviso".
+      .list({ hours: 720, unresolved_only: true, limit: 500 })
+      .then((r) => setStatus(statusByMachine(r.data)))
+      .catch(() => setStatus(null));
   }, []);
 
   const poll = usePolling(fetchMachines, 15000);
@@ -180,6 +191,7 @@ export function Machines() {
               onDelete={remove}
               onSetInterval={changeInterval}
               onSetRealtime={setRealtime}
+              status={status ? status[m.id] ?? { open: 0, worst: null } : undefined}
             />
           ))}
         </ul>
