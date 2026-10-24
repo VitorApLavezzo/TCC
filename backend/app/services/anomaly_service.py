@@ -14,7 +14,7 @@ nasce por `persist_candidate`, que aplica na mesma ordem:
 Assim nenhuma origem nova esquece um desses passos.
 """
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 import threading
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -271,11 +271,26 @@ def filter_reason(db: Session, machine: Machine, c: Candidate, now,
     return None, None
 
 
+def _json_safe(valor: Any) -> Any:
+    """Converte o que o JSON do banco não aceita (data, conjunto) em texto/lista.
+
+    Os detalhes de um aviso vêm de detectores diferentes, e bastou um deles pôr
+    um datetime aqui para a gravação falhar e derrubar a ingestão inteira.
+    """
+    if isinstance(valor, dict):
+        return {str(k): _json_safe(v) for k, v in valor.items()}
+    if isinstance(valor, (list, tuple, set)):
+        return [_json_safe(v) for v in valor]
+    if isinstance(valor, (datetime, date)):
+        return valor.isoformat()
+    return valor
+
+
 def _affected_of(c: Candidate) -> Dict[str, Any]:
     affected = dict(c.affected or {})
     if c.details:
         affected["_behavior"] = c.details
-    return affected
+    return _json_safe(affected)
 
 
 def _queue_explanation(db: Session, anomaly: Anomaly, machine: Machine) -> None:

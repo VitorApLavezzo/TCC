@@ -397,7 +397,11 @@ def evaluate_beacons(db: Session, machine: Machine, beacons: List[Dict[str, Any]
                 responsible=name,
                 details={"type": "beaconing", **b, "signed": ident.signed if ident else None,
                          "exe": b.get("exe") or (ident.exe if ident else None),
-                         "first_seen_on_machine": ident.first_seen if ident else None},
+                         # Em texto: um datetime cru aqui quebrava a gravação do JSON
+                         # e, com ela, a ingestão inteira.
+                         "first_seen_on_machine": (
+                             aware(ident.first_seen).isoformat() if ident and ident.first_seen else None
+                         )},
                 source="agent_event",
                 cooldown_minutes=6 * 60,
             ),

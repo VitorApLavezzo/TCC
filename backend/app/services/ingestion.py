@@ -129,21 +129,41 @@ def ingest(db: Session, machine: Machine, payload: MetricCreate, now=None) -> In
         db.rollback()
         print(f"[Ingest] Identidade dos processos não registrada: {e}")
 
+    # Cada detector roda isolado. A leitura já está gravada; se um detector
+    # quebra, perde-se só o aviso dele. Antes a exceção subia, a ingestão
+    # respondia 500 e o agente reenviava a mesma leitura para sempre — um
+    # defeito num detector de segurança parava a coleta do computador inteiro.
+    def detectar(etapa: str, fn):
+        try:
+            resultado = fn()
+            db.commit()
+            return resultado
+        except Exception as e:
+            db.rollback()
+            print(f"[Ingest] Detector '{etapa}' falhou na máquina {machine.id}: {e!r}")
+            return None
+
     anomalies: List[Anomaly] = []
-    reboot = agent_events.check_reboot(db, machine, payload.boot_time, events, previous_metric, now)
-    db.commit()
+    reboot = detectar(
+        "reinício", lambda: agent_events.check_reboot(db, machine, payload.boot_time, events, previous_metric, now)
+    )
     if reboot:
         anomalies.append(reboot)
 
-    anomaly = process_metric(metric, machine, db, process_starts=starts, now=now)
+    anomaly = detectar("leitura", lambda: process_metric(metric, machine, db, process_starts=starts, now=now))
     if anomaly:
         anomalies.insert(0, anomaly)
     if payload.inventory:
-        anomalies += agent_events.apply_inventory(db, machine, payload.inventory, now)
+        anomalies += detectar(
+            "inventário", lambda: agent_events.apply_inventory(db, machine, payload.inventory, now)
+        ) or []
     if events:
-        anomalies += agent_events.handle_events(db, machine, events, metric, now)
+        anomalies += detectar("eventos", lambda: agent_events.handle_events(db, machine, events, metric, now)) or []
     if payload.beacons:
-        anomalies += agent_events.evaluate_beacons(db, machine, [b.model_dump() for b in payload.beacons], now)
+        anomalies += detectar(
+            "beaconing",
+            lambda: agent_events.evaluate_beacons(db, machine, [b.model_dump() for b in payload.beacons], now),
+        ) or []
 
     serious = next((a for a in anomalies if a.severity in ("high", "critical")), None)
     response = {
