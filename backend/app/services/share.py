@@ -20,7 +20,7 @@ from app.models.incident import Incident
 from app.models.machine import Machine
 from app.models.metric import Metric
 from app.models.process import ProcessSnapshot
-from app.services import ai_service, knowledge
+from app.services import ai_service
 
 
 def create(db: Session, anomaly: Anomaly, user_id: int, hours: int = 72) -> Any:
@@ -99,5 +99,7 @@ def build_package(db: Session, anomaly_id: int) -> Optional[Dict[str, Any]]:
         "incident": {"title": incident.title, "narrative": incident.narrative, "chain": incident.chain}
         if incident else None,
         "blackbox": {"samples": blackbox.samples, "forensic": blackbox.forensic} if blackbox else None,
-        "history": knowledge.similar_anomalies(db, anomaly),
+        # Sem histórico de outros avisos: o link dá leitura de UM aviso. O
+        # histórico era recalculado a cada visita e entregava a quem tinha o
+        # link os avisos seguintes da máquina e as notas privadas do dono.
     }

@@ -11,8 +11,12 @@ Cuidados deliberados:
   arquivo temporário + replace), então uma queda de rede no meio não deixa o
   agente com um arquivo pela metade;
 - se algo falhar, mantém o que estava e tenta de novo na próxima janela;
-- a origem é o mesmo servidor que já entrega o agente e recebe as métricas —
-  não há nova relação de confiança aqui.
+- só se atualiza por HTTPS (ou com AGENT_ALLOW_INSECURE_UPDATE=1): o hash
+  vem do mesmo servidor que entrega o arquivo, então por HTTP qualquer um na
+  rede que respondesse no lugar do servidor servia código que o agente
+  executava — como SYSTEM, nas instalações silenciosa e em massa;
+- só aceita os arquivos do próprio agente, a mesma lista que o servidor
+  publica: um "json.py" no manifesto seria importado antes da biblioteca.
 """
 import hashlib
 import logging
@@ -39,8 +43,22 @@ def _sha256(path: str) -> Optional[str]:
         return None
 
 
+# A mesma lista de backend/app/routers/agent_files.py (ALLOWED_FILES)
+ALLOWED_FILES = frozenset({
+    "agent.py", "collector.py", "requirements.txt", "privacy.py", "sensors.py", "security.py",
+    "blackbox.py", "actions.py", "inventory.py", "updater.py", "localguard.py",
+})
+
+
+def _transporte_confiavel(api_url: str) -> bool:
+    return api_url.lower().startswith("https://") or os.environ.get("AGENT_ALLOW_INSECURE_UPDATE") == "1"
+
+
 def check(api_url: str, token: str) -> List[Tuple[str, str]]:
     """Arquivos que estão diferentes do servidor: [(nome, sha256_esperado)]."""
+    if not _transporte_confiavel(api_url):
+        logger.debug("Autoatualização desligada: o servidor não usa HTTPS (AGENT_ALLOW_INSECURE_UPDATE=1 libera).")
+        return []
     response = requests.get(f"{api_url}/api/agent/manifest", headers={"X-Agent-Token": token}, timeout=15)
     response.raise_for_status()
     manifest = response.json()
@@ -48,7 +66,7 @@ def check(api_url: str, token: str) -> List[Tuple[str, str]]:
     for item in manifest.get("files", []):
         name = item.get("name")
         expected = item.get("sha256")
-        if not name or not expected or "/" in name or "\\" in name:
+        if name not in ALLOWED_FILES or not expected:
             continue
         if _sha256(os.path.join(AGENT_DIR, name)) != expected:
             pending.append((name, expected))

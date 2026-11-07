@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 class AskBody(BaseModel):
     question: str = Field(min_length=2, max_length=1000)
     machine_id: Optional[int] = None
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 def _serialize(m: ChatMessage) -> dict:
@@ -32,6 +32,11 @@ def ask(body: AskBody, db: Session = Depends(get_db), user: User = Depends(get_c
     if body.machine_id is not None:
         if not db.query(Machine.id).filter(Machine.id == body.machine_id, Machine.owner_id == user.id).first():
             raise HTTPException(status_code=404, detail="Computador não encontrado")
+    # A conversa é de quem a começou: com o id de outra conta, o histórico
+    # dela entrava no prompt desta (e ia para a nuvem com a privacidade desta).
+    if body.conversation_id and db.query(ChatMessage.id).filter(
+            ChatMessage.conversation_id == body.conversation_id, ChatMessage.user_id != user.id).first():
+        raise HTTPException(status_code=404, detail="Conversa não encontrada")
     conversation_id = body.conversation_id or secrets.token_urlsafe(8)
     assistant = chat.ask(db, user, body.machine_id, conversation_id, body.question)
     return {"conversation_id": conversation_id, "message": _serialize(assistant)}

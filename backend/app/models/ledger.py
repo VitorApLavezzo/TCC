@@ -26,3 +26,6 @@ class LedgerEntry(Base):
     payload_digest = Column(String, nullable=False)
     prev_hash = Column(String, nullable=False)
     entry_hash = Column(String, nullable=False, index=True)
+    # 2 = selo HMAC com chave fora do banco e máquina/usuário lacrados no
+    # conteúdo. Vazio = entrada antiga, resselada na subida (integrity.py).
+    seal_version = Column(Integer, nullable=True)

@@ -116,7 +116,8 @@ def answer_async(db: Session, message_id: int):
         else ChatMessage.machine_id.is_(None)
     history_rows = (
         db.query(ChatMessage)
-        .filter(ChatMessage.conversation_id == msg.conversation_id, ChatMessage.id < msg.id,
+        .filter(ChatMessage.user_id == msg.user_id,
+                ChatMessage.conversation_id == msg.conversation_id, ChatMessage.id < msg.id,
                 ChatMessage.status == "done", mesmo_escopo)
         .order_by(ChatMessage.id.desc())
         .limit(HISTORY_TURNS * 2)
@@ -148,7 +149,7 @@ def ask(db: Session, user: User, machine_id: Optional[int], conversation_id: str
     db.commit()
     db.refresh(assistant)
     from app.services import jobs
-    jobs.submit(answer_async, assistant.id)
+    jobs.submit(answer_async, assistant.id, owner_id=user.id)
     return assistant
 
 

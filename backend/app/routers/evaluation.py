@@ -94,7 +94,7 @@ def start_benchmark(real_machine_id: Optional[int] = None, db: Session = Depends
     uma requisição síncrona. O painel busca o resultado depois.
     """
     from app.services import jobs
-    jobs.submit(_run_benchmark, user.id, real_machine_id)
+    jobs.submit(_run_benchmark, user.id, real_machine_id, owner_id=user.id)
     return {"started": True}
 
 
@@ -155,7 +155,7 @@ def holdout(machine_id: int, db: Session = Depends(get_db),
 def start_ablation(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Roda os cenários três vezes (regras, modelo, os dois) em segundo plano."""
     from app.services import jobs
-    jobs.submit(_run_ablation, user.id)
+    jobs.submit(_run_ablation, user.id, owner_id=user.id)
     return {"started": True}
 
 
@@ -208,7 +208,7 @@ def start_real_replay(machine_id: int, days: int = 14, db: Session = Depends(get
     """Reproduz as sessões com e sem contexto e por camada, em segundo plano (pode levar dezenas de minutos)."""
     from app.services import jobs
     _own_machine(db, machine_id, user)
-    jobs.submit_long(_run_real_replay, user.id, machine_id, max(1, min(days, 90)))
+    jobs.submit_long(_run_real_replay, user.id, machine_id, max(1, min(days, 90)), owner_id=user.id)
     return {"started": True}
 
 

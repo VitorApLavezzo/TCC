@@ -160,7 +160,7 @@ def update_step(anomaly_id: int, body: StepProgress, db: Session = Depends(get_d
     db.commit()
     if body.status == "not_helped":
         from app.services import jobs, next_step
-        jobs.submit(next_step.generate, anomaly.id, body.step_index)
+        jobs.submit(next_step.generate, anomaly.id, body.step_index, owner_id=current_user.id)
     db.refresh(anomaly)
     return anomaly
 

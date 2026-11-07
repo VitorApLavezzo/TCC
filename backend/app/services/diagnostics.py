@@ -123,7 +123,8 @@ def receive_samples(db: Session, diagnostic: Diagnostic, samples: List[Dict], pr
     diagnostic.samples = {"samples": samples[:120], "processes": processes[:40]}
     diagnostic.status = "analyzing"
     db.commit()
-    jobs.submit(analyze, diagnostic.id)
+    dono = db.query(Machine.owner_id).filter(Machine.id == diagnostic.machine_id).scalar()
+    jobs.submit(analyze, diagnostic.id, owner_id=dono)
 
 
 def analyze(db: Session, diagnostic_id: int):

@@ -53,7 +53,7 @@ def reputation_lookup(name: Optional[str] = None, sha256: Optional[str] = None, 
                       db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if not name and not sha256:
         raise HTTPException(status_code=400, detail="Informe name ou sha256")
-    info = reputation.for_process(db, name, exe, sha256)
+    info = reputation.for_process(db, name, exe, sha256, owner_id=user.id)
     if not info:
         return {"found": False, "sentence": "Nenhuma informação sobre este programa ainda."}
     return {"found": True, **info}
@@ -69,7 +69,7 @@ def machine_programs(machine_id: int, db: Session = Depends(get_db), user: User 
     )
     out = []
     for i in idents:
-        rep = reputation.for_process(db, i.name, i.exe, i.sha256)
+        rep = reputation.for_process(db, i.name, i.exe, i.sha256, owner_id=user.id)
         out.append({"name": i.name, "exe": i.exe, "signed": i.signed, "publisher": i.publisher,
                     "seen_count": i.seen_count, "first_seen": i.first_seen,
                     "reputation": {"verdict": rep["verdict"], "sentence": rep["sentence"]} if rep else None})

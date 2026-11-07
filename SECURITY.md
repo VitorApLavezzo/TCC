@@ -28,7 +28,9 @@ saber exatamente o que é confiado a quem — e onde estão os limites conhecido
 **Rotas abertas a quem não tem conta.** `/api/auth/login`, `/api/auth/register`,
 `/api/auth/google` e `/api/machines/enroll`. As quatro têm limite de tentativas
 por IP ([ratelimit.py](backend/app/core/ratelimit.py)): 10 logins / 5 min,
-5 cadastros / h, 30 pareamentos / h. O limite é em memória e vale por processo —
+5 cadastros / h, 30 pareamentos / h. O IP é o da conexão; `X-Real-IP` só vale
+quando a conexão vem do Nginx (`TRUSTED_PROXY_CIDRS`), senão cada cliente
+escolheria o próprio balde pelo cabeçalho. O limite é em memória e vale por processo —
 com mais de um Uvicorn atrás de um balanceador, o teto efetivo multiplica pelo
 número de processos. Para a escala deste trabalho (um processo no Compose) é
 suficiente; em produção maior, a mesma interface aceitaria Redis por trás.
@@ -57,7 +59,9 @@ contém o risco:
 - cada ordem tem prazo curto (10 a 60 min): uma ordem de ontem não roda hoje;
 - toda ordem fica registrada com quem pediu, quando e qual foi o resultado, e
   entra no livro-caixa encadeado ([integrity.py](backend/app/services/integrity.py)),
-  onde adulterar um registro antigo quebra a cadeia de hashes de forma detectável;
+  selado com HMAC por uma chave fora do banco: editar, reatribuir ou recalcular
+  um registro quebra a cadeia de forma detectável (apagar só as entradas mais
+  recentes ainda exige guardar o último hash fora do servidor);
 - ação automática (playbooks) roda com teto diário, janela de desfazer e modo
   de ensaio, e nunca é o padrão de uma regra nova.
 
@@ -73,12 +77,15 @@ isolar da rede), e guarda a ação anterior para desfazer.
   responde no endereço configurado, sobre TLS. Fechar isso exigiria uma chave
   por máquina e assinatura de cada comando — anotado como trabalho futuro.
 - **Sem TLS embutido.** O Compose serve HTTP; a implantação real fica atrás de
-  um proxy com certificado. Em HTTP puro, token e métricas trafegam em claro.
+  um proxy com certificado. Em HTTP puro, token e métricas trafegam em claro —
+  e por isso o agente só se autoatualiza por HTTPS (ou com
+  `AGENT_ALLOW_INSECURE_UPDATE=1`): por HTTP, quem respondesse no lugar do
+  servidor entregaria código para o agente executar como SYSTEM.
 - **Token JWT sem revogação.** Um token roubado vale até expirar (24 h). Não há
   lista de revogados nem refresh token.
-- **`SECRET_KEY` padrão.** O valor de desenvolvimento está no código. Subir em
-  produção sem trocar permite forjar qualquer sessão — está avisado no
-  `.env.example` e é o primeiro item de qualquer implantação.
+- ~~**`SECRET_KEY` padrão.**~~ Corrigido: não há mais valor padrão. O backend
+  não sobe com chave conhecida ou com menos de 32 caracteres, e `start.sh` /
+  `start.ps1` geram uma ao criar o `.env`.
 - **`/metrics` é aberto.** Não expõe dado de usuário (só contadores do
   serviço), mas revela volume de uso; num servidor público, fecha-se no Nginx.
 

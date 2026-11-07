@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.database import engine
+from app.services import jobs
 from app.routers import (
     account, actions, agent_api, agent_files, anomalies, audit, auth, chat, demo, evaluation,
     explanations, insights, machines, meta, metrics, playbooks, reports, reputation_hub, share,
@@ -24,6 +25,10 @@ async def lifespan(app: FastAPI):
     # O esquema é criado/atualizado na subida, não na importação do módulo:
     # os testes importam o app sem PostgreSQL disponível.
     upgrade_schema(engine)
+    from app.database import SessionLocal
+    from app.services import integrity
+    with SessionLocal() as db:
+        integrity.reseal_legacy(db)
 
     tasks = [asyncio.create_task(explanation_worker())]
     if settings.SCHEDULER_ENABLED:
@@ -42,6 +47,14 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(jobs.Busy)
+async def _fila_cheia(_request, _exc):
+    # Cota de trabalhos de IA por conta (services/jobs.py)
+    return JSONResponse(status_code=429, headers={"Retry-After": "30"},
+                        content={"detail": "Você já tem tarefas demais em andamento. Espere uma terminar."})
+
 
 # "*" com allow_credentials=True é inválido no padrão CORS: o navegador recusa
 # a resposta e a chamada falha em produção. Como o painel manda o token no

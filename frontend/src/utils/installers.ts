@@ -273,6 +273,10 @@ if errorlevel 1 (
 )
 
 mkdir "%DIR%" 2>nul
+REM So SYSTEM e Administradores: o agente roda como SYSTEM e importa modulos daqui.
+REM Herdando de ProgramData, um usuario comum podia criar arquivos na pasta.
+icacls "%DIR%" /setowner *S-1-5-32-544 /T /C >> "%LOG%" 2>&1
+icacls "%DIR%" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F /T /C >> "%LOG%" 2>&1
 cd /d "%DIR%"
 for %%F in (${[...CORE_FILES, ...EXTRA_FILES].join(" ")}) do (
     curl -fsS "%SERVER%/api/agent/download/%%F" -o "%%F" >> "%LOG%" 2>&1
@@ -324,6 +328,9 @@ $installScript = {
     param($server, $bulkKey)
     $dir = "$env:ProgramData\\AnomalyDetect"
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    # Só SYSTEM e Administradores: o agente roda como SYSTEM e importa módulos daqui
+    icacls $dir /setowner '*S-1-5-32-544' /T /C | Out-Null
+    icacls $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /T /C | Out-Null
     Set-Location $dir
     foreach ($f in @(${[...CORE_FILES, ...EXTRA_FILES].map((f) => `"${f}"`).join(", ")})) {
         try { Invoke-WebRequest "$server/api/agent/download/$f" -OutFile $f -UseBasicParsing } catch {}

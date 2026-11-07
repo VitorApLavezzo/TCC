@@ -32,9 +32,11 @@ import ntpath
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.identity import HashReputation
+from app.models.identity import HashReputation, ProcessIdentity, ReputationVote
+from app.models.machine import Machine
 from app.services.identity_service import identity_key
 
 UNKNOWN = 0
@@ -104,15 +106,70 @@ def _is_security_product(name: str, publisher: str) -> bool:
     return bool(publisher) and any(v in publisher for v in SECURITY_VENDORS)
 
 
-def _from_reputation(rep: Optional[HashReputation]) -> Tuple[bool, bool, Optional[str]]:
-    """(reprovado, prevalente, frase) — o que a reputação diz deste executável."""
-    if rep is None:
-        return False, False, None
-    if (rep.marked_problem or 0) > 0:
-        return True, False, f"já foi confirmado como problema {rep.marked_problem} vez(es)"
-    if (rep.vt_malicious or 0) > 0:
+# Contagens do hub só valem quando vêm de várias instalações: uma instalação
+# sozinha (ou alguém fingindo ser várias com o mesmo id) não dá confiança.
+HUB_MIN_INSTALLATIONS = 3
+
+
+def owner_machine_counts(db: Session, owner_id: Optional[int], keys: Iterable[str]) -> Dict[str, int]:
+    """Em quantas máquinas DESTE dono cada executável já apareceu.
+
+    A prevalência que dá confiança era um contador do servidor inteiro, que
+    o agente de qualquer conta alimentava: três caminhos falsos numa máquina
+    bastavam para um programa virar "comum" — e o beaconing dele sumir —
+    nos computadores de outra pessoa. Contar só a própria frota fecha isso.
+    """
+    keys = set(keys)
+    if owner_id is None or not keys:
+        return {}
+    shas = {k for k in keys if not k.startswith("nome:")}
+    nomes = {k[len("nome:"):] for k in keys if k.startswith("nome:")}
+    query = (
+        db.query(ProcessIdentity.machine_id, ProcessIdentity.name, ProcessIdentity.exe, ProcessIdentity.sha256)
+        .join(Machine, Machine.id == ProcessIdentity.machine_id)
+        .filter(Machine.owner_id == owner_id)
+    )
+    linhas = []
+    if shas:
+        linhas += query.filter(func.lower(ProcessIdentity.sha256).in_(shas)).all()
+    if nomes:
+        linhas += query.filter(ProcessIdentity.sha256.is_(None), func.lower(ProcessIdentity.name).in_(nomes)).all()
+    vistos: Dict[str, set] = {}
+    for machine_id, name, exe, sha256 in linhas:
+        k = identity_key(name, exe, sha256)
+        if k in keys:
+            vistos.setdefault(k, set()).add(machine_id)
+    return {k: len(v) for k, v in vistos.items()}
+
+
+def owner_problem_keys(db: Session, owner_id: Optional[int], keys: Iterable[str]) -> set:
+    """Executáveis que o próprio dono já confirmou como problema."""
+    keys = set(keys)
+    if owner_id is None or not keys:
+        return set()
+    return {
+        v.identity_key for v in db.query(ReputationVote).filter(
+            ReputationVote.owner_id == owner_id, ReputationVote.kind == "problem",
+            ReputationVote.identity_key.in_(keys)).all()
+    }
+
+
+def _from_reputation(rep: Optional[HashReputation], owner_machines: int = 0,
+                     own_problem: bool = False) -> Tuple[bool, bool, Optional[str]]:
+    """(reprovado, prevalente, frase) — o que a reputação diz deste executável.
+
+    Só decide o que a conta dona pode afirmar: o próprio "é problema", o
+    VirusTotal e a prevalência na própria frota (ou no hub, com instalações
+    suficientes). Votos de outras contas não reprovam aqui.
+    """
+    if own_problem:
+        return True, False, "você já confirmou este programa como problema"
+    if rep is not None and (rep.vt_malicious or 0) > 0:
         return True, False, f"reprovado por {rep.vt_malicious} antivírus no VirusTotal"
-    machines = max(rep.local_machines or 0, rep.hub_machines or 0)
+    hub = 0
+    if rep is not None and (rep.hub_installations or 0) >= HUB_MIN_INSTALLATIONS:
+        hub = rep.hub_machines or 0
+    machines = max(owner_machines, hub)
     if machines >= PREVALENCE_MACHINES:
         return False, True, f"visto em {machines} computadores sem nunca dar problema"
     return False, False, None
@@ -133,7 +190,10 @@ def evaluate_all(db: Session, machine_id: int, processes: Iterable[Any]) -> Dict
     if keys:
         for rep in db.query(HashReputation).filter(HashReputation.identity_key.in_(keys)).all():
             reputations[rep.identity_key] = rep
-    return {key_of(p): _evaluate(p, reputations) for p in processes}
+    owner_id = db.query(Machine.owner_id).filter(Machine.id == machine_id).scalar()
+    counts = owner_machine_counts(db, owner_id, keys)
+    problems = owner_problem_keys(db, owner_id, keys)
+    return {key_of(p): _evaluate(p, reputations, counts, problems) for p in processes}
 
 
 def evaluate(db: Session, machine_id: int, proc: Any) -> Trust:
@@ -141,14 +201,16 @@ def evaluate(db: Session, machine_id: int, proc: Any) -> Trust:
     return evaluate_all(db, machine_id, [proc])[key_of(proc)]
 
 
-def _evaluate(proc: Any, reputations: Dict[str, HashReputation]) -> Trust:
+def _evaluate(proc: Any, reputations: Dict[str, HashReputation], counts: Optional[Dict[str, int]] = None,
+              problems: Optional[set] = None) -> Trust:
     name = (getattr(proc, "name", "") or "").lower()
     exe = (getattr(proc, "exe", "") or "").lower()
     publisher = (getattr(proc, "publisher", "") or "").lower()
     signed = getattr(proc, "signed", None) == "signed"
 
     key = identity_key(getattr(proc, "name", None), getattr(proc, "exe", None), getattr(proc, "sha256", None))
-    reproved, prevalent, rep_phrase = _from_reputation(reputations.get(key))
+    reproved, prevalent, rep_phrase = _from_reputation(reputations.get(key), (counts or {}).get(key, 0),
+                                                       key in (problems or set()))
     if reproved:
         return Trust(level=UNKNOWN, reasons=[rep_phrase] if rep_phrase else [])
 

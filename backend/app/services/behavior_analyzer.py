@@ -828,7 +828,8 @@ def _candidates(processes: List[ProcessSnapshot], ctx: DetectionContext) -> List
     """Processos da leitura e os que nasceram desde a última, no mesmo formato."""
     out = [
         {
-            "name": p.name, "exe": p.exe, "pid": p.pid, "parent_name": p.parent_name,
+            "name": p.name, "exe": p.exe, "pid": p.pid, "create_time": getattr(p, "create_time", None),
+            "parent_name": p.parent_name,
             "signed": p.signed, "publisher": p.publisher, "sha256": p.sha256,
             "cmdline": p.cmdline, "username": p.username,
         }
@@ -897,6 +898,9 @@ def detect_process_masquerading(metric: Metric, processes: List[ProcessSnapshot]
                 "exe": exe,
                 "expected_dirs": list(PROTECTED_WINDOWS_BINARIES.get(imitates, ())),
                 "pid": c.get("pid"),
+                # Identidade da instância: com ela o agente encerra só este
+                # processo, e não todos os svchost.exe verdadeiros
+                "create_time": c.get("create_time"),
                 "parent": c.get("parent_name"),
                 "sha256": c.get("sha256"),
                 "signed": c.get("signed"),

@@ -34,7 +34,7 @@ def start(body: StartBody, db: Session = Depends(get_db), user: User = Depends(g
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if body.auto_run:
-        jobs.submit(demo.run_to_completion, session.id)
+        jobs.submit(demo.run_to_completion, session.id, owner_id=user.id)
     return _serialize(session)
 
 

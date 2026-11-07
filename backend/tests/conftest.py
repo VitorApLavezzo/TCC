@@ -3,8 +3,15 @@ Base de testes: SQLite em memória, IA desligada (privacy no_ai) e jobs de
 segundo plano executados na hora, para os testes serem determinísticos e
 não dependerem de Ollama, Groq nem de threads.
 """
-import pytest
-from fastapi.testclient import TestClient
+import os
+import secrets
+
+# A chave de sessão é obrigatória e precisa ser forte: config.py recusa as
+# públicas e as curtas. Cada execução da suíte usa uma chave nova.
+os.environ.setdefault("SECRET_KEY", secrets.token_urlsafe(48))
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool

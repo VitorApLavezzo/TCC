@@ -14,6 +14,7 @@ canais opcionais.
 """
 import json
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
@@ -61,6 +62,32 @@ def public_key() -> Optional[str]:
     return settings.VAPID_PUBLIC_KEY or None
 
 
+# Serviços de push dos navegadores. O servidor faz um POST para o endereço da
+# assinatura; aceitando qualquer URL, qualquer conta fazia o backend chamar
+# endereços internos (127.0.0.1, rede do Compose) e lia o resultado pela
+# lista de aparelhos.
+_PUSH_HOSTS = {"fcm.googleapis.com", "updates.push.services.mozilla.com", "web.push.apple.com"}
+_PUSH_SUFIXOS = (".notify.windows.com", ".push.apple.com")
+
+
+def valid_endpoint(endpoint: Optional[str]) -> bool:
+    try:
+        partes = urlparse(endpoint or "")
+        porta = partes.port
+    except ValueError:
+        return False
+    host = (partes.hostname or "").lower()
+    return (partes.scheme == "https" and porta in (None, 443) and not partes.username
+            and (host in _PUSH_HOSTS or host.endswith(_PUSH_SUFIXOS)))
+
+
+def _sem_redirecionamento():
+    import requests
+    sessao = requests.Session()
+    sessao.max_redirects = 0
+    return sessao
+
+
 def subscribe(db: Session, user_id: int, subscription: Dict[str, Any],
               user_agent: Optional[str] = None) -> "PushSubscription":
     """Guarda (ou atualiza) a assinatura deste aparelho."""
@@ -70,6 +97,8 @@ def subscribe(db: Session, user_id: int, subscription: Dict[str, Any],
     keys = subscription.get("keys") or {}
     if not endpoint or not keys.get("p256dh") or not keys.get("auth"):
         raise ValueError("Assinatura de notificação incompleta.")
+    if not valid_endpoint(endpoint):
+        raise ValueError("Endereço de notificação não reconhecido.")
 
     row = db.query(PushSubscription).filter(PushSubscription.endpoint == endpoint).first()
     if row is None:
@@ -127,7 +156,10 @@ def send_to_user(db: Session, user_id: int, title: str, body: str,
     claims = {"sub": f"mailto:{settings.VAPID_CONTACT_EMAIL or 'admin@localhost'}"}
     entregues = 0
     mudou = False
+    sessao = _sem_redirecionamento()
     for assinatura in assinaturas:
+        if not valid_endpoint(assinatura.endpoint):
+            continue
         try:
             webpush(
                 subscription_info={
@@ -138,6 +170,7 @@ def send_to_user(db: Session, user_id: int, title: str, body: str,
                 vapid_private_key=settings.VAPID_PRIVATE_KEY,
                 vapid_claims=dict(claims),
                 timeout=10,
+                requests_session=sessao,
             )
             assinatura.last_ok_at = utcnow()
             assinatura.failures = 0

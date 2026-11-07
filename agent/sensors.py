@@ -107,9 +107,22 @@ def _publisher_from_subject(subject: str) -> Optional[str]:
     return publisher
 
 
+# O PowerShell fecha uma string de aspas simples com a aspa ASCII e também
+# com as aspas tipográficas ‘ ’ ‚ ‛. Dobrar só a ASCII deixava um usuário
+# comum nomear um programa C:\Users\Public\t’;comando;’.exe e ter o comando
+# executado pelo agente — como SYSTEM na instalação silenciosa.
+_ASPAS_PS = ("'", "\u2018", "\u2019", "\u201a", "\u201b")
+
+
+def _ps_literal(texto: str) -> str:
+    """Conteúdo seguro para uma string de aspas simples do PowerShell: dobra cada aspa."""
+    for aspa in _ASPAS_PS:
+        texto = texto.replace(aspa, aspa * 2)
+    return texto
+
+
 def _signatures_windows(paths: List[str]) -> Dict[str, Dict[str, Any]]:
-    # Aspas simples do PowerShell: o escape é dobrar a aspa
-    array = ",".join("'" + p.replace("'", "''") + "'" for p in paths)
+    array = ",".join("'" + _ps_literal(p) + "'" for p in paths)
     ps = (
         "$ErrorActionPreference='SilentlyContinue';"
         f"@({array}) | ForEach-Object {{"

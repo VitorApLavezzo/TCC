@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import jwt as jose_jwt
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
@@ -29,19 +30,18 @@ def auth_config():
     return {"google_client_id": settings.GOOGLE_CLIENT_ID or None}
 
 
-@router.post("/google", response_model=Token, dependencies=[Depends(limit("google", 20, 300))])
-def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
+def _claims_google(credential: str) -> dict:
+    """Confere a assinatura e o destinatário do token do Google; devolve as claims."""
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=400, detail="Login com Google não configurado")
-
     try:
         certs = httpx.get(GOOGLE_CERTS_URL, timeout=10).json()
-        header = jose_jwt.get_unverified_header(body.credential)
+        header = jose_jwt.get_unverified_header(credential)
         key = next((k for k in certs["keys"] if k["kid"] == header["kid"]), None)
         if not key:
             raise ValueError("Chave de assinatura não encontrada")
         claims = jose_jwt.decode(
-            body.credential,
+            credential,
             key,
             algorithms=["RS256"],
             audience=settings.GOOGLE_CLIENT_ID,
@@ -52,13 +52,26 @@ def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
         raise
     except Exception:
         raise HTTPException(status_code=401, detail="Token do Google inválido")
-
-    email = claims.get("email")
-    if not email or not claims.get("email_verified"):
+    if not claims.get("email") or claims.get("email_verified") is not True or not claims.get("sub"):
         raise HTTPException(status_code=401, detail="E-mail do Google não verificado")
+    return claims
 
-    user = db.query(User).filter(User.email == email).first()
+
+@router.post("/google", response_model=Token, dependencies=[Depends(limit("google", 20, 300))])
+def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
+    claims = _claims_google(body.credential)
+    email, sub = claims["email"], claims["sub"]
+
+    user = db.query(User).filter(User.google_sub == sub).first()
     if not user:
+        if db.query(User).filter(func.lower(User.email) == email.lower()).first():
+            # Conta de senha com este e-mail: quem a criou não provou que o
+            # e-mail é seu. Vincular aqui daria a esta pessoa uma conta cuja
+            # senha outro escolheu. O vínculo é feito de dentro da conta.
+            raise HTTPException(
+                status_code=409,
+                detail="Já existe uma conta com este e-mail. Entre com usuário e senha e vincule o Google na sua conta.",
+            )
         # Primeiro acesso: cria a conta automaticamente
         base_username = email.split("@")[0]
         username = base_username
@@ -69,6 +82,7 @@ def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
         user = User(
             email=email,
             username=username,
+            google_sub=sub,
             # Senha aleatória — conta Google entra sempre pelo botão do Google
             hashed_password=get_password_hash(secrets.token_urlsafe(24)),
         )
@@ -81,6 +95,17 @@ def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
 
     token = create_access_token(data={"sub": str(user.id)})
     return {"access_token": token, "token_type": "bearer"}
+
+
+@router.post("/google/link", status_code=status.HTTP_204_NO_CONTENT)
+def google_link(body: GoogleLogin, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Vincula a conta Google à conta em que a pessoa já entrou com senha."""
+    claims = _claims_google(body.credential)
+    outra = db.query(User).filter(User.google_sub == claims["sub"], User.id != current_user.id).first()
+    if outra:
+        raise HTTPException(status_code=409, detail="Esta conta Google já está vinculada a outra conta.")
+    current_user.google_sub = claims["sub"]
+    db.commit()
 
 
 # Cadastro e login são os dois pontos abertos a quem não tem conta: sem limite,

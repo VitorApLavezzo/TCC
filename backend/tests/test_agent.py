@@ -241,7 +241,8 @@ class TestUpdater:
         manifest = {
             "files": [
                 {"name": "agent.py", "sha256": hashlib.sha256(b"igual").hexdigest()},
-                {"name": "novo.py", "sha256": "a" * 64},
+                {"name": "inventory.py", "sha256": "a" * 64},
+                {"name": "novo.py", "sha256": "c" * 64},  # fora da lista do agente: ignorado
                 {"name": "../fora.py", "sha256": "b" * 64},  # travessia de caminho: ignorada
             ]
         }
@@ -254,8 +255,8 @@ class TestUpdater:
                 return manifest
 
         monkeypatch.setattr(updater.requests, "get", lambda *a, **k: FakeResponse())
-        pending = updater.check("http://server", "tok")
-        assert [name for name, _ in pending] == ["novo.py"]
+        pending = updater.check("https://server", "tok")
+        assert [name for name, _ in pending] == ["inventory.py"]
 
 
 class TestCollectorPayload:

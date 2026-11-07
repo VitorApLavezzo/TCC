@@ -14,3 +14,23 @@ export function confirmBody(command: string, machineName?: string | null) {
   const consequencia = CONSEQUENCIA[command] ?? "";
   return `Esta ação será executada ${onde}. ${consequencia}`.trim();
 }
+
+/**
+ * Parâmetros de "encerrar processo" a partir dos detalhes do aviso.
+ *
+ * Vai a identidade da instância — pid, caminho e hora de início — para o
+ * agente conferir antes de agir. Sem pid não há botão: só pelo nome, o agente
+ * encerraria todo processo homônimo (os svchost.exe verdadeiros, inclusive).
+ */
+export function killParamsFor(
+  proc: string | null | undefined,
+  beh: { pid?: number; exe?: string; create_time?: number } | null | undefined,
+) {
+  if (!beh?.pid) return null;
+  return {
+    pid: beh.pid,
+    ...(proc ? { name: proc } : {}),
+    ...(beh.exe ? { exe: beh.exe } : {}),
+    ...(beh.create_time != null ? { create_time: beh.create_time } : {}),
+  };
+}

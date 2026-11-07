@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, JSON, Float, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, JSON, Float, Text, UniqueConstraint
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -50,3 +50,20 @@ class HashReputation(Base):
     vt_total = Column(Integer)
     checked_at = Column(DateTime(timezone=True))
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ReputationVote(Base):
+    """Um "é normal" / "é problema" por executável e por conta.
+
+    O contador global somava cada clique de qualquer conta: um só "é problema"
+    de quem nem tinha o programa reprovava o antivírus dos outros. O voto
+    vale para as máquinas da própria conta; para as demais, os contadores de
+    HashReputation são só opinião coletiva, contada uma vez por conta.
+    """
+    __tablename__ = "reputation_votes"
+    __table_args__ = (UniqueConstraint("identity_key", "owner_id"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    identity_key = Column(String, index=True, nullable=False)
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    kind = Column(String, nullable=False)

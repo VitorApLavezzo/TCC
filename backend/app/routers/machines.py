@@ -2,6 +2,7 @@ import secrets
 from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.timeutil import aware, utcnow
@@ -90,6 +91,24 @@ def revoke_bulk_key(key_id: int, db: Session = Depends(get_db), current_user: Us
 # O pareamento aceita um código de seis caracteres de quem ainda não tem token:
 # 30 tentativas por hora por IP mantêm a instalação legítima confortável e
 # tornam a varredura do espaço de códigos inviável.
+def _consume_enrollment(db: Session, enrollment: EnrollmentCode) -> bool:
+    """Gasta um uso do código no próprio banco. Devolve False se não sobrava uso.
+
+    Conferir `use_count` lido antes e gravar `use_count + 1` calculado em
+    Python deixava pedidos simultâneos passarem todos pela conferência: uma
+    chave com limite de 1 máquina pareou 5, e o contador ficou em 1. O UPDATE
+    condicional decide com o valor que está no banco na hora de gravar.
+    """
+    filtros = [EnrollmentCode.id == enrollment.id, EnrollmentCode.revoked == False]  # noqa: E712
+    if enrollment.reusable:
+        filtros.append(or_(EnrollmentCode.max_uses.is_(None), EnrollmentCode.use_count < EnrollmentCode.max_uses))
+    else:
+        filtros += [EnrollmentCode.machine_id.is_(None), EnrollmentCode.use_count == 0]
+    gastos = db.query(EnrollmentCode).filter(*filtros).update(
+        {EnrollmentCode.use_count: EnrollmentCode.use_count + 1}, synchronize_session=False)
+    return gastos == 1
+
+
 @router.post("/enroll", response_model=AgentEnrollResponse,
              dependencies=[Depends(limit("enroll", 30, 3600))])
 def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
@@ -108,10 +127,10 @@ def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
     if not enrollment or aware(enrollment.expires_at) < utcnow() or enrollment.revoked:
         raise HTTPException(status_code=400, detail="Código de pareamento inválido, expirado ou revogado")
 
-    if enrollment.reusable:
-        if enrollment.max_uses is not None and enrollment.use_count >= enrollment.max_uses:
+    if not _consume_enrollment(db, enrollment):
+        db.rollback()
+        if enrollment.reusable:
             raise HTTPException(status_code=400, detail="Este código atingiu o limite de máquinas permitido")
-    elif enrollment.machine_id is not None:
         raise HTTPException(status_code=400, detail="Código de pareamento já utilizado")
 
     machine = Machine(
@@ -126,9 +145,10 @@ def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
     db.add(machine)
     db.flush()
 
-    enrollment.use_count += 1
     if not enrollment.reusable:
-        enrollment.machine_id = machine.id  # marca o código de uso único como consumido
+        # marca o código de uso único como consumido
+        db.query(EnrollmentCode).filter(EnrollmentCode.id == enrollment.id).update(
+            {EnrollmentCode.machine_id: machine.id}, synchronize_session=False)
 
     db.commit()
     db.refresh(machine)

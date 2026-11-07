@@ -1,6 +1,7 @@
 import axios from "axios";
 import { reportFailure, reportSuccess } from "../lib/connection";
 import { sessionExpired } from "../lib/session";
+import { pararAvisosNesteAparelho } from "../lib/push";
 
 const api = axios.create({
   baseURL: "/api",
@@ -23,6 +24,9 @@ api.interceptors.response.use(
     if (err.response?.status === 401) {
       const hadToken = Boolean(err.config?.headers?.Authorization);
       localStorage.removeItem("token");
+      // Sessão vencida: sem token para avisar o servidor, ao menos o
+      // navegador para de receber os avisos desta conta.
+      if (hadToken) void pararAvisosNesteAparelho();
       // `sessao=expirada` faz o login explicar por que a pessoa voltou pra cá,
       // em vez de simplesmente aparecer na tela de login sem motivo.
       if (sessionExpired({ hadToken, pathname: window.location.pathname })) {
@@ -258,7 +262,11 @@ export const pushApi = {
   config: () => api.get("/account/push/config"),
   devices: () => api.get("/account/push/devices"),
   subscribe: (subscription: object) => api.post("/account/push/subscribe", subscription),
-  unsubscribe: (endpoint: string) => api.delete("/account/push/subscribe", { params: { endpoint } }),
+  unsubscribe: (endpoint: string, token?: string | null) =>
+    api.delete("/account/push/subscribe", {
+      params: { endpoint },
+      ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+    }),
   test: () => api.post("/account/push/test"),
 };
 

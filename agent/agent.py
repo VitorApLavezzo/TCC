@@ -136,8 +136,13 @@ def _load_saved_token() -> str:
 
 
 def _save_token(token: str, machine_name: str):
+    # O token autentica a máquina para sempre: só o dono do processo lê. No
+    # Windows quem protege é a ACL da pasta, que o instalador define.
     try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump({"agent_token": token, "machine_name": machine_name, "api_url": API_URL}, f, indent=2)
         logger.info(f"Token salvo em {CONFIG_FILE} — não será pedido novamente.")
     except OSError as e:

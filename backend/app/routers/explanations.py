@@ -106,5 +106,5 @@ def judge_explanation(anomaly_id: int, db: Session = Depends(get_db), current_us
     """Pede a uma IA-juíza que avalie a qualidade da explicação (assíncrono)."""
     _owned_anomaly(db, anomaly_id, current_user)
     from app.services import evaluation
-    jobs.submit(evaluation.judge, anomaly_id)
+    jobs.submit(evaluation.judge, anomaly_id, owner_id=current_user.id)
     return {"status": "avaliando"}

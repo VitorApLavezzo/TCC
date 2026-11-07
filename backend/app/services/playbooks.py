@@ -101,15 +101,27 @@ def _guard(db: Session, playbook: Playbook, anomaly: Anomaly, now) -> Optional[s
 
 
 def _params_for(playbook: Playbook, anomaly: Anomaly) -> Dict[str, Any]:
+    """Parâmetros da ação a partir do aviso.
+
+    Encerrar processo leva a identidade da instância (pid, caminho, hora de
+    início) para o agente conferir antes de agir. Pausar sincronização não
+    leva nome nenhum: o agente usa a própria lista de clientes conhecidos, e
+    o nome do aviso (que vem do agente) virava "encerre qualquer programa".
+    """
     params = dict(playbook.params or {})
-    if playbook.action in ("kill_process", "stop_sync_client") and anomaly.responsible_process:
-        params.setdefault("name", anomaly.responsible_process)
     if playbook.action == "kill_process":
-        pid = (anomaly.affected_metrics or {}).get("pid")
-        if pid is None:
-            pid = ((anomaly.affected_metrics or {}).get("_behavior") or {}).get("pid")
+        affected = anomaly.affected_metrics or {}
+        details = affected.get("_behavior") or {}
+        pid = affected.get("pid") if affected.get("pid") is not None else details.get("pid")
         if pid is not None:
             params.setdefault("pid", pid)
+            if anomaly.responsible_process:
+                params.setdefault("name", anomaly.responsible_process)
+            for chave in ("exe", "create_time"):
+                if details.get(chave) is not None:
+                    params.setdefault(chave, details[chave])
+    if playbook.action == "stop_sync_client":
+        params.pop("name", None)
     return params
 
 

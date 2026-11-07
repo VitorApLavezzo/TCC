@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.core.timeutil import aware, utcnow
 from app.models.hub import HubContribution, HubInstallation
-from app.models.identity import HashReputation, ProcessIdentity
+from app.models.identity import HashReputation, ProcessIdentity, ReputationVote
 from app.models.machine import Machine
 from app.models.user import User
 from app.services.identity_service import identity_key
@@ -40,56 +40,82 @@ def total_machines(db: Session, days: int = 30) -> int:
     return db.query(Machine.id).filter(Machine.last_seen >= since).count() or db.query(Machine.id).count()
 
 
-def describe(db: Session, key: str) -> Optional[Dict[str, Any]]:
+def describe(db: Session, key: str, owner_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """O que se sabe de um executável.
+
+    Com `owner_id`, só o que essa conta pode saber: as máquinas e o voto dela,
+    o hub e o VirusTotal. A consulta pela rota usava o contador do servidor
+    inteiro e revelava programas de outras contas — inclusive de quem
+    desligou o compartilhamento de reputação.
+    """
     rep = db.query(HashReputation).filter(HashReputation.identity_key == key).first()
-    if not rep:
-        return None
-    total = max(total_machines(db), 1)
-    prevalence = min((rep.local_machines or 0) / total, 1.0)
+    if owner_id is None:
+        if not rep:
+            return None
+        local, total = rep.local_machines or 0, max(total_machines(db), 1)
+        normal, problem = rep.marked_normal or 0, rep.marked_problem or 0
+    else:
+        from app.services import trust
+        local = trust.owner_machine_counts(db, owner_id, {key}).get(key, 0)
+        total = max(db.query(Machine.id).filter(Machine.owner_id == owner_id).count(), 1)
+        voto = db.query(ReputationVote.kind).filter(ReputationVote.identity_key == key,
+                                                    ReputationVote.owner_id == owner_id).scalar()
+        normal, problem = int(voto == "normal"), int(voto == "problem")
+        if not local and not voto and not (rep and (rep.hub_installations or rep.vt_total)):
+            return None
+    hub_installations = rep.hub_installations if rep else None
+    hub_prevalence = rep.hub_prevalence if rep else None
+    vt_malicious = rep.vt_malicious if rep else None
+    vt_total = rep.vt_total if rep else None
+
+    prevalence = min(local / total, 1.0)
     parts: List[str] = []
-    if rep.local_machines:
-        parts.append(f"visto em {round(prevalence * 100)}% dos computadores deste servidor ({rep.local_machines} de {total})")
-    if rep.hub_installations:
+    if local:
+        parts.append(f"visto em {round(prevalence * 100)}% dos seus computadores ({local} de {total})"
+                     if owner_id is not None else
+                     f"visto em {round(prevalence * 100)}% dos computadores deste servidor ({local} de {total})")
+    if hub_installations:
         parts.append(
-            f"em {round((rep.hub_prevalence or 0) * 100)}% dos computadores de {rep.hub_installations} "
+            f"em {round((hub_prevalence or 0) * 100)}% dos computadores de {hub_installations} "
             "instalações que compartilham reputação"
         )
-    if rep.marked_normal:
-        parts.append(f"marcado como normal {rep.marked_normal} vez(es)")
-    if rep.marked_problem:
-        parts.append(f"confirmado como problema {rep.marked_problem} vez(es)")
-    if rep.vt_total:
-        parts.append(f"VirusTotal: {rep.vt_malicious or 0} de {rep.vt_total} antivírus acusam")
+    if normal:
+        parts.append(f"marcado como normal {normal} vez(es)")
+    if problem:
+        parts.append(f"confirmado como problema {problem} vez(es)")
+    if vt_total:
+        parts.append(f"VirusTotal: {vt_malicious or 0} de {vt_total} antivírus acusam")
 
-    malicious = rep.vt_malicious or 0
-    if (rep.marked_problem or 0) > (rep.marked_normal or 0) or malicious >= 3:
+    malicious = vt_malicious or 0
+    if problem > normal or malicious >= 3:
         verdict = "suspeito"
-    elif (prevalence >= 0.5 or (rep.hub_prevalence or 0) >= 0.3) and not rep.marked_problem and malicious == 0:
+    elif (prevalence >= 0.5 or (hub_prevalence or 0) >= 0.3) and not problem and malicious == 0:
         verdict = "comum e sem queixas"
-    elif (rep.local_machines or 0) <= 1 and not rep.hub_installations:
+    elif local <= 1 and not hub_installations:
         verdict = "raro"
     else:
         verdict = "sem opinião formada"
     return {
         "identity_key": key,
-        "name": rep.name,
-        "publisher": rep.publisher,
-        "local_machines": rep.local_machines or 0,
+        "name": rep.name if rep else None,
+        "publisher": rep.publisher if rep else None,
+        "local_machines": local,
         "total_machines": total,
         "prevalence": round(prevalence, 3),
-        "hub_prevalence": rep.hub_prevalence,
-        "hub_installations": rep.hub_installations,
-        "marked_normal": rep.marked_normal or 0,
-        "marked_problem": rep.marked_problem or 0,
-        "vt_malicious": rep.vt_malicious,
-        "vt_total": rep.vt_total,
+        "hub_prevalence": hub_prevalence,
+        "hub_installations": hub_installations,
+        "marked_normal": normal,
+        "marked_problem": problem,
+        "vt_malicious": vt_malicious,
+        "vt_total": vt_total,
         "verdict": verdict,
         "sentence": (parts[0][0].upper() + "; ".join(parts)[1:] + ".") if parts else "Nenhuma informação ainda.",
     }
 
 
-def for_process(db: Session, name: Optional[str], exe: Optional[str], sha256: Optional[str]) -> Optional[Dict[str, Any]]:
-    return describe(db, identity_key(name, exe, sha256))
+def for_process(db: Session, name: Optional[str], exe: Optional[str], sha256: Optional[str],
+                owner_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    return describe(db, identity_key(name, exe, sha256), owner_id)
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +174,8 @@ def accept_contribution(db: Session, installation: str, total: int, items: List[
             identity_key=str(item["identity_key"])[:128],
             name=str(item.get("name") or "")[:200],
             publisher=str(item.get("publisher") or "")[:200] or None,
-            machines=int(item["machines"]),
+            # Nunca mais máquinas do que a própria instalação diz ter
+            machines=min(int(item["machines"]), inst.total_machines),
             marked_normal=int(item.get("marked_normal") or 0),
             marked_problem=int(item.get("marked_problem") or 0),
         ))
@@ -187,7 +214,7 @@ def apply_hub_snapshot(db: Session, snapshot: Dict[str, Any]) -> int:
             db.add(rep)
         rep.hub_machines = item.get("machines")
         rep.hub_installations = item.get("installations")
-        rep.hub_prevalence = item.get("prevalence")
+        rep.hub_prevalence = min(float(item.get("prevalence") or 0), 1.0)
         updated += 1
     db.commit()
     return updated
@@ -200,7 +227,7 @@ def sync_hub(db: Session) -> int:
         return updated
     payload = contributions(db)
     with httpx.Client(timeout=30) as client:
-        client.post(f"{hub}/api/reputation/contribute", json={
+        client.post(f"{hub}/api/reputation/contribute", headers={"X-Hub-Key": settings.REPUTATION_HUB_KEY}, json={
             "installation_id": installation_id(),
             "total_machines": payload["total_machines"],
             "items": payload["items"],

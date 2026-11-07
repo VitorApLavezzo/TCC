@@ -39,7 +39,7 @@ WORK_NATIVE="$(to_native "$WORK")"
 
 echo "== subindo o backend (SQLite em $WORK) =="
 cd "$ROOT/backend"
-DATABASE_URL="sqlite:///$WORK_NATIVE/e2e.db" SECRET_KEY=e2e-secret PYTHONPATH=. \
+DATABASE_URL="sqlite:///$WORK_NATIVE/e2e.db" SECRET_KEY=e2e-chave-local-somente-para-teste-0123456789 PYTHONPATH=. \
   "$PY" -m uvicorn app.main:app --host 127.0.0.1 --port "$PORT" --log-level warning \
   > "$WORK/server.log" 2>&1 &
 SERVER_PID=$!

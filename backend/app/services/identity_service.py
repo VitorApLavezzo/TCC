@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from sqlalchemy.orm import Session
 
 from app.core.timeutil import utcnow
-from app.models.identity import HashReputation, ProcessIdentity
+from app.models.identity import HashReputation, ProcessIdentity, ReputationVote
 from app.models.machine import Machine
 
 # Pastas com a versão no nome (Discord\app-1.0.9034\, Teams\25.1.2\): sem
@@ -78,6 +78,9 @@ def observe(db: Session, machine: Machine, snapshots: Iterable, starts: Iterable
 
     now = utcnow()
     new_keys: List[str] = []
+    # Um executável conta uma máquina uma vez só, por mais caminhos com que o
+    # agente o informe: três caminhos falsos não viram três computadores.
+    contados = {identity_key(i.name, i.exe, i.sha256) for i in existing.values()}
     for key, e in entries.items():
         ident = existing.get(key)
         if ident:
@@ -107,7 +110,9 @@ def observe(db: Session, machine: Machine, snapshots: Iterable, starts: Iterable
             ))
             k = identity_key(e["name"], e["exe"], e["sha256"])
             new_keys.append(k)
-            _bump_reputation(db, k, e)
+            if k not in contados:
+                contados.add(k)
+                _bump_reputation(db, k, e)
     db.flush()
     return new_keys
 
@@ -125,18 +130,32 @@ def _bump_reputation(db: Session, key: str, e: Dict[str, Any]):
 
 
 def record_feedback(db: Session, anomaly, kind: str):
-    """Soma o "é normal" / "é problema" à reputação do programa responsável."""
-    if not anomaly.responsible_process:
+    """Guarda o "é normal" / "é problema" da conta dona do aviso.
+
+    Um voto por executável e por conta: repetir troca o voto, não soma. Os
+    contadores globais passam a contar contas, e só valem como opinião para
+    as outras — quem reprova de verdade é o voto da própria conta (trust.py).
+    """
+    if not anomaly.responsible_process or kind not in ("normal", "problem"):
+        return
+    owner_id = db.query(Machine.owner_id).filter(Machine.id == anomaly.machine_id).scalar()
+    if owner_id is None:
         return
     details = (anomaly.affected_metrics or {}).get("_behavior") or {}
     key = identity_key(anomaly.responsible_process, details.get("exe"), details.get("sha256"))
+    vote = db.query(ReputationVote).filter(ReputationVote.identity_key == key,
+                                           ReputationVote.owner_id == owner_id).first()
+    if vote is None:
+        vote = ReputationVote(identity_key=key, owner_id=owner_id, kind=kind)
+        db.add(vote)
+    vote.kind = kind
+    db.flush()
     rep = db.query(HashReputation).filter(HashReputation.identity_key == key).first()
     if not rep:
         rep = HashReputation(identity_key=key, name=anomaly.responsible_process, local_machines=0,
                              local_owners=0, marked_normal=0, marked_problem=0)
         db.add(rep)
         db.flush()
-    if kind == "normal":
-        rep.marked_normal = (rep.marked_normal or 0) + 1
-    elif kind == "problem":
-        rep.marked_problem = (rep.marked_problem or 0) + 1
+    votos = db.query(ReputationVote.kind).filter(ReputationVote.identity_key == key).all()
+    rep.marked_normal = sum(1 for (k,) in votos if k == "normal")
+    rep.marked_problem = sum(1 for (k,) in votos if k == "problem")

@@ -11,6 +11,10 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
+    # Identidade estável do Google (claim `sub`). O vínculo é com ela, não
+    # com o e-mail: o cadastro por senha não prova posse do e-mail, e casar
+    # pelo e-mail entregava a conta a quem a criou primeiro.
+    google_sub = Column(String, unique=True, index=True, nullable=True)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

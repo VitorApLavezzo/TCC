@@ -76,23 +76,32 @@ class TestNiveisDeConfianca:
         assert trust.evaluate(db, m.id, proc).level == trust.TRUSTED
 
     def test_confirmado_como_problema_perde_toda_a_confianca(self, db):
-        from app.models.identity import HashReputation
+        # O voto que reprova é o da própria conta (o de outra conta é só opinião)
+        from app.models.identity import HashReputation, ReputationVote
         from app.services import trust
         m = _machine(db)
         proc = _proc(name="avp.exe", exe="C:\\Program Files\\Kaspersky Lab\\avp.exe",
                      publisher="Kaspersky Lab JSC", sha256="b" * 64)
-        db.add(HashReputation(identity_key="b" * 64, name="avp.exe", local_machines=5, marked_problem=2))
+        db.add(HashReputation(identity_key="b" * 64, name="avp.exe", local_machines=5, marked_problem=1))
+        db.add(ReputationVote(identity_key="b" * 64, owner_id=m.owner_id, kind="problem"))
         db.commit()
         assert trust.evaluate(db, m.id, proc).level == trust.UNKNOWN
 
     def test_visto_em_varias_maquinas_vira_comum_mesmo_sem_assinatura(self, db):
-        from app.models.identity import HashReputation
+        # Prevalência é na frota do próprio dono: quatro máquinas dele
+        from app.models.identity import ProcessIdentity
         from app.services import trust
         m = _machine(db)
+        for i in range(4):
+            outra = m if i == 0 else Machine(name=f"PC{i}", hostname=f"H{i}", agent_token=f"tok-{id(db)}-{i}",
+                                             owner_id=m.owner_id)
+            db.add(outra)
+            db.flush()
+            db.add(ProcessIdentity(machine_id=outra.id, name="ferramenta.exe",
+                                   exe=f"C:\\Users\\x{i}\\ferramenta.exe", sha256="c" * 64))
+        db.commit()
         proc = _proc(name="ferramenta.exe", exe="C:\\Users\\x\\ferramenta.exe",
                      signed="unknown", publisher=None, sha256="c" * 64)
-        db.add(HashReputation(identity_key="c" * 64, name="ferramenta.exe", local_machines=4, marked_problem=0))
-        db.commit()
         assert trust.evaluate(db, m.id, proc).level == trust.COMMON
 
 

@@ -81,15 +81,30 @@ def send_notification(db, user, text: str, notification, link: Optional[str]):
 # Recebimento (long polling)
 # ---------------------------------------------------------------------------
 
-def _handle_start(db, chat_id: str, code: str) -> str:
+def _handle_start(db, chat_id: str, code: str, chat_type: str = "private") -> str:
     from app.models.user import User
+    if chat_type != "private":
+        return "Vincule pelo chat privado com o bot."
     user = db.query(User).filter(User.telegram_link_code == code).first() if code else None
     if not user:
         return "Código inválido ou expirado. Gere um novo no painel, em Conta → Telegram."
+    # Um chat, uma conta: o código de outra conta não pode anexar o chat de
+    # alguém que já está vinculado (os avisos dela chegavam nele, e os botões
+    # do dono passavam a responder pela conta errada).
+    outra = db.query(User).filter(User.telegram_chat_id == str(chat_id), User.id != user.id).first()
+    if outra:
+        return "Este Telegram já está vinculado a outra conta. Envie /sair para desvincular e tente de novo."
     user.telegram_chat_id = str(chat_id)
     user.telegram_link_code = None
     db.commit()
     return f"Pronto, {user.username}! Este Telegram agora recebe os avisos dos seus computadores."
+
+
+def _handle_leave(db, chat_id: str) -> str:
+    from app.models.user import User
+    db.query(User).filter(User.telegram_chat_id == str(chat_id)).update({User.telegram_chat_id: None})
+    db.commit()
+    return "Pronto: este Telegram não recebe mais avisos de nenhuma conta."
 
 
 def _handle_callback(db, chat_id: str, data: str) -> str:
@@ -98,7 +113,8 @@ def _handle_callback(db, chat_id: str, data: str) -> str:
     from app.models.user import User
     from app.services import commands, feedback
 
-    user = db.query(User).filter(User.telegram_chat_id == str(chat_id)).first()
+    usuarios = db.query(User).filter(User.telegram_chat_id == str(chat_id)).all()
+    user = usuarios[0] if len(usuarios) == 1 else None
     if not user or ":" not in data:
         return "Não consegui identificar sua conta."
     action, _, raw_id = data.partition(":")
@@ -115,9 +131,16 @@ def _handle_callback(db, chat_id: str, data: str) -> str:
         feedback.apply_feedback(db, anomaly, "normal", scope="process")
         return f"Ok, vou tratar isso como normal para {machine.name}."
     if action == "kill" and anomaly.responsible_process:
-        commands.create(db, machine, "kill_process", {"name": anomaly.responsible_process},
+        # O agente encerra só o processo exato do aviso (pid + caminho + hora
+        # de início); sem pid, um nome como svchost.exe encerraria os do sistema.
+        details = (anomaly.affected_metrics or {}).get("_behavior") or {}
+        if details.get("pid") is None:
+            return "Este aviso não aponta um processo específico; encerre pelo painel."
+        params = {k: details[k] for k in ("pid", "exe", "create_time") if details.get(k) is not None}
+        params["name"] = anomaly.responsible_process
+        commands.create(db, machine, "kill_process", params,
                         user_id=user.id, anomaly_id=anomaly.id, source="telegram")
-        return f"Pedi para encerrar {anomaly.responsible_process} em {machine.name}. Confiro se resolveu."
+        return f"Pedi para encerrar {anomaly.responsible_process} (PID {params['pid']}) em {machine.name}. Confiro se resolveu."
     if action == "isolate":
         commands.create(db, machine, "isolate_network", {}, user_id=user.id, anomaly_id=anomaly.id, source="telegram")
         return f"Pedi para isolar {machine.name} da rede (menos o servidor). Você pode restaurar pelo painel."
@@ -133,7 +156,9 @@ def _process_update(update: Dict[str, Any]):
             text = (msg.get("text") or "").strip()
             if text.startswith("/start"):
                 code = text[6:].strip()
-                reply = _handle_start(db, chat_id, code)
+                reply = _handle_start(db, chat_id, code, msg["chat"].get("type", ""))
+            elif text == "/sair":
+                reply = _handle_leave(db, chat_id)
             elif text == "/ajuda" or text == "/help":
                 reply = "Vincule sua conta com o código do painel (Conta → Telegram). Depois é só receber os avisos."
             else:

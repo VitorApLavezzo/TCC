@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Anomaly, Machine, SECURITY_TYPES } from "../../types";
 import { actionsApi, errorMessage } from "../../services/api";
 import { processName } from "../../lib/format";
-import { confirmBody } from "../../lib/actions";
+import { confirmBody, killParamsFor } from "../../lib/actions";
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
@@ -67,9 +67,9 @@ export function AnomalyActions({ anomaly, machine }: { anomaly: Anomaly; machine
   const isSecurity = SECURITY_TYPES.has(anomaly.anomaly_type);
   const isAdmin = (machine.system_info as any)?.is_admin;
   const proc = processName(anomaly);
-  const pid = anomaly.affected_metrics?._behavior?.pid;
-  const killLabel = proc ? `Encerrar ${proc}` : pid ? `Encerrar processo (PID ${pid})` : null;
-  const killParams = proc ? { name: proc, ...(pid ? { pid } : {}) } : pid ? { pid } : null;
+  const beh = anomaly.affected_metrics?._behavior;
+  const killParams = killParamsFor(proc, beh);
+  const killLabel = killParams ? (proc ? `Encerrar ${proc}` : `Encerrar processo (PID ${killParams.pid})`) : null;
 
   return (
     <div className="flex flex-wrap items-center gap-2">

@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.redaction import redact_personal
 from app.core.timeutil import aware, utcnow
 from app.models.anomaly import Anomaly
-from app.models.identity import HashReputation, ProcessIdentity
+from app.models.identity import ProcessIdentity
 from app.models.inventory import ChangeEvent, InventorySnapshot
 from app.models.machine import Machine
 from app.models.metric import Metric
@@ -374,13 +374,15 @@ def evaluate_beacons(db: Session, machine: Machine, beacons: List[Dict[str, Any]
         # Programa assinado e presente há dias: provavelmente checagem de atualização
         if established and signed:
             continue
-        rep = None
-        if ident:
-            rep = db.query(HashReputation).filter(
-                HashReputation.identity_key == identity_key(ident.name, ident.exe, ident.sha256)
-            ).first()
-        if rep and (rep.local_machines or 0) >= 3 and (rep.marked_problem or 0) == 0 and signed:
-            continue
+        # Assinado e comum na frota DESTE dono: provavelmente atualização. A
+        # contagem é da própria conta — o agente de outra conta inflava o
+        # contador global e fazia o beaconing de um implante sumir aqui.
+        if ident and signed:
+            from app.services import trust
+            k = identity_key(ident.name, ident.exe, ident.sha256)
+            if (trust.owner_machine_counts(db, machine.owner_id, {k}).get(k, 0) >= 3
+                    and k not in trust.owner_problem_keys(db, machine.owner_id, {k})):
+                continue
 
         severity = "high" if not signed and not established else "medium"
         a = persist_candidate(

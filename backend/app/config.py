@@ -1,10 +1,17 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from typing import Optional
+
+# Valores que já circularam publicamente (código, .env.example, compose):
+# quem conhece um deles assina sessão de qualquer conta.
+_CHAVES_PUBLICAS = {"change-this-in-production", "dev-secret-key-change-in-production"}
 
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/anomaly_db"
-    SECRET_KEY: str = "dev-secret-key-change-in-production"
+    # Obrigatória e forte: sem padrão, para o servidor não subir assinando
+    # sessões com uma chave que está no repositório (start.sh gera uma).
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
@@ -73,8 +80,13 @@ class Settings(BaseSettings):
     VIRUSTOTAL_API_KEY: str = ""
     # Outro servidor AnomalyDetect que agrega reputação anônima entre instalações
     REPUTATION_HUB_URL: str = ""
-    # Este servidor aceita contribuições anônimas de outros (atua como hub)
-    REPUTATION_HUB_ACCEPT: bool = True
+    # Este servidor aceita contribuições de outros (atua como hub). Desligado
+    # por padrão: só instalações cadastradas em REPUTATION_HUB_KEYS
+    # ("instalacao:segredo,outra:segredo") podem contribuir.
+    REPUTATION_HUB_ACCEPT: bool = False
+    REPUTATION_HUB_KEYS: str = ""
+    # Segredo desta instalação ao contribuir para REPUTATION_HUB_URL
+    REPUTATION_HUB_KEY: str = ""
 
     # Energia: valores padrão enquanto o usuário não informa os seus
     DEFAULT_TARIFF_KWH: float = 0.85
@@ -94,6 +106,15 @@ class Settings(BaseSettings):
 
     # Limite de tentativas por IP em login, cadastro e pareamento
     RATE_LIMIT_ENABLED: bool = True
+    # Redes dos proxies que escrevem o IP real do cliente em X-Real-IP (o
+    # Nginx do Compose fica na rede bridge 172.16.0.0/12). De qualquer outro
+    # endereço o cabeçalho é ignorado: senão cada cliente escolhia o próprio
+    # balde do limite.
+    TRUSTED_PROXY_CIDRS: str = ""
+
+    # Chave do selo do livro de auditoria, guardada fora do banco. Vazia,
+    # deriva da SECRET_KEY — quem só tem acesso ao banco não refaz os selos.
+    LEDGER_HMAC_KEY: str = ""
 
     # --- Deriva do modelo -------------------------------------------------
     # Distância (Jensen-Shannon média entre as métricas) a partir da qual o
@@ -118,6 +139,15 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def _chave_forte(cls, v: str) -> str:
+        v = v.strip()
+        if v in _CHAVES_PUBLICAS or len(v) < 32:
+            raise ValueError("SECRET_KEY precisa ser um valor aleatório próprio, com pelo menos 32 caracteres "
+                             "(gere com: python3 -c 'import secrets; print(secrets.token_urlsafe(48))')")
+        return v
 
 
 settings = Settings()

@@ -30,31 +30,39 @@ SYNC_CLIENTS = {"onedrive.exe", "googledrivesync.exe", "googledrive.exe", "dropb
 FIREWALL_RULE = "AnomalyDetect-Isolation"
 
 
-def _kill(pid: Optional[int], name: Optional[str]) -> Dict[str, Any]:
-    killed = []
-    targets = []
-    if pid:
+def _kill(pid: Optional[int], name: Optional[str], create_time: Optional[float] = None,
+          exe: Optional[str] = None) -> Dict[str, Any]:
+    """Encerra só o processo que o aviso apontou.
+
+    Antes, além do pid, encerrava todo processo com o mesmo nome: um programa
+    de usuário comum chamado svchost.exe gerava o aviso, e o agente (como
+    SYSTEM) derrubava os svchost.exe verdadeiros. Agora vale o pid, conferido
+    com nome, hora de início e caminho quando o servidor os manda — um pid
+    reaproveitado por outro processo não é encerrado.
+    """
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return {"ok": False, "killed_pids": [], "message": "Sem o número do processo (pid), nada foi encerrado"}
+    try:
+        p = psutil.Process(pid)
+        with p.oneshot():
+            if name and (p.name() or "").lower() != str(name).lower():
+                return {"ok": False, "killed_pids": [], "message": "O processo com esse número já é outro"}
+            if create_time is not None and abs(p.create_time() - float(create_time)) > 1:
+                return {"ok": False, "killed_pids": [], "message": "O número do processo foi reaproveitado"}
+            if exe and os.path.normcase(p.exe() or "") != os.path.normcase(str(exe)):
+                return {"ok": False, "killed_pids": [], "message": "O programa não é o do aviso"}
+        p.terminate()
         try:
-            targets.append(psutil.Process(pid))
-        except psutil.NoSuchProcess:
-            pass
-    if name:
-        for p in psutil.process_iter(["pid", "name"]):
-            if (p.info.get("name") or "").lower() == name.lower():
-                targets.append(p)
-    for p in targets:
-        try:
-            p.terminate()
-            killed.append(p.pid)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    gone, alive = psutil.wait_procs(targets, timeout=5)
-    for p in alive:
-        try:
+            p.wait(5)
+        except psutil.TimeoutExpired:
             p.kill()
-        except psutil.Error:
-            pass
-    return {"killed_pids": killed, "message": f"{len(killed)} processo(s) encerrado(s)"}
+    except psutil.NoSuchProcess:
+        return {"ok": False, "killed_pids": [], "message": "O processo já tinha terminado"}
+    except (psutil.AccessDenied, ValueError) as e:
+        return {"ok": False, "killed_pids": [], "message": f"Não foi possível encerrar: {e}"}
+    return {"killed_pids": [pid], "message": "1 processo encerrado"}
 
 
 def _clean_temp(_params) -> Dict[str, Any]:
@@ -76,9 +84,15 @@ def _clean_temp(_params) -> Dict[str, Any]:
                 size = entry.stat().st_size if entry.is_file() else 0
                 if entry.is_file() or entry.is_symlink():
                     os.remove(entry.path)
-                else:
+                elif shutil.rmtree.avoids_symlink_attacks:
                     size = _dir_size(entry.path)
                     shutil.rmtree(entry.path, ignore_errors=True)
+                else:
+                    # No Windows o rmtree segue o caminho: quem criou a pasta
+                    # na Temp troca uma subpasta por junção no meio da descida
+                    # e o agente (SYSTEM) apaga fora da Temp. Lá só sai pasta
+                    # vazia — rmdir numa junção remove a junção, não o alvo.
+                    os.rmdir(entry.path)
                 freed += size
                 removed += 1
             except (OSError, PermissionError):
@@ -99,11 +113,14 @@ def _dir_size(path: str) -> int:
 
 
 def _stop_sync(params) -> Dict[str, Any]:
+    # Só clientes de sincronização conhecidos: o nome vindo do servidor pode
+    # restringir a lista, nunca acrescentar outro programa a ela.
     name = (params.get("name") or "").lower()
+    wanted = ({name} & SYNC_CLIENTS) if name else SYNC_CLIENTS
     stopped = []
     for p in psutil.process_iter(["pid", "name"]):
         pname = (p.info.get("name") or "").lower()
-        if pname in SYNC_CLIENTS or (name and pname == name):
+        if pname in wanted:
             try:
                 p.terminate()
                 stopped.append(p.info.get("name"))
@@ -197,7 +214,7 @@ def execute(command: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     params = command.get("params") or {}
     try:
         if cmd == "kill_process":
-            return _kill(params.get("pid"), params.get("name"))
+            return _kill(params.get("pid"), params.get("name"), params.get("create_time"), params.get("exe"))
         if cmd == "clean_temp":
             return _clean_temp(params)
         if cmd == "stop_sync_client":

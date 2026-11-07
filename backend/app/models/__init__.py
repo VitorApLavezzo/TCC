@@ -14,7 +14,7 @@ from app.models.diagnostic import Diagnostic
 from app.models.chat import ChatMessage
 from app.models.report import Report
 from app.models.inventory import InventorySnapshot, ChangeEvent
-from app.models.identity import ProcessIdentity, HashReputation
+from app.models.identity import ProcessIdentity, HashReputation, ReputationVote
 from app.models.blackbox import BlackboxCapture
 from app.models.notification import Notification, ShareLink
 from app.models.demo import DemoSession
@@ -34,6 +34,6 @@ __all__ = [
     "User", "Machine", "Metric", "ProcessSnapshot", "Incident", "Anomaly", "AIExplanation",
     "ProcessBaseline", "EnrollmentCode", "DetectionRule", "DetectorCalibration", "AgentCommand",
     "Diagnostic", "ChatMessage", "Report", "InventorySnapshot", "ChangeEvent", "ProcessIdentity",
-    "HashReputation", "BlackboxCapture", "Notification", "ShareLink", "DemoSession",
+    "HashReputation", "ReputationVote", "BlackboxCapture", "Notification", "ShareLink", "DemoSession",
     "BenchmarkRun", "ActivityLabel",
 ]
