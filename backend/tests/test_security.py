@@ -325,6 +325,22 @@ class TestAuditLedger:
         db.commit()
         assert integrity.verify(db)["ok"] is False
 
+    def test_verify_counts_only_the_callers_entries(self, client, auth, machine, db):
+        self._three_entries(db, machine)
+        other = _account(client, "outra")
+        assert client.get("/api/audit/verify", headers=other).json()["entries"] == 0
+        assert client.get("/api/audit/verify", headers=auth).json()["entries"] == 3
+
+    def test_break_in_another_accounts_entry_is_not_described(self, client, auth, machine, db):
+        self._three_entries(db, machine)
+        db.execute(text("""UPDATE ledger_entries SET payload = '{"comando": "x"}' WHERE ref_id = 201"""))
+        db.commit()
+        other = client.get("/api/audit/verify", headers=_account(client, "outra")).json()
+        assert other["ok"] is False
+        assert not {"broken_at", "kind", "created_at"} & other.keys()
+        own = client.get("/api/audit/verify", headers=auth).json()
+        assert own["ok"] is False and own["broken_at"]
+
     def test_machine_removal_keeps_integrity(self, client, auth, machine, db):
         self._three_entries(db, machine)
         assert client.delete(f"/api/machines/{machine['id']}", headers=auth).status_code in (200, 204)

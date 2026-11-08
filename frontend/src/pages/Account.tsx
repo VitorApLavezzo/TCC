@@ -111,11 +111,12 @@ export function Account() {
   const requested = params.get("aba") || "perfil";
   const tab = LEGACY_TABS[requested] ?? requested;
 
-  const guarded = (content: ReactElement) =>
+  // Recebe uma função: a aba lê prefs.*, e montá-la antes de as preferências chegarem quebrava a tela
+  const guarded = (render: () => ReactElement) =>
     loading ? (
       <Skeleton className="h-40 w-full rounded-panel" />
     ) : prefs ? (
-      content
+      render()
     ) : loadFailed ? (
       <LoadError what="suas preferências" onRetry={load} />
     ) : null;
@@ -164,7 +165,7 @@ export function Account() {
 
       {tab === "notificacoes" && (
         <div className="space-y-8">
-          {guarded(
+          {guarded(() => (
             <div className="space-y-8">
           <Section title="Como as explicações são escritas" description="O mesmo aviso, no nível que você preferir">
             <div className="inline-flex overflow-hidden rounded-control border border-edge">
@@ -281,14 +282,14 @@ export function Account() {
             </div>
           </Section>
             </div>
-          )}
+          ))}
           <PushDevices />
         </div>
       )}
 
       {tab === "privacidade" && (
         <div className="space-y-8">
-          {guarded(
+          {guarded(() => (
             <div className="space-y-8">
           <Section title="Privacidade">
             <Toggle
@@ -311,7 +312,7 @@ export function Account() {
             </label>
           </Section>
             </div>
-          )}
+          ))}
         </div>
       )}
 

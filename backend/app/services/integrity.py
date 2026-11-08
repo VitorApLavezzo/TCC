@@ -9,7 +9,7 @@ import hashlib
 import hmac
 import json
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -112,44 +112,66 @@ def append(db: Session, kind: str, payload: Dict[str, Any], ref_id: Optional[int
     return entry
 
 
-def verify(db: Session, limit: Optional[int] = None) -> Dict[str, Any]:
-    """Refaz a conta da cadeia inteira e diz se, e onde, ela quebrou."""
+def verify(db: Session, limit: Optional[int] = None,
+           machine_ids: Optional[List[int]] = None) -> Dict[str, Any]:
+    """Refaz a conta da cadeia inteira e diz se, e onde, ela quebrou.
+
+    Com machine_ids, conta e descreve só os registros desses computadores: o livro é um só
+    para todas as contas, e o registro quebrado pode ser de outra pessoa.
+    """
     query = db.query(LedgerEntry).order_by(LedgerEntry.id.asc())
     if limit:
         query = query.limit(limit)
     entries: List[LedgerEntry] = query.all()
+    broken, reason = _first_break(entries)
 
+    owned = set(machine_ids) if machine_ids is not None else None
+    mine = entries if owned is None else [e for e in entries if e.machine_id in owned]
+    if broken is not None:
+        if owned is not None and broken.machine_id not in owned:
+            return {
+                "ok": False,
+                "entries": len(mine),
+                "message": "A cadeia do livro está quebrada num registro de outra conta; "
+                           "os registros gravados depois dele não podem ser conferidos.",
+            }
+        return _failure(broken, reason, len(mine))
+
+    if owned is None:
+        message = (f"Cadeia íntegra: {len(entries)} registros conferidos, do primeiro ao último."
+                   if entries else "Nenhum registro no livro ainda.")
+    else:
+        message = (f"Cadeia íntegra: {len(mine)} registros seus conferidos com o livro inteiro, "
+                   "do primeiro ao último." if mine else "Cadeia íntegra. Nenhum registro seu no livro ainda.")
+    return {
+        "ok": True,
+        "entries": len(mine),
+        "head": entries[-1].entry_hash if entries else GENESIS,
+        "message": message,
+    }
+
+
+def _first_break(entries: List[LedgerEntry]) -> Tuple[Optional[LedgerEntry], str]:
     # Remover uma máquina desvincula os registros dela (machine_id vira NULL)
     # e lacra um machine_removed; fora disso, a coluna tem de bater com o lacre.
     removed_ids = {e.ref_id for e in entries if e.kind == "machine_removed"}
     expected = GENESIS
     for entry in entries:
         if entry.seal_version != SEAL_VERSION:
-            return _failure(entry, "o registro não tem o selo com chave", len(entries))
+            return entry, "o registro não tem o selo com chave"
         sealed_machine_id = (entry.payload or {}).get("_machine_id")
         if entry.machine_id is not None and entry.machine_id != sealed_machine_id:
-            return _failure(entry, "o registro foi atribuído a outro computador", len(entries))
+            return entry, "o registro foi atribuído a outro computador"
         if entry.machine_id is None and sealed_machine_id is not None and sealed_machine_id not in removed_ids:
-            return _failure(entry, "o registro foi desvinculado do computador sem remoção lacrada", len(entries))
+            return entry, "o registro foi desvinculado do computador sem remoção lacrada"
         if entry.prev_hash != expected:
-            return _failure(entry, "o elo com a entrada anterior não confere",
-                          len(entries))
+            return entry, "o elo com a entrada anterior não confere"
         if digest(canonical(entry.payload or {})) != entry.payload_digest:
-            return _failure(entry, "o conteúdo do registro foi alterado depois de gravado",
-                          len(entries))
-        recomputed = _entry_hash(entry.prev_hash, entry.payload_digest, entry.kind, entry.ref_id)
-        if recomputed != entry.entry_hash:
-            return _failure(entry, "o selo desta entrada não corresponde ao conteúdo",
-                          len(entries))
+            return entry, "o conteúdo do registro foi alterado depois de gravado"
+        if _entry_hash(entry.prev_hash, entry.payload_digest, entry.kind, entry.ref_id) != entry.entry_hash:
+            return entry, "o selo desta entrada não corresponde ao conteúdo"
         expected = entry.entry_hash
-
-    return {
-        "ok": True,
-        "entries": len(entries),
-        "head": expected if entries else GENESIS,
-        "message": (f"Cadeia íntegra: {len(entries)} registros conferidos, do primeiro ao último."
-                    if entries else "Nenhum registro no livro ainda."),
-    }
+    return None, ""
 
 
 def reseal_legacy(db: Session) -> int:

@@ -1,3 +1,6 @@
+import { SECURITY_TYPES } from "../types";
+import { pluralize, processName } from "./format";
+
 /**
  * O que cada ação remota faz de fato, para a confirmação não prometer mais
  * do que o sistema entrega.
@@ -31,4 +34,23 @@ export function killParamsFor(
     ...(beh.exe ? { exe: beh.exe } : {}),
     ...(beh.create_time != null ? { create_time: beh.create_time } : {}),
   };
+}
+
+export function bulkResolveMessage(count: number, reopen: boolean) {
+  const done = reopen ? "reaberto" : "resolvido";
+  return `${pluralize(count, "aviso", "avisos")} ${count === 1 ? done : `${done}s`}.`;
+}
+
+// Mesmas condições dos botões de components/anomaly/Actions.tsx: sem nenhum, a seção não aparece vazia
+export function hasAnomalyActions(
+  anomaly: { anomaly_type: string; responsible_process?: string | null; affected_metrics?: any },
+  machine: { network_isolated?: boolean } | null | undefined,
+) {
+  if (!machine) return false;
+  return (
+    !!killParamsFor(processName(anomaly), anomaly.affected_metrics?._behavior) ||
+    ["disk_full", "disk_forecast", "network_spike"].includes(anomaly.anomaly_type) ||
+    SECURITY_TYPES.has(anomaly.anomaly_type) ||
+    !!machine.network_isolated
+  );
 }

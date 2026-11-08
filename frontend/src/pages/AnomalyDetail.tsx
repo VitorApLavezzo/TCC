@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { hasAnomalyActions } from "../lib/actions";
 import { useLocation, useParams, useNavigate } from "react-router-dom";
 import { anomaliesApi, explanationsApi, machinesApi, metricsApi, errorMessage } from "../services/api";
 import { Anomaly, Machine, Metric, Incident, ANOMALY_TYPE_LABELS, SECURITY_TYPES, LanguageLevel } from "../types";
@@ -329,7 +330,7 @@ export function AnomalyDetail() {
         </div>
       )}
 
-      {machine && !anomaly.is_resolved && (
+      {hasAnomalyActions(anomaly, machine) && !anomaly.is_resolved && (
         <Section className="mt-9" title="Agir agora" description="Ações executadas no próprio computador, com um clique">
           <AnomalyActions anomaly={anomaly} machine={machine} />
         </Section>

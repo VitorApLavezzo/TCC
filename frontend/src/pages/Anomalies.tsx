@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { bulkResolveMessage } from "../lib/actions";
 import { useNavigate } from "react-router-dom";
 import { anomaliesApi, machinesApi, errorMessage } from "../services/api";
 import { usePolling } from "../hooks/usePolling";
@@ -185,7 +186,7 @@ export function Anomalies() {
       await fetchAnomalies();
       setSelected([]);
       toast.undoable(
-        `${pluralize(ids.length, "aviso", "avisos")} ${reopen ? "reaberto(s)" : "resolvido(s)"}.`,
+        bulkResolveMessage(ids.length, reopen),
         "Desfazer",
         async () => {
           await anomaliesApi.resolveBulk(ids, reopen);

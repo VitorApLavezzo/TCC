@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { isNotFound } from "../lib/http";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   insightsApi, reportsApi, reputationApi, accountApi, machinesExtraApi, machinesApi, anomaliesApi, errorMessage,
@@ -121,10 +122,15 @@ export function MachineDetail() {
   const requested = params.get("aba") || "resumo";
   const tab = LEGACY_TABS[requested] ?? (TABS.some((t) => t.id === requested) ? requested : "resumo");
   const [machine, setMachine] = useState<Machine | null>(null);
+  const [notFound, setNotFound] = useState(false);
   useDocumentTitle(machine?.name);
 
   useEffect(() => {
-    machinesApi.get(machineId).then((r) => setMachine(r.data)).catch(() => {});
+    setNotFound(false);
+    machinesApi
+      .get(machineId)
+      .then((r) => setMachine(r.data))
+      .catch((err) => setNotFound(isNotFound(err)));
   }, [machineId]);
 
   const setTab = (t: string) => setParams({ aba: t }, { replace: true });
@@ -138,6 +144,18 @@ export function MachineDetail() {
     setTab(next.id);
     requestAnimationFrame(() => document.getElementById(`aba-${next.id}`)?.focus());
   };
+
+  if (notFound) {
+    return (
+      <div className="max-w-3xl">
+        <EmptyState
+          title="Este computador não existe mais"
+          body="Ele pode ter sido removido da sua conta."
+          action={<Button variant="primary" onClick={() => navigate("/machines")}>Voltar para os computadores</Button>}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

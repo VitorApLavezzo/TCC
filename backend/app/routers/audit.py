@@ -31,9 +31,9 @@ def entries(limit: int = Query(100, ge=1, le=500), kind: Optional[str] = None,
 def verify(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Refaz a conta da cadeia inteira (a integridade é da cadeia, não de um pedaço).
 
-    O conteúdo das entradas de terceiros não é devolvido.
+    Conta e descreve só os registros dos computadores da conta.
     """
-    return integrity.verify(db)
+    return integrity.verify(db, machine_ids=_machine_ids(db, user))
 
 
 @router.get("/report")
