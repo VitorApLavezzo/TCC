@@ -111,12 +111,7 @@ class PushSubscriptionIn(BaseModel):
 
 @router.get("/push/config")
 def push_config():
-    """Chave pública para o navegador assinar, e por que o canal está desligado.
-
-    Os dois motivos possíveis exigem ações diferentes — gerar as chaves ou
-    instalar a biblioteca e reconstruir a imagem —, e a tela só consegue dizer
-    qual é se o servidor contar.
-    """
+    """Chave pública para o navegador assinar e, se desligado, qual dos dois motivos (chaves ou biblioteca)."""
     from app.services import push
     return {
         "enabled": push.available(),
@@ -158,7 +153,7 @@ def push_unsubscribe(endpoint: str, db: Session = Depends(get_db),
 def push_test(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Manda um aviso de teste para os aparelhos — é como a pessoa confere que funcionou."""
     from app.services import push
-    entregues = push.send_to_user(db, user.id, "AnomalyDetect",
+    delivered = push.send_to_user(db, user.id, "AnomalyDetect",
                                   "Tudo certo: é assim que um aviso vai aparecer aqui.",
                                   link=settings.PUBLIC_BASE_URL or "/")
-    return {"delivered": entregues}
+    return {"delivered": delivered}

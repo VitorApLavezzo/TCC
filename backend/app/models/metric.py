@@ -13,7 +13,6 @@ class Metric(Base):
     machine_id = Column(Integer, ForeignKey("machines.id"), nullable=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    # CPU
     cpu_percent = Column(Float)
     cpu_per_core = Column(JSON)
     cpu_freq_current = Column(Float)
@@ -21,18 +20,15 @@ class Metric(Base):
     cpu_count_logical = Column(Integer)
     cpu_count_physical = Column(Integer)
 
-    # Memória
     mem_used = Column(Float)
     mem_available = Column(Float)
     mem_percent = Column(Float)
     mem_total = Column(Float)
 
-    # Swap
     swap_used = Column(Float)
     swap_percent = Column(Float)
     swap_total = Column(Float)
 
-    # Disco
     disk_used = Column(Float)
     disk_free = Column(Float)
     disk_percent = Column(Float)
@@ -40,12 +36,10 @@ class Metric(Base):
     disk_write_bytes = Column(Float)
     disk_partitions = Column(JSON)
 
-    # Rede
     net_bytes_sent = Column(Float)
     net_bytes_recv = Column(Float)
     net_connections = Column(Integer)
 
-    # Sistema
     uptime_seconds = Column(Float)
     load_avg_1 = Column(Float)
     load_avg_5 = Column(Float)
@@ -64,13 +58,10 @@ class Metric(Base):
     cpu_std_10m = Column(Float)  # oscilação da CPU nos últimos 10 minutos
     gpu_std_10m = Column(Float)
 
-    # GPU
     gpu_metrics = Column(JSON)
 
-    # Temperatura
     temperatures = Column(JSON)
 
-    # Bateria
     battery_percent = Column(Float)
     battery_plugged = Column(Boolean)
     battery_secs_left = Column(Float)

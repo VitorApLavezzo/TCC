@@ -1,16 +1,5 @@
-"""
-Reputação coletiva de executáveis.
-
-Três fontes, somadas numa frase só ("visto em 94% dos computadores, marcado
-como normal 12 vezes"):
-
-1. Este servidor: em quantas máquinas o executável já apareceu e quantas
-   vezes foi marcado como normal ou como problema.
-2. Um hub: outros servidores AnomalyDetect enviam contagens anônimas. Só saem
-   executáveis vistos em pelo menos K máquinas daquela instalação
-   (k-anonimato) e só de contas que permitiram compartilhar.
-3. VirusTotal (opcional, com chave): o veredito dos antivírus pelo hash.
-"""
+"""Reputação coletiva de executáveis, de três fontes: este servidor, um hub de outros servidores
+(contagens anônimas, k-anonimato, só de contas que permitiram) e o VirusTotal (opcional)."""
 import hashlib
 from collections import defaultdict
 from datetime import timedelta
@@ -43,10 +32,8 @@ def total_machines(db: Session, days: int = 30) -> int:
 def describe(db: Session, key: str, owner_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """O que se sabe de um executável.
 
-    Com `owner_id`, só o que essa conta pode saber: as máquinas e o voto dela,
-    o hub e o VirusTotal. A consulta pela rota usava o contador do servidor
-    inteiro e revelava programas de outras contas — inclusive de quem
-    desligou o compartilhamento de reputação.
+    Com `owner_id`, só o que essa conta pode saber (as máquinas e o voto dela, o hub e o
+    VirusTotal): o contador do servidor inteiro revelaria programas de outras contas.
     """
     rep = db.query(HashReputation).filter(HashReputation.identity_key == key).first()
     if owner_id is None:
@@ -58,10 +45,10 @@ def describe(db: Session, key: str, owner_id: Optional[int] = None) -> Optional[
         from app.services import trust
         local = trust.owner_machine_counts(db, owner_id, {key}).get(key, 0)
         total = max(db.query(Machine.id).filter(Machine.owner_id == owner_id).count(), 1)
-        voto = db.query(ReputationVote.kind).filter(ReputationVote.identity_key == key,
+        vote = db.query(ReputationVote.kind).filter(ReputationVote.identity_key == key,
                                                     ReputationVote.owner_id == owner_id).scalar()
-        normal, problem = int(voto == "normal"), int(voto == "problem")
-        if not local and not voto and not (rep and (rep.hub_installations or rep.vt_total)):
+        normal, problem = int(vote == "normal"), int(vote == "problem")
+        if not local and not vote and not (rep and (rep.hub_installations or rep.vt_total)):
             return None
     hub_installations = rep.hub_installations if rep else None
     hub_prevalence = rep.hub_prevalence if rep else None
@@ -117,10 +104,6 @@ def for_process(db: Session, name: Optional[str], exe: Optional[str], sha256: Op
                 owner_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
     return describe(db, identity_key(name, exe, sha256), owner_id)
 
-
-# ---------------------------------------------------------------------------
-# Hub
-# ---------------------------------------------------------------------------
 
 def contributions(db: Session) -> Dict[str, Any]:
     opted = [u.id for u in db.query(User).all() if get_preferences(u).get("share_reputation")]
@@ -235,10 +218,6 @@ def sync_hub(db: Session) -> int:
         snapshot = client.get(f"{hub}/api/reputation/snapshot").json()
     return updated + apply_hub_snapshot(db, snapshot)
 
-
-# ---------------------------------------------------------------------------
-# VirusTotal
-# ---------------------------------------------------------------------------
 
 def check_virustotal_pending(db: Session, limit: int = 4) -> int:
     """Consulta hashes raros ainda não verificados (plano gratuito: 4 por minuto)."""

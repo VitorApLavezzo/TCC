@@ -1,14 +1,5 @@
-"""
-Identidade dos executáveis e reputação somada entre máquinas.
-
-Cada combinação (nome, caminho) vista numa máquina vira uma `ProcessIdentity`.
-A primeira aparição de um executável numa máquina soma uma máquina à
-reputação daquele executável (`HashReputation`), identificado pelo sha256
-quando o agente consegue calcular, ou pelo nome do arquivo quando não.
-
-É dessa contagem que saem "visto em 94% dos computadores" e a detecção de
-surto (o mesmo programa novo aparecendo em vários computadores de uma vez).
-"""
+"""Identidade dos executáveis e reputação somada entre máquinas (sha256 ou, sem ele, o nome
+do arquivo). Dessa contagem saem o "visto em N% dos computadores" e a detecção de surto."""
 import ntpath
 import posixpath
 import re
@@ -20,9 +11,8 @@ from app.core.timeutil import utcnow
 from app.models.identity import HashReputation, ProcessIdentity, ReputationVote
 from app.models.machine import Machine
 
-# Pastas com a versão no nome (Discord\app-1.0.9034\, Teams\25.1.2\): sem
-# normalizar, cada atualização vira um "executável novo" em todos os
-# computadores ao mesmo tempo — exatamente o padrão de um surto.
+# Pastas com a versão no nome (Discord\app-1.0.9034\): sem normalizar, cada atualização
+# vira um "executável novo" em todos os computadores ao mesmo tempo — o padrão de um surto.
 _VERSION_SEGMENT = re.compile(r"(?i)(?<=[\\/])(?:app-)?v?\d+(?:\.\d+){1,3}(?=[\\/])")
 
 
@@ -80,7 +70,7 @@ def observe(db: Session, machine: Machine, snapshots: Iterable, starts: Iterable
     new_keys: List[str] = []
     # Um executável conta uma máquina uma vez só, por mais caminhos com que o
     # agente o informe: três caminhos falsos não viram três computadores.
-    contados = {identity_key(i.name, i.exe, i.sha256) for i in existing.values()}
+    counted = {identity_key(i.name, i.exe, i.sha256) for i in existing.values()}
     for key, e in entries.items():
         ident = existing.get(key)
         if ident:
@@ -110,8 +100,8 @@ def observe(db: Session, machine: Machine, snapshots: Iterable, starts: Iterable
             ))
             k = identity_key(e["name"], e["exe"], e["sha256"])
             new_keys.append(k)
-            if k not in contados:
-                contados.add(k)
+            if k not in counted:
+                counted.add(k)
                 _bump_reputation(db, k, e)
     db.flush()
     return new_keys
@@ -130,12 +120,8 @@ def _bump_reputation(db: Session, key: str, e: Dict[str, Any]):
 
 
 def record_feedback(db: Session, anomaly, kind: str):
-    """Guarda o "é normal" / "é problema" da conta dona do aviso.
-
-    Um voto por executável e por conta: repetir troca o voto, não soma. Os
-    contadores globais passam a contar contas, e só valem como opinião para
-    as outras — quem reprova de verdade é o voto da própria conta (trust.py).
-    """
+    """Um voto por executável e por conta: repetir troca o voto, não soma. Os contadores
+    globais são só opinião; quem reprova de verdade é o voto da própria conta (trust.py)."""
     if not anomaly.responsible_process or kind not in ("normal", "problem"):
         return
     owner_id = db.query(Machine.owner_id).filter(Machine.id == anomaly.machine_id).scalar()
@@ -156,6 +142,6 @@ def record_feedback(db: Session, anomaly, kind: str):
                              local_owners=0, marked_normal=0, marked_problem=0)
         db.add(rep)
         db.flush()
-    votos = db.query(ReputationVote.kind).filter(ReputationVote.identity_key == key).all()
-    rep.marked_normal = sum(1 for (k,) in votos if k == "normal")
-    rep.marked_problem = sum(1 for (k,) in votos if k == "problem")
+    votes = db.query(ReputationVote.kind).filter(ReputationVote.identity_key == key).all()
+    rep.marked_normal = sum(1 for (k,) in votes if k == "normal")
+    rep.marked_problem = sum(1 for (k,) in votes if k == "problem")

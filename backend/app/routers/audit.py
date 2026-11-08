@@ -1,9 +1,6 @@
-"""
-Auditoria: o livro encadeado de fatos e a verificação da cadeia.
+"""Auditoria: o livro encadeado de fatos e a verificação da cadeia.
 
-Só leitura. Escrever no livro é privilégio dos serviços que registram o fato
-(um aviso criado, uma ação executada, um playbook disparado) — não existe
-rota que acrescente uma entrada, de propósito.
+Só leitura, de propósito: só os serviços que registram o fato escrevem no livro.
 """
 from typing import Optional
 
@@ -32,11 +29,9 @@ def entries(limit: int = Query(100, ge=1, le=500), kind: Optional[str] = None,
 
 @router.get("/verify")
 def verify(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """Refaz a conta da cadeia inteira.
+    """Refaz a conta da cadeia inteira (a integridade é da cadeia, não de um pedaço).
 
-    A verificação é do livro completo, não só das entradas desta conta: a
-    integridade é uma propriedade da cadeia, e conferir um pedaço não diria
-    nada. O conteúdo das entradas de terceiros não é devolvido.
+    O conteúdo das entradas de terceiros não é devolvido.
     """
     return integrity.verify(db)
 
@@ -44,6 +39,6 @@ def verify(db: Session = Depends(get_db), user: User = Depends(get_current_user)
 @router.get("/report")
 def report(limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_db),
            user: User = Depends(get_current_user)):
-    corpo = integrity.report(db, _machine_ids(db, user), limit=limit)
+    body = integrity.report(db, _machine_ids(db, user), limit=limit)
     return PlainTextResponse(
-        corpo, headers={"Content-Disposition": 'attachment; filename="auditoria-anomalydetect.txt"'})
+        body, headers={"Content-Disposition": 'attachment; filename="auditoria-anomalydetect.txt"'})

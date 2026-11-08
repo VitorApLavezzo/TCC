@@ -1,14 +1,5 @@
-"""
-Bot de Telegram com resposta.
-
-Long polling: funciona atrás de NAT, sem expor o servidor à internet nem
-configurar webhook. A pessoa vincula a conta com um código gerado no painel;
-depois recebe os avisos e pode responder por botões — "Encerrar o programa",
-"É normal", "Ver no painel".
-
-Os botões viram as mesmas ações e o mesmo feedback do painel, então nada aqui
-é um caminho paralelo de regras.
-"""
+"""Bot de Telegram por long polling (funciona atrás de NAT, sem webhook). Os botões viram as
+mesmas ações e o mesmo feedback do painel: nada aqui é um caminho paralelo de regras."""
 import asyncio
 import json
 from typing import Any, Dict, List, Optional
@@ -77,10 +68,6 @@ def send_notification(db, user, text: str, notification, link: Optional[str]):
     _call("sendMessage", payload)
 
 
-# ---------------------------------------------------------------------------
-# Recebimento (long polling)
-# ---------------------------------------------------------------------------
-
 def _handle_start(db, chat_id: str, code: str, chat_type: str = "private") -> str:
     from app.models.user import User
     if chat_type != "private":
@@ -88,11 +75,9 @@ def _handle_start(db, chat_id: str, code: str, chat_type: str = "private") -> st
     user = db.query(User).filter(User.telegram_link_code == code).first() if code else None
     if not user:
         return "Código inválido ou expirado. Gere um novo no painel, em Conta → Telegram."
-    # Um chat, uma conta: o código de outra conta não pode anexar o chat de
-    # alguém que já está vinculado (os avisos dela chegavam nele, e os botões
-    # do dono passavam a responder pela conta errada).
-    outra = db.query(User).filter(User.telegram_chat_id == str(chat_id), User.id != user.id).first()
-    if outra:
+    # Um chat, uma conta: senão os botões do dono responderiam pela conta errada
+    other_user = db.query(User).filter(User.telegram_chat_id == str(chat_id), User.id != user.id).first()
+    if other_user:
         return "Este Telegram já está vinculado a outra conta. Envie /sair para desvincular e tente de novo."
     user.telegram_chat_id = str(chat_id)
     user.telegram_link_code = None
@@ -113,8 +98,8 @@ def _handle_callback(db, chat_id: str, data: str) -> str:
     from app.models.user import User
     from app.services import commands, feedback
 
-    usuarios = db.query(User).filter(User.telegram_chat_id == str(chat_id)).all()
-    user = usuarios[0] if len(usuarios) == 1 else None
+    users = db.query(User).filter(User.telegram_chat_id == str(chat_id)).all()
+    user = users[0] if len(users) == 1 else None
     if not user or ":" not in data:
         return "Não consegui identificar sua conta."
     action, _, raw_id = data.partition(":")

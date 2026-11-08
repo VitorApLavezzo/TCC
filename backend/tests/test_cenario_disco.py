@@ -72,23 +72,23 @@ class TestFraseDaPrevisao:
     """Aparece no log da demonstração e no aviso, na frente de quem assiste."""
 
     def test_um_dia_no_singular(self):
-        from app.services.forecasting import frase_previsao
-        frase = frase_previsao(span_dias=1.2, gb_por_dia=92.7, eta_dias=3.0)
+        from app.services.forecasting import forecast_sentence
+        frase = forecast_sentence(span_days=1.2, gb_per_day=92.7, eta_days=3.0)
         assert "do último dia" in frase and "1 dias" not in frase
 
     def test_menos_de_um_dia_sem_cerca_de(self):
-        from app.services.forecasting import frase_previsao
-        frase = frase_previsao(span_dias=1.2, gb_por_dia=92.7, eta_dias=0.4)
+        from app.services.forecasting import forecast_sentence
+        frase = forecast_sentence(span_days=1.2, gb_per_day=92.7, eta_days=0.4)
         assert "enche em menos de um dia" in frase and "cerca de menos" not in frase
 
     def test_varios_dias_continua_igual(self):
-        from app.services.forecasting import frase_previsao
-        frase = frase_previsao(span_dias=5, gb_por_dia=2.5, eta_dias=6)
+        from app.services.forecasting import forecast_sentence
+        frase = forecast_sentence(span_days=5, gb_per_day=2.5, eta_days=6)
         assert frase == "No ritmo dos últimos 5 dias (2,5 GB por dia), o disco enche em cerca de 6 dias."
 
     def test_duas_semanas(self):
-        from app.services.forecasting import frase_previsao
-        assert "das últimas duas semanas" in frase_previsao(span_dias=12, gb_por_dia=1.0, eta_dias=20)
+        from app.services.forecasting import forecast_sentence
+        assert "das últimas duas semanas" in forecast_sentence(span_days=12, gb_per_day=1.0, eta_days=20)
 
 
 class TestAblacao:

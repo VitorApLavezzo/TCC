@@ -1,10 +1,5 @@
-"""
-Rotas usadas pelo agente em tempo de execução (autenticadas pelo token da máquina).
-
-Separadas de `agent_files.py`, que cuida da distribuição dos arquivos, e de
-`metrics.py`, que recebe as coletas regulares. Aqui ficam os canais que não
-podem esperar a próxima coleta: comandos, caixa-preta, diagnóstico rápido,
-eventos urgentes (arquivo-isca) e o "tchau" do agente.
+"""Rotas do agente em tempo de execução (token da máquina) que não podem esperar a próxima coleta:
+comandos, caixa-preta, diagnóstico rápido, eventos urgentes e o "tchau" do agente.
 """
 from datetime import timedelta
 from typing import Any, Dict, List, Optional

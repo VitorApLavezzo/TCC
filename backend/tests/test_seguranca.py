@@ -143,28 +143,28 @@ class TestLoginGoogle:
     def test_conta_antiga_liberada_pelo_administrador_entra_com_google(self, client, google, db):
         # Conta criada pelo Google antes do vínculo por sub: tem senha
         # aleatória que ninguém sabe, então "entre com senha" não serve.
-        from liberar_google import liberar
+        from allow_google_link import allow_google_link
         client.post("/api/auth/register", json={"email": "Antiga@x.com", "username": "antiga",
                                                 "password": "senha-qualquer-1"})
-        assert liberar(db, "antiga@x.com") is True
+        assert allow_google_link(db, "antiga@x.com") is True
         res = client.post("/api/auth/google", json={"credential": google("antiga@x.com", "sub-antiga")})
         assert res.status_code == 200
         me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {res.json()['access_token']}"}).json()
         assert me["username"] == "antiga"
 
     def test_liberacao_vale_so_para_a_primeira_identidade_google(self, client, google, db):
-        from liberar_google import liberar
+        from allow_google_link import allow_google_link
         client.post("/api/auth/register", json={"email": "uma@x.com", "username": "uma",
                                                 "password": "senha-qualquer-1"})
-        liberar(db, "uma@x.com")
+        allow_google_link(db, "uma@x.com")
         assert client.post("/api/auth/google", json={"credential": google("uma@x.com", "sub-a")}).status_code == 200
         assert client.post("/api/auth/google", json={"credential": google("uma@x.com", "sub-b")}).status_code == 409
 
     def test_liberar_conta_inexistente_ou_ja_vinculada_nao_faz_nada(self, client, google, db):
-        from liberar_google import liberar
-        assert liberar(db, "ninguem@x.com") is False
+        from allow_google_link import allow_google_link
+        assert allow_google_link(db, "ninguem@x.com") is False
         client.post("/api/auth/google", json={"credential": google("ja@x.com", "sub-ja")})
-        assert liberar(db, "ja@x.com") is False
+        assert allow_google_link(db, "ja@x.com") is False
 
     def test_mesma_identidade_google_volta_para_a_mesma_conta(self, client, google):
         a = client.post("/api/auth/google", json={"credential": google("nova@x.com", "sub-1")}).json()

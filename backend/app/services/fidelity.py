@@ -1,16 +1,5 @@
-"""
-Fidelidade da explicação: a IA acertou o que disse que ia acontecer?
-
-O cartão "se você fechar o Chrome, a memória cai de 91% para cerca de 48%" é
-uma previsão — e previsão dá para conferir. Quando a pessoa executa a ação,
-este módulo guarda o que foi prometido, espera as leituras seguintes e compara
-com o que aconteceu de verdade.
-
-É o laço que quase nenhuma ferramenta com IA fecha: em vez de perguntar se o
-texto pareceu bom, mede-se se o texto estava certo. O resultado agregado por
-provedor entra na monografia ao lado da checagem de números — uma mede se a
-explicação cita dados reais, esta mede se ela prevê o futuro real.
-"""
+"""Fidelidade da explicação: guarda a previsão do contrafactual quando a ação roda e a confere
+com as leituras seguintes (mede se a IA prevê o futuro real, não só se cita dados reais)."""
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
@@ -38,18 +27,18 @@ MEASURABLE_ACTIONS = {"kill_process", "stop_sync_client"}
 
 def _pick_prediction(cf: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Escolhe a métrica em que a previsão se compromete mais."""
-    candidatos = []
+    candidates = []
     if cf.get("mem_now") is not None and cf.get("mem_after") is not None:
-        candidatos.append(("mem_percent", float(cf["mem_now"]), float(cf["mem_after"])))
+        candidates.append(("mem_percent", float(cf["mem_now"]), float(cf["mem_after"])))
     if cf.get("cpu_now") is not None and cf.get("cpu_after") is not None:
-        candidatos.append(("cpu_percent", float(cf["cpu_now"]), float(cf["cpu_after"])))
-    if not candidatos:
+        candidates.append(("cpu_percent", float(cf["cpu_now"]), float(cf["cpu_after"])))
+    if not candidates:
         return None
-    key, antes, depois = max(candidatos, key=lambda c: abs(c[1] - c[2]))
-    if abs(antes - depois) < 2:
+    key, before, after = max(candidates, key=lambda c: abs(c[1] - c[2]))
+    if abs(before - after) < 2:
         # Previsão de "quase nada muda" não distingue provedor bom de ruim.
         return None
-    return {"metric_key": key, "baseline": antes, "predicted": depois}
+    return {"metric_key": key, "baseline": before, "predicted": after}
 
 
 def register_from_action(db: Session, anomaly_id: int, machine_id: int, action: str,
@@ -63,14 +52,14 @@ def register_from_action(db: Session, anomaly_id: int, machine_id: int, action: 
     pred = _pick_prediction(expl.counterfactual)
     if not pred:
         return None
-    ja_existe = (
+    existing = (
         db.query(ExplanationOutcome)
         .filter(ExplanationOutcome.anomaly_id == anomaly_id,
                 ExplanationOutcome.status == "pending")
         .first()
     )
-    if ja_existe:
-        return ja_existe
+    if existing:
+        return existing
 
     outcome = ExplanationOutcome(
         anomaly_id=anomaly_id,
@@ -94,44 +83,44 @@ def register_from_action(db: Session, anomaly_id: int, machine_id: int, action: 
 def measure_pending(db: Session) -> int:
     """Rotina periódica: fecha as previsões que já dá para conferir."""
     now = utcnow()
-    pendentes = (
+    pending = (
         db.query(ExplanationOutcome)
         .filter(ExplanationOutcome.status == "pending")
         .all()
     )
-    fechadas = 0
-    for outcome in pendentes:
-        criada = aware(outcome.created_at) or now
-        esperou = (now - criada).total_seconds() / 60
-        if esperou < MIN_WAIT_MINUTES:
+    closed = 0
+    for outcome in pending:
+        created = aware(outcome.created_at) or now
+        waited = (now - created).total_seconds() / 60
+        if waited < MIN_WAIT_MINUTES:
             continue
 
-        leitura = (
+        reading = (
             db.query(Metric)
-            .filter(Metric.machine_id == outcome.machine_id, Metric.timestamp > criada)
+            .filter(Metric.machine_id == outcome.machine_id, Metric.timestamp > created)
             .order_by(Metric.timestamp.asc())
             .first()
         )
-        if leitura is None:
-            if esperou >= MAX_WAIT_MINUTES:
+        if reading is None:
+            if waited >= MAX_WAIT_MINUTES:
                 # A máquina não mandou leitura nenhuma: não é erro da IA,
                 # e contar como erro estragaria a estatística.
                 outcome.status = "expired"
                 outcome.measured_at = now
-                fechadas += 1
+                closed += 1
             continue
 
-        observado = float(getattr(leitura, outcome.metric_key) or 0.0)
-        erro = abs(observado - (outcome.predicted_value or 0.0))
-        outcome.observed_value = round(observado, 2)
-        outcome.error = round(erro, 2)
-        outcome.hit = erro <= TOLERANCE_POINTS
+        observed = float(getattr(reading, outcome.metric_key) or 0.0)
+        error = abs(observed - (outcome.predicted_value or 0.0))
+        outcome.observed_value = round(observed, 2)
+        outcome.error = round(error, 2)
+        outcome.hit = error <= TOLERANCE_POINTS
         outcome.status = "measured"
         outcome.measured_at = now
-        fechadas += 1
-    if fechadas:
+        closed += 1
+    if closed:
         db.commit()
-    return fechadas
+    return closed
 
 
 def for_anomaly(db: Session, anomaly_id: int) -> Optional[Dict[str, Any]]:
@@ -145,22 +134,22 @@ def for_anomaly(db: Session, anomaly_id: int) -> Optional[Dict[str, Any]]:
 
 
 def serialize(row: ExplanationOutcome) -> Dict[str, Any]:
-    nomes = {"mem_percent": "memória", "cpu_percent": "processador"}
-    alvo = nomes.get(row.metric_key, row.metric_key)
+    metric_names = {"mem_percent": "memória", "cpu_percent": "processador"}
+    metric_label = metric_names.get(row.metric_key, row.metric_key)
     if row.status == "measured":
-        veredito = ("A previsão se confirmou" if row.hit
+        verdict = ("A previsão se confirmou" if row.hit
                     else "A previsão não se confirmou")
-        frase = (f"{veredito}: a IA disse que a {alvo} ficaria em cerca de "
+        sentence = (f"{verdict}: a IA disse que a {metric_label} ficaria em cerca de "
                  f"{row.predicted_value:.0f}% e ela ficou em {row.observed_value:.0f}%.")
     elif row.status == "expired":
-        frase = "Não houve leitura a tempo para conferir a previsão."
+        sentence = "Não houve leitura a tempo para conferir a previsão."
     else:
-        frase = f"Conferindo se a {alvo} vai mesmo para perto de {row.predicted_value:.0f}%."
+        sentence = f"Conferindo se a {metric_label} vai mesmo para perto de {row.predicted_value:.0f}%."
     return {
         "id": row.id,
         "anomaly_id": row.anomaly_id,
         "metric_key": row.metric_key,
-        "metric_label": alvo,
+        "metric_label": metric_label,
         "baseline_value": row.baseline_value,
         "predicted_value": row.predicted_value,
         "observed_value": row.observed_value,
@@ -169,7 +158,7 @@ def serialize(row: ExplanationOutcome) -> Dict[str, Any]:
         "status": row.status,
         "model_used": row.model_used,
         "measured_at": row.measured_at,
-        "sentence": frase,
+        "sentence": sentence,
     }
 
 
@@ -183,9 +172,9 @@ def summary(db: Session, user_id: int, days: int = 90) -> Dict[str, Any]:
                 ExplanationOutcome.created_at >= since)
         .all()
     )
-    por_provedor: Dict[str, Dict[str, Any]] = {}
+    by_provider: Dict[str, Dict[str, Any]] = {}
     for row in rows:
-        agg = por_provedor.setdefault(row.model_used or "desconhecido",
+        agg = by_provider.setdefault(row.model_used or "desconhecido",
                                       {"previsoes": 0, "medidas": 0, "acertos": 0, "erro_total": 0.0})
         agg["previsoes"] += 1
         if row.status != "measured":
@@ -194,23 +183,23 @@ def summary(db: Session, user_id: int, days: int = 90) -> Dict[str, Any]:
         agg["acertos"] += 1 if row.hit else 0
         agg["erro_total"] += row.error or 0.0
 
-    resultado = {}
-    for provedor, agg in por_provedor.items():
-        medidas = agg["medidas"]
-        resultado[provedor] = {
+    result = {}
+    for provider, agg in by_provider.items():
+        measured = agg["medidas"]
+        result[provider] = {
             "previsoes": agg["previsoes"],
-            "medidas": medidas,
+            "medidas": measured,
             "acertos": agg["acertos"],
-            "taxa_acerto_pct": round(agg["acertos"] / medidas * 100, 1) if medidas else None,
-            "erro_medio_pontos": round(agg["erro_total"] / medidas, 1) if medidas else None,
+            "taxa_acerto_pct": round(agg["acertos"] / measured * 100, 1) if measured else None,
+            "erro_medio_pontos": round(agg["erro_total"] / measured, 1) if measured else None,
         }
-    medidas_total = sum(a["medidas"] for a in por_provedor.values())
-    acertos_total = sum(a["acertos"] for a in por_provedor.values())
+    measured_total = sum(a["medidas"] for a in by_provider.values())
+    hits_total = sum(a["acertos"] for a in by_provider.values())
     return {
         "period_days": days,
         "tolerancia_pontos": TOLERANCE_POINTS,
         "total": len(rows),
-        "medidas": medidas_total,
-        "taxa_acerto_geral_pct": round(acertos_total / medidas_total * 100, 1) if medidas_total else None,
-        "by_provider": resultado,
+        "medidas": measured_total,
+        "taxa_acerto_geral_pct": round(hits_total / measured_total * 100, 1) if measured_total else None,
+        "by_provider": result,
     }

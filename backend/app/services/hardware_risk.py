@@ -1,24 +1,7 @@
-"""
-Risco de falha de peça, em porcentagem e em português.
+"""Risco de falha de peça (disco, bateria) em porcentagem e em português, num horizonte de 90 dias.
 
-Os sinais já estavam todos no sistema — SMART do disco, saúde e ciclos da
-bateria, temperatura, erros de hardware do sistema operacional —, só que
-espalhados por telas diferentes e em unidade que ninguém fora da área lê
-("Reallocated_Sector_Ct: 12"). Para quem usa o computador, o que importa é
-uma frase: vale a pena fazer backup agora?
-
-Aqui cada sinal vira um peso, os pesos somam um risco e o risco vira essa
-frase, com o horizonte explícito (90 dias por padrão) e a lista do que pesou.
-
-Sobre o método, para não prometer mais do que entrega: os pesos são
-heurísticos, calibrados a partir do que a literatura de confiabilidade de
-discos aponta como preditivo (setores realocados e pendentes, erros de mídia,
-idade e temperatura) e deliberadamente conservadores. Não é um modelo treinado
-em uma base de falhas reais — para isso seria preciso um conjunto de dados com
-discos que morreram, que este trabalho não tem. O valor está em transformar
-sinais dispersos em uma decisão acionável, e a interface diz "cerca de", nunca
-um número exato.
-"""
+Os pesos são heurísticos e conservadores, inspirados na literatura de confiabilidade de discos;
+não há modelo treinado em falhas reais, por isso a interface diz "cerca de"."""
 import math
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
@@ -46,9 +29,9 @@ LEVEL_LABELS = {
 
 
 def _level(risk: float) -> str:
-    for limite, nome in LEVELS:
-        if risk >= limite:
-            return nome
+    for threshold, name in LEVELS:
+        if risk >= threshold:
+            return name
     return "baixo"
 
 
@@ -70,90 +53,90 @@ def _latest_inventory(db: Session, machine_id: int, kind: str) -> Optional[List[
     return [i for i in snap.items if isinstance(i, dict)]
 
 
-def _disk_factors(disk: Dict[str, Any], erros_recentes: int) -> List[Dict[str, Any]]:
+def _disk_factors(disk: Dict[str, Any], recent_errors: int) -> List[Dict[str, Any]]:
     """Cada indício que pesa no risco deste disco, com peso e explicação."""
-    fatores: List[Dict[str, Any]] = []
+    factors: List[Dict[str, Any]] = []
 
-    def somar(peso: float, titulo: str, detalhe: str):
-        fatores.append({"peso": round(peso, 3), "titulo": titulo, "detalhe": detalhe})
+    def add_factor(weight: float, title: str, detail: str):
+        factors.append({"peso": round(weight, 3), "titulo": title, "detalhe": detail})
 
-    saude = str(disk.get("health") or "").lower()
-    if saude in ("failed", "unhealthy", "failing"):
-        somar(2.0, "O disco informa que está falhando",
+    health = str(disk.get("health") or "").lower()
+    if health in ("failed", "unhealthy", "failing"):
+        add_factor(2.0, "O disco informa que está falhando",
               "O próprio firmware do disco declara estado de falha — este é o sinal mais grave que existe.")
-    elif saude == "warning":
-        somar(0.45, "O disco reporta alerta", "O firmware indica atenção, sem declarar falha.")
+    elif health == "warning":
+        add_factor(0.45, "O disco reporta alerta", "O firmware indica atenção, sem declarar falha.")
 
-    pendentes = int(disk.get("pending_sectors") or 0)
-    if pendentes:
-        somar(min(1.2, 0.35 + 0.05 * pendentes), f"{pendentes} setor(es) ilegível(is)",
+    pending = int(disk.get("pending_sectors") or 0)
+    if pending:
+        add_factor(min(1.2, 0.35 + 0.05 * pending), f"{pending} setor(es) ilegível(is)",
               "São pedaços do disco que não puderam ser lidos. Costumam anteceder perda de arquivo.")
 
-    realocados = int(disk.get("reallocated_sectors") or 0)
-    if realocados:
-        somar(min(0.9, 0.15 + 0.01 * realocados), f"{realocados} setor(es) já substituído(s)",
+    reallocated = int(disk.get("reallocated_sectors") or 0)
+    if reallocated:
+        add_factor(min(0.9, 0.15 + 0.01 * reallocated), f"{reallocated} setor(es) já substituído(s)",
               "O disco remanejou partes defeituosas. Poucos são normais; muitos indicam desgaste em curso.")
 
-    midia = int(disk.get("media_errors") or 0)
-    if midia:
-        somar(min(0.8, 0.2 + 0.02 * midia), f"{midia} erro(s) de leitura registrados",
+    media_errors = int(disk.get("media_errors") or 0)
+    if media_errors:
+        add_factor(min(0.8, 0.2 + 0.02 * media_errors), f"{media_errors} erro(s) de leitura registrados",
               "Leituras que precisaram ser repetidas ou falharam.")
 
-    usado = float(disk.get("percent_used") or 0)
-    if usado >= 95:
-        somar(0.8, f"Vida útil do SSD em {usado:.0f}%", "O fabricante considera o fim da vida projetada.")
-    elif usado >= 80:
-        somar(0.3, f"Vida útil do SSD em {usado:.0f}%", "Passou de 80% da escrita prevista para este modelo.")
+    used = float(disk.get("percent_used") or 0)
+    if used >= 95:
+        add_factor(0.8, f"Vida útil do SSD em {used:.0f}%", "O fabricante considera o fim da vida projetada.")
+    elif used >= 80:
+        add_factor(0.3, f"Vida útil do SSD em {used:.0f}%", "Passou de 80% da escrita prevista para este modelo.")
 
-    horas = float(disk.get("power_on_hours") or 0)
-    anos = horas / 8760 if horas else 0
-    if anos >= 6:
-        somar(0.45, f"{anos:.1f} anos ligado", "Idade alta: a taxa de falha cresce bastante a partir dos 5 anos.")
-    elif anos >= 4:
-        somar(0.2, f"{anos:.1f} anos ligado", "Já passou da metade da vida típica de um disco.")
+    hours = float(disk.get("power_on_hours") or 0)
+    years = hours / 8760 if hours else 0
+    if years >= 6:
+        add_factor(0.45, f"{years:.1f} anos ligado", "Idade alta: a taxa de falha cresce bastante a partir dos 5 anos.")
+    elif years >= 4:
+        add_factor(0.2, f"{years:.1f} anos ligado", "Já passou da metade da vida típica de um disco.")
 
     temp = float(disk.get("temperature") or 0)
     if temp >= 55:
-        somar(0.35, f"{temp:.0f} °C de temperatura", "Calor constante encurta a vida do disco.")
+        add_factor(0.35, f"{temp:.0f} °C de temperatura", "Calor constante encurta a vida do disco.")
     elif temp >= 48:
-        somar(0.12, f"{temp:.0f} °C de temperatura", "Um pouco acima do confortável.")
+        add_factor(0.12, f"{temp:.0f} °C de temperatura", "Um pouco acima do confortável.")
 
-    if erros_recentes:
-        somar(min(0.6, 0.2 * erros_recentes), f"{erros_recentes} erro(s) de hardware no mês",
+    if recent_errors:
+        add_factor(min(0.6, 0.2 * recent_errors), f"{recent_errors} erro(s) de hardware no mês",
               "O sistema operacional registrou falhas de hardware recentemente.")
-    return fatores
+    return factors
 
 
 def _battery_factors(db: Session, machine_id: int) -> List[Dict[str, Any]]:
-    leitura = (
+    reading = (
         db.query(Metric)
         .filter(Metric.machine_id == machine_id, Metric.battery_percent.isnot(None))
         .order_by(Metric.timestamp.desc())
         .first()
     )
-    if leitura is None:
+    if reading is None:
         return []
-    fatores: List[Dict[str, Any]] = []
-    saude = leitura.battery_health_percent
-    ciclos = leitura.battery_cycle_count
-    if saude is not None:
-        if saude < 60:
-            fatores.append({"peso": 0.9, "titulo": f"Bateria com {saude:.0f}% da capacidade original",
+    factors: List[Dict[str, Any]] = []
+    health = reading.battery_health_percent
+    cycles = reading.battery_cycle_count
+    if health is not None:
+        if health < 60:
+            factors.append({"peso": 0.9, "titulo": f"Bateria com {health:.0f}% da capacidade original",
                             "detalhe": "Abaixo de 60% o fabricante considera a bateria no fim da vida."})
-        elif saude < 75:
-            fatores.append({"peso": 0.35, "titulo": f"Bateria com {saude:.0f}% da capacidade original",
+        elif health < 75:
+            factors.append({"peso": 0.35, "titulo": f"Bateria com {health:.0f}% da capacidade original",
                             "detalhe": "A autonomia já caiu bastante em relação à de fábrica."})
-    if ciclos:
-        if ciclos >= 1000:
-            fatores.append({"peso": 0.5, "titulo": f"{ciclos} ciclos de carga",
+    if cycles:
+        if cycles >= 1000:
+            factors.append({"peso": 0.5, "titulo": f"{cycles} ciclos de carga",
                             "detalhe": "A maioria das baterias é projetada para 500 a 1000 ciclos."})
-        elif ciclos >= 500:
-            fatores.append({"peso": 0.2, "titulo": f"{ciclos} ciclos de carga",
+        elif cycles >= 500:
+            factors.append({"peso": 0.2, "titulo": f"{cycles} ciclos de carga",
                             "detalhe": "Passou da metade dos ciclos previstos."})
-    return fatores
+    return factors
 
 
-def _advice(component: str, level: str, fatores: List[Dict[str, Any]]) -> str:
+def _advice(component: str, level: str, factors: List[Dict[str, Any]]) -> str:
     if component.startswith("disk"):
         if level in ("critico", "alto"):
             return ("Faça backup dos seus arquivos hoje, em outro disco ou na nuvem, e programe a "
@@ -175,7 +158,7 @@ def _advice(component: str, level: str, fatores: List[Dict[str, Any]]) -> str:
 def compute(db: Session, machine: Machine, save: bool = True) -> List[Dict[str, Any]]:
     """Calcula o risco de cada peça desta máquina."""
     now = utcnow()
-    erros_recentes = (
+    recent_errors = (
         db.query(Anomaly)
         .filter(Anomaly.machine_id == machine.id,
                 Anomaly.anomaly_type == "hardware_errors",
@@ -183,80 +166,79 @@ def compute(db: Session, machine: Machine, save: bool = True) -> List[Dict[str, 
         .count()
     )
 
-    achados: List[Dict[str, Any]] = []
+    findings: List[Dict[str, Any]] = []
     for disk in _latest_inventory(db, machine.id, "disk_health") or []:
-        fatores = _disk_factors(disk, erros_recentes)
-        risco = _risk_from_weights([f["peso"] for f in fatores])
-        achados.append({
+        factors = _disk_factors(disk, recent_errors)
+        risk = _risk_from_weights([f["peso"] for f in factors])
+        findings.append({
             "component": f"disk:{disk.get('device') or disk.get('model') or '?'}",
             "component_label": disk.get("model") or disk.get("device") or "Disco",
-            "risk_pct": round(risco * 100, 1),
-            "factors": fatores,
+            "risk_pct": round(risk * 100, 1),
+            "factors": factors,
         })
 
-    fatores_bateria = _battery_factors(db, machine.id)
-    if fatores_bateria:
-        risco = _risk_from_weights([f["peso"] for f in fatores_bateria])
-        achados.append({
+    battery_risk_factors = _battery_factors(db, machine.id)
+    if battery_risk_factors:
+        risk = _risk_from_weights([f["peso"] for f in battery_risk_factors])
+        findings.append({
             "component": "battery",
             "component_label": "Bateria",
-            "risk_pct": round(risco * 100, 1),
-            "factors": fatores_bateria,
+            "risk_pct": round(risk * 100, 1),
+            "factors": battery_risk_factors,
         })
 
-    resultados = []
-    for achado in achados:
-        nivel = _level(achado["risk_pct"] / 100)
+    rows = []
+    for finding in findings:
+        level = _level(finding["risk_pct"] / 100)
         row = HardwareRisk(
             machine_id=machine.id,
-            component=achado["component"],
-            component_label=achado["component_label"],
+            component=finding["component"],
+            component_label=finding["component_label"],
             computed_at=now,
-            risk_pct=achado["risk_pct"],
+            risk_pct=finding["risk_pct"],
             horizon_days=HORIZON_DAYS,
-            level=nivel,
-            factors=achado["factors"],
-            advice=_advice(achado["component"], nivel, achado["factors"]),
+            level=level,
+            factors=finding["factors"],
+            advice=_advice(finding["component"], level, finding["factors"]),
         )
         if save:
             db.add(row)
-        resultados.append(row)
-    if save and resultados:
+        rows.append(row)
+    if save and rows:
         db.commit()
-        for row in resultados:
+        for row in rows:
             db.refresh(row)
-    saida = [serialize(r) for r in resultados]
+    output = [serialize(r) for r in rows]
     if save:
-        _maybe_warn(db, machine, saida)
-    return saida
+        _maybe_warn(db, machine, output)
+    return output
 
 
-def _maybe_warn(db: Session, machine: Machine, riscos: List[Dict[str, Any]]) -> None:
+def _maybe_warn(db: Session, machine: Machine, risks: List[Dict[str, Any]]) -> None:
     """Risco alto vira aviso no painel — com a ação certa: backup antes da troca."""
     from app.services.anomaly_service import Candidate, persist_candidate
 
-    for risco in riscos:
-        if risco["level"] not in ("alto", "critico"):
+    for risk in risks:
+        if risk["level"] not in ("alto", "critico"):
             continue
         persist_candidate(
             db, machine,
             Candidate(
                 anomaly_type="hardware_failure_risk",
-                severity="high" if risco["level"] == "critico" else "medium",
+                severity="high" if risk["level"] == "critico" else "medium",
                 affected={
-                    "peca": risco["component_label"],
-                    "risco_pct": risco["risk_pct"],
-                    "horizonte_dias": risco["horizon_days"],
+                    "peca": risk["component_label"],
+                    "risco_pct": risk["risk_pct"],
+                    "horizonte_dias": risk["horizon_days"],
                 },
                 details={
-                    "resumo": risco["sentence"],
-                    "fatores": risco["factors"],
-                    "recomendacao": risco["advice"],
+                    "resumo": risk["sentence"],
+                    "fatores": risk["factors"],
+                    "recomendacao": risk["advice"],
                 },
                 source="hardware",
-                # Uma condição por peça: o risco da bateria não pode ser
-                # somado ao aviso que fala do disco
-                identity=risco["component_label"],
+                # Uma condição por peça: o risco da bateria não se soma ao aviso do disco
+                identity=risk["component_label"],
                 # Desgaste não muda de um dia para o outro
                 cooldown_minutes=7 * 24 * 60,
             ),
@@ -290,10 +272,10 @@ def latest(db: Session, machine_id: int) -> List[Dict[str, Any]]:
         .limit(50)
         .all()
     )
-    vistos = {}
+    seen = {}
     for row in rows:
-        vistos.setdefault(row.component, row)
-    return [serialize(r) for r in vistos.values()]
+        seen.setdefault(row.component, row)
+    return [serialize(r) for r in seen.values()]
 
 
 def run_all(db: Session) -> int:

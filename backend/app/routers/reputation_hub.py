@@ -1,10 +1,7 @@
-"""
-Endpoints do hub de reputação: um servidor AnomalyDetect recebe contagens
-anônimas de outros e devolve o retrato agregado. Sem conta de usuário — é
-troca servidor-a-servidor — mas só instalações cadastradas contribuem: cada
-uma manda o seu segredo em X-Hub-Key (REPUTATION_HUB_KEYS). Aberto, qualquer
-um inventava "visto em 999 computadores" e os consumidores viravam a
-confiança. Ligado por REPUTATION_HUB_ACCEPT, desligado por padrão.
+"""Hub de reputação: recebe contagens anônimas de outros servidores e devolve o retrato agregado.
+
+Servidor-a-servidor, sem conta de usuário, mas só instalações cadastradas contribuem (segredo em
+X-Hub-Key, REPUTATION_HUB_KEYS): aberto, qualquer um inventaria "visto em 999 computadores".
 """
 import hmac
 from typing import Any, Dict, List
@@ -32,10 +29,10 @@ def _hub_enabled():
         raise HTTPException(status_code=404, detail="Este servidor não atua como hub de reputação.")
 
 
-def _instalacao_autorizada(installation_id: str, chave: str) -> bool:
-    cadastradas = dict(par.split(":", 1) for par in settings.REPUTATION_HUB_KEYS.split(",") if ":" in par)
-    esperada = cadastradas.get(installation_id)
-    return bool(esperada) and hmac.compare_digest(esperada.encode(), (chave or "").encode())
+def _installation_authorized(installation_id: str, key: str) -> bool:
+    registered = dict(pair.split(":", 1) for pair in settings.REPUTATION_HUB_KEYS.split(",") if ":" in pair)
+    expected = registered.get(installation_id)
+    return bool(expected) and hmac.compare_digest(expected.encode(), (key or "").encode())
 
 
 @router.post("/contribute", dependencies=[Depends(limit("hub", 10, 3600))])
@@ -43,7 +40,7 @@ def contribute(body: Contribution, x_hub_key: str = Header(default=""), db: Sess
     _hub_enabled()
     if not body.installation_id or len(body.installation_id) > 64:
         raise HTTPException(status_code=400, detail="installation_id inválido")
-    if not _instalacao_autorizada(body.installation_id, x_hub_key):
+    if not _installation_authorized(body.installation_id, x_hub_key):
         raise HTTPException(status_code=401, detail="Instalação não autorizada a contribuir")
     accepted = reputation.accept_contribution(db, body.installation_id[:64], body.total_machines, body.items)
     return {"accepted": accepted}

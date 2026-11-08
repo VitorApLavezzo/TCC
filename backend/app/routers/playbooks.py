@@ -97,11 +97,11 @@ def update_playbook(playbook_id: int, body: PlaybookPatch, db: Session = Depends
                                          Playbook.user_id == user.id).first()
     if not playbook:
         raise HTTPException(status_code=404, detail="Automação não encontrada")
-    mudancas = body.model_dump(exclude_unset=True)
-    if "autonomy" in mudancas:
-        _validate(playbook.anomaly_type, playbook.action, mudancas["autonomy"])
-    for campo, valor in mudancas.items():
-        setattr(playbook, campo, valor)
+    changes = body.model_dump(exclude_unset=True)
+    if "autonomy" in changes:
+        _validate(playbook.anomaly_type, playbook.action, changes["autonomy"])
+    for field, value in changes.items():
+        setattr(playbook, field, value)
     db.commit()
     db.refresh(playbook)
     return playbooks.serialize(playbook)

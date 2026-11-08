@@ -1,14 +1,6 @@
-"""
-Limite de tentativas por IP, em memória.
+"""Limite de tentativas por IP (login, cadastro, pareamento), em janela deslizante na memória.
 
-Login, cadastro e pareamento são os três pontos em que um desconhecido pode
-bater à vontade: os dois primeiros aceitam senha, o terceiro aceita um código
-de seis dígitos. Sem limite, adivinhar é só questão de tempo de CPU alheio.
-
-Feito com uma janela deslizante em memória, de propósito: o sistema roda num
-processo só (um Uvicorn no Compose) e trazer Redis para isso custaria mais do
-que resolve. Se um dia houver mais de um processo, o limite passa a valer por
-processo — está anotado no README e em SECURITY.md.
+Sem Redis de propósito: o sistema roda num processo só; com mais de um, o limite vale por processo.
 """
 import ipaddress
 import threading
@@ -22,23 +14,21 @@ _hits: Dict[str, Deque[float]] = defaultdict(deque)
 _windows: Dict[str, float] = {}
 _lock = threading.Lock()
 
-# Teto de chaves na memória. Ao passar dele, a varredura tira as vencidas e,
-# se ainda sobrar demais, as mais antigas até 90% do teto: assim a varredura
-# (que percorre tudo) acontece uma vez a cada milhares de chaves novas, e não
-# a cada requisição de quem inventa chaves aos montes.
+# Teto de chaves na memória. A varredura desce até 90% do teto, para rodar uma vez a cada
+# milhares de chaves novas e não a cada requisição de quem inventa chaves aos montes.
 _MAX_KEYS = 20_000
 
 
-def _proxy_confiavel(peer: str) -> bool:
+def _trusted_proxy(peer: str) -> bool:
     from app.config import settings
 
     try:
         ip = ipaddress.ip_address(peer)
     except ValueError:
         return False
-    for rede in settings.TRUSTED_PROXY_CIDRS.split(","):
-        rede = rede.strip()
-        if rede and ip in ipaddress.ip_network(rede, strict=False):
+    for network in settings.TRUSTED_PROXY_CIDRS.split(","):
+        network = network.strip()
+        if network and ip in ipaddress.ip_network(network, strict=False):
             return True
     return False
 
@@ -46,12 +36,10 @@ def _proxy_confiavel(peer: str) -> bool:
 def _client_ip(request: Request) -> str:
     """O endereço de quem conectou; X-Real-IP só quando quem conectou é o Nginx.
 
-    X-Forwarded-For chega do próprio cliente (o Nginx não sobrescreve, e a
-    porta 8000 é publicada direto): confiar nele deixava cada tentativa
-    escolher um balde novo, e o limite nunca disparava.
+    X-Forwarded-For não é confiável: vem do próprio cliente e deixaria cada tentativa escolher o balde.
     """
     peer = request.client.host if request.client else "desconhecido"
-    if _proxy_confiavel(peer):
+    if _trusted_proxy(peer):
         real = (request.headers.get("x-real-ip") or "").strip()
         if real:
             return real
@@ -67,9 +55,9 @@ def _sweep(now: float) -> None:
         if not bucket:
             del _hits[key]
             _windows.pop(key, None)
-    excesso = len(_hits) - int(_MAX_KEYS * 0.9)
-    if excesso > 0:
-        for key in sorted(_hits, key=lambda k: _hits[k][-1])[:excesso]:
+    excess = len(_hits) - int(_MAX_KEYS * 0.9)
+    if excess > 0:
+        for key in sorted(_hits, key=lambda k: _hits[k][-1])[:excess]:
             del _hits[key]
             _windows.pop(key, None)
 

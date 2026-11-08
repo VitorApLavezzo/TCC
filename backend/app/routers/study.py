@@ -107,6 +107,6 @@ def results(db: Session = Depends(get_db), user: User = Depends(get_current_user
 
 @router.get("/export")
 def export(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    corpo = study.export_csv(db, user.id)
+    body = study.export_csv(db, user.id)
     return PlainTextResponse(
-        corpo, headers={"Content-Disposition": 'attachment; filename="estudo-compreensao.csv"'})
+        body, headers={"Content-Disposition": 'attachment; filename="estudo-compreensao.csv"'})

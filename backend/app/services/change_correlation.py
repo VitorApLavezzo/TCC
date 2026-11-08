@@ -1,17 +1,5 @@
-"""
-A mesma atualização, em vários computadores: quando a culpa é da mudança.
-
-O sistema já compara o antes e o depois de uma mudança **numa** máquina
-(trends.evaluate_change_impacts). Só que o desempenho de um computador oscila
-por mil motivos, e uma piora isolada é indistinguível de coincidência —
-alguém abriu um jogo, alguém instalou outra coisa no mesmo dia.
-
-O que separa coincidência de causa é a repetição: se a mesma atualização do
-Windows entrou em nove máquinas e seis pioraram, a chance de ser acaso cai
-muito. É a conclusão que hoje custa um analista olhando planilha, e o que sai
-daqui é a frase pronta: "depois do KB5034123, 6 dos seus 12 computadores
-ficaram mais lentos".
-"""
+"""A mesma atualização em vários computadores: piora isolada pode ser coincidência,
+a repetição entre máquinas é o que aponta a mudança como causa."""
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -58,67 +46,67 @@ def _group_key(event: ChangeEvent) -> Tuple[str, str, str]:
 def analyze(db: Session, user_id: int, days: int = 45) -> List[Dict[str, Any]]:
     """Agrupa as mudanças da frota e mede quantas máquinas pioraram em cada uma."""
     now = utcnow()
-    desde = now - timedelta(days=days)
+    since = now - timedelta(days=days)
     machine_ids = [m.id for m in db.query(Machine.id).filter(Machine.owner_id == user_id).all()]
     if len(machine_ids) < MIN_MACHINES:
         return []
 
-    eventos = (
+    events = (
         db.query(ChangeEvent)
         .filter(ChangeEvent.machine_id.in_(machine_ids),
                 ChangeEvent.kind.in_(FLEET_KINDS),
-                ChangeEvent.detected_at >= desde,
+                ChangeEvent.detected_at >= since,
                 # Precisa ter passado a janela de observação depois da mudança
                 ChangeEvent.detected_at <= now - timedelta(days=WINDOW_DAYS))
         .all()
     )
-    grupos: Dict[Tuple[str, str, str], List[ChangeEvent]] = {}
-    for evento in eventos:
-        grupos.setdefault(_group_key(evento), []).append(evento)
+    groups: Dict[Tuple[str, str, str], List[ChangeEvent]] = {}
+    for event in events:
+        groups.setdefault(_group_key(event), []).append(event)
 
-    achados = []
-    for (kind, nome, versao), lista in grupos.items():
+    findings = []
+    for (kind, name, version), group_events in groups.items():
         # Uma máquina pode ter o mesmo evento duas vezes; conta uma
-        por_maquina = {e.machine_id: e for e in lista}
-        if len(por_maquina) < MIN_MACHINES:
+        by_machine = {e.machine_id: e for e in group_events}
+        if len(by_machine) < MIN_MACHINES:
             continue
 
-        pioraram, comparadas = [], 0
-        for machine_id, evento in por_maquina.items():
-            t = aware(evento.detected_at)
-            antes = _window_stats(db, machine_id, t - timedelta(days=WINDOW_DAYS), t)
-            depois = _window_stats(db, machine_id, t, min(t + timedelta(days=WINDOW_DAYS), now))
-            if antes is None or depois is None:
+        worsened, compared = [], 0
+        for machine_id, event in by_machine.items():
+            t = aware(event.detected_at)
+            before = _window_stats(db, machine_id, t - timedelta(days=WINDOW_DAYS), t)
+            after = _window_stats(db, machine_id, t, min(t + timedelta(days=WINDOW_DAYS), now))
+            if before is None or after is None:
                 continue
-            comparadas += 1
-            sintoma = _worse(antes, depois)
-            if sintoma:
-                pioraram.append({"machine_id": machine_id, "sintoma": sintoma})
+            compared += 1
+            symptom = _worse(before, after)
+            if symptom:
+                worsened.append({"machine_id": machine_id, "sintoma": symptom})
 
-        if comparadas < MIN_MACHINES:
+        if compared < MIN_MACHINES:
             continue
-        proporcao = len(pioraram) / comparadas
-        achados.append({
+        ratio = len(worsened) / compared
+        findings.append({
             "kind": kind,
-            "name": nome,
-            "version": versao or None,
-            "machines_compared": comparadas,
-            "machines_worse": len(pioraram),
-            "ratio": round(proporcao, 2),
-            "suspect": proporcao >= SUSPECT_RATIO and len(pioraram) >= MIN_MACHINES,
-            "details": pioraram,
-            "sentence": _sentence(nome, len(pioraram), comparadas, pioraram),
+            "name": name,
+            "version": version or None,
+            "machines_compared": compared,
+            "machines_worse": len(worsened),
+            "ratio": round(ratio, 2),
+            "suspect": ratio >= SUSPECT_RATIO and len(worsened) >= MIN_MACHINES,
+            "details": worsened,
+            "sentence": _sentence(name, len(worsened), compared, worsened),
         })
-    achados.sort(key=lambda a: (a["suspect"], a["ratio"], a["machines_worse"]), reverse=True)
-    return achados
+    findings.sort(key=lambda a: (a["suspect"], a["ratio"], a["machines_worse"]), reverse=True)
+    return findings
 
 
-def _sentence(nome: str, pioraram: int, comparadas: int, detalhes: List[Dict[str, Any]]) -> str:
-    if not pioraram:
-        return f"Depois de {nome}, nenhum dos {comparadas} computadores comparados piorou."
-    exemplo = detalhes[0]["sintoma"]
-    return (f"Depois de {nome}, {pioraram} dos {comparadas} computadores comparados pioraram "
-            f"(por exemplo: {exemplo}).")
+def _sentence(name: str, worsened: int, compared: int, details: List[Dict[str, Any]]) -> str:
+    if not worsened:
+        return f"Depois de {name}, nenhum dos {compared} computadores comparados piorou."
+    example = details[0]["sintoma"]
+    return (f"Depois de {name}, {worsened} dos {compared} computadores comparados pioraram "
+            f"(por exemplo: {example}).")
 
 
 def run_all(db: Session) -> int:
@@ -126,53 +114,53 @@ def run_all(db: Session) -> int:
     from app.models.user import User
     from app.services import notifications
 
-    avisados = 0
+    notified = 0
     for (user_id,) in db.query(User.id).filter(User.is_active == True).all():  # noqa: E712
         try:
-            for achado in analyze(db, user_id):
-                if not achado["suspect"]:
+            for finding in analyze(db, user_id):
+                if not finding["suspect"]:
                     continue
-                if _ja_avisado(db, user_id, achado):
+                if _already_notified(db, user_id, finding):
                     continue
                 notifications.notify_user(
                     db, user_id,
-                    title=f"{achado['name']} parece ter deixado seus computadores mais lentos",
-                    body=achado["sentence"],
+                    title=f"{finding['name']} parece ter deixado seus computadores mais lentos",
+                    body=finding["sentence"],
                     kind="fleet_change",
                     severity="medium",
                 )
-                _marcar(db, user_id, achado)
-                avisados += 1
+                _mark_notified(db, user_id, finding)
+                notified += 1
         except Exception as e:
             db.rollback()
             print(f"[Correlação] Conta {user_id} falhou: {e}")
-    return avisados
+    return notified
 
 
-def _eventos_do_achado(db: Session, user_id: int, achado: Dict[str, Any]) -> List[ChangeEvent]:
+def _finding_events(db: Session, user_id: int, finding: Dict[str, Any]) -> List[ChangeEvent]:
     ids = [m.id for m in db.query(Machine.id).filter(Machine.owner_id == user_id).all()]
     return (
         db.query(ChangeEvent)
         .filter(ChangeEvent.machine_id.in_(ids),
-                ChangeEvent.kind == achado["kind"],
-                ChangeEvent.name == achado["name"])
+                ChangeEvent.kind == finding["kind"],
+                ChangeEvent.name == finding["name"])
         .all()
     )
 
 
-def _ja_avisado(db: Session, user_id: int, achado: Dict[str, Any]) -> bool:
+def _already_notified(db: Session, user_id: int, finding: Dict[str, Any]) -> bool:
     """O veredito da frota fica gravado no próprio evento, para não repetir."""
-    return any((e.impact or {}).get("fleet") for e in _eventos_do_achado(db, user_id, achado))
+    return any((e.impact or {}).get("fleet") for e in _finding_events(db, user_id, finding))
 
 
-def _marcar(db: Session, user_id: int, achado: Dict[str, Any]) -> None:
-    for evento in _eventos_do_achado(db, user_id, achado):
-        impacto = dict(evento.impact or {})
-        impacto["fleet"] = {
-            "machines_worse": achado["machines_worse"],
-            "machines_compared": achado["machines_compared"],
-            "sentence": achado["sentence"],
+def _mark_notified(db: Session, user_id: int, finding: Dict[str, Any]) -> None:
+    for event in _finding_events(db, user_id, finding):
+        impact = dict(event.impact or {})
+        impact["fleet"] = {
+            "machines_worse": finding["machines_worse"],
+            "machines_compared": finding["machines_compared"],
+            "sentence": finding["sentence"],
             "evaluated_at": utcnow().isoformat(),
         }
-        evento.impact = impacto
+        event.impact = impact
     db.commit()

@@ -1,10 +1,5 @@
-"""
-Resolução verificada.
-
-"Marcar como resolvido" era uma declaração da pessoa. Agora é uma hipótese: o
-sistema acompanha as leituras seguintes e confirma ("a memória voltou ao
-normal") ou reabre o aviso sozinho ("o problema continua").
-"""
+"""Resolução verificada: "marcar como resolvido" é uma hipótese que o sistema confere nas
+leituras seguintes, confirmando ou reabrindo o aviso sozinho."""
 from datetime import timedelta
 from typing import Optional
 

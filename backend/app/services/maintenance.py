@@ -1,8 +1,5 @@
-"""Limpeza periódica de dados brutos antigos.
-
-Leituras e processos ligados a avisos nunca são apagados: são a prova do que
-o sistema afirmou, e a caixa-preta e o replay dependem deles.
-"""
+"""Limpeza periódica de dados brutos antigos. Leituras ligadas a avisos nunca são apagadas:
+são a prova do que o sistema afirmou."""
 from datetime import timedelta
 
 from sqlalchemy.orm import Session

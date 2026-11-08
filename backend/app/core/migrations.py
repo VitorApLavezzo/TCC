@@ -1,15 +1,6 @@
-"""
-Atualização automática do esquema do banco.
-
-O projeto não usa Alembic: as tabelas nascem do `create_all` no primeiro start.
-Só que `create_all` cria tabelas novas e ignora colunas novas em tabelas que já
-existem — toda funcionalidade que acrescentava um campo exigia rodar
-`migrate.py` à mão, e quem esquecia via o backend quebrar com "column does not
-exist" logo na primeira leitura.
-
-Aqui a diferença entre os modelos e o banco real é calculada na subida:
-colunas e índices que faltam são criados. Só adiciona — nunca remove nem muda
-tipo —, então é seguro repetir a cada start.
+"""Atualização automática do esquema (sem Alembic): `create_all` ignora colunas novas em
+tabelas existentes, então colunas e índices que faltam são criados na subida. Só adiciona —
+nunca remove nem muda tipo —, então é seguro repetir a cada start.
 """
 from typing import List
 

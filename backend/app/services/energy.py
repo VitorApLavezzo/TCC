@@ -1,16 +1,5 @@
-"""
-Energia: consumo estimado em kWh, reais e CO₂, e desperdício.
-
-Quando há medida real, ela é usada: o notebook na bateria informa a taxa de
-descarga, e placas NVIDIA informam o próprio consumo. No resto, um modelo
-simples — base do aparelho + processador proporcional ao uso sobre um TDP
-típico. Os números aparecem sempre como estimativa, com a fração medida à
-vista: é ordem de grandeza para decisão, não conta de luz.
-
-Desperdício: horas de madrugada com o computador ligado, ninguém usando e o
-processador parado — e, quando o sistema informa, os programas que impedem
-o computador de dormir.
-"""
+"""Consumo estimado (kWh, reais, CO₂) e desperdício de madrugada. Usa medida real quando há
+(bateria, GPU NVIDIA); no resto, base do aparelho + TDP típico: ordem de grandeza, não conta de luz."""
 from collections import defaultdict
 from datetime import timedelta
 from typing import Any, Dict, Optional, Tuple

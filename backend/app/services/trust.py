@@ -1,33 +1,7 @@
-"""
-Quanto benefício da dúvida um executável merece antes de ser acusado.
-
-O problema que isto resolve: comportamento sozinho não distingue um antivírus
-de um minerador. Os dois rodam com privilégio, comem processador e falam com a
-internet — é literalmente o trabalho de um deles. Quem separa os dois é a
-identidade do arquivo: quem assinou, de onde ele roda, quantas máquinas já o
-viram sem nunca ter dado problema.
-
-Nada aqui é sensor novo: `signed`, `publisher`, `exe` e `sha256` já chegam em
-cada coleta, e `HashReputation` já soma o que se sabe do executável entre
-todas as máquinas. O que faltava era alguém ler isso *a favor* do programa —
-até agora a assinatura só era usada contra ele.
-
-Os quatro níveis:
-
-    0 desconhecido  nada sustenta esse executável
-    1 comum         assinado, ou visto em várias máquinas sem reclamação
-    2 confiável     assinado E instalado onde programas de verdade moram
-    3 segurança     confiável E é um produto de segurança conhecido
-
-Duas regras que impedem isto de virar um buraco:
-
-- O nível 3 nunca vem do nome nem do fabricante sozinhos. Sem assinatura
-  válida, `MsMpEng.exe` em `Downloads` é nível 0 — e continua sendo pego pelo
-  detector de disfarce.
-- Um executável confirmado como problema por alguém, ou reprovado no
-  VirusTotal, cai para 0 por mais bem assinado que seja. Certificado roubado
-  é uma coisa que acontece.
-"""
+"""Benefício da dúvida de um executável: comportamento não separa antivírus de minerador, a
+identidade do arquivo sim. Níveis: 0 desconhecido, 1 comum (assinado ou prevalente),
+2 confiável (assinado E na pasta de programas), 3 segurança. O nível 3 nunca vem só do nome
+ou do fabricante, e um executável reprovado cai para 0 por mais bem assinado que seja."""
 import ntpath
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -112,34 +86,29 @@ HUB_MIN_INSTALLATIONS = 3
 
 
 def owner_machine_counts(db: Session, owner_id: Optional[int], keys: Iterable[str]) -> Dict[str, int]:
-    """Em quantas máquinas DESTE dono cada executável já apareceu.
-
-    A prevalência que dá confiança era um contador do servidor inteiro, que
-    o agente de qualquer conta alimentava: três caminhos falsos numa máquina
-    bastavam para um programa virar "comum" — e o beaconing dele sumir —
-    nos computadores de outra pessoa. Contar só a própria frota fecha isso.
-    """
+    """Em quantas máquinas DESTE dono cada executável já apareceu. Só a própria frota:
+    senão o agente de outra conta tornaria um programa "comum" aqui."""
     keys = set(keys)
     if owner_id is None or not keys:
         return {}
     shas = {k for k in keys if not k.startswith("nome:")}
-    nomes = {k[len("nome:"):] for k in keys if k.startswith("nome:")}
+    names = {k[len("nome:"):] for k in keys if k.startswith("nome:")}
     query = (
         db.query(ProcessIdentity.machine_id, ProcessIdentity.name, ProcessIdentity.exe, ProcessIdentity.sha256)
         .join(Machine, Machine.id == ProcessIdentity.machine_id)
         .filter(Machine.owner_id == owner_id)
     )
-    linhas = []
+    rows = []
     if shas:
-        linhas += query.filter(func.lower(ProcessIdentity.sha256).in_(shas)).all()
-    if nomes:
-        linhas += query.filter(ProcessIdentity.sha256.is_(None), func.lower(ProcessIdentity.name).in_(nomes)).all()
-    vistos: Dict[str, set] = {}
-    for machine_id, name, exe, sha256 in linhas:
+        rows += query.filter(func.lower(ProcessIdentity.sha256).in_(shas)).all()
+    if names:
+        rows += query.filter(ProcessIdentity.sha256.is_(None), func.lower(ProcessIdentity.name).in_(names)).all()
+    seen: Dict[str, set] = {}
+    for machine_id, name, exe, sha256 in rows:
         k = identity_key(name, exe, sha256)
         if k in keys:
-            vistos.setdefault(k, set()).add(machine_id)
-    return {k: len(v) for k, v in vistos.items()}
+            seen.setdefault(k, set()).add(machine_id)
+    return {k: len(v) for k, v in seen.items()}
 
 
 def owner_problem_keys(db: Session, owner_id: Optional[int], keys: Iterable[str]) -> set:
@@ -156,12 +125,8 @@ def owner_problem_keys(db: Session, owner_id: Optional[int], keys: Iterable[str]
 
 def _from_reputation(rep: Optional[HashReputation], owner_machines: int = 0,
                      own_problem: bool = False) -> Tuple[bool, bool, Optional[str]]:
-    """(reprovado, prevalente, frase) — o que a reputação diz deste executável.
-
-    Só decide o que a conta dona pode afirmar: o próprio "é problema", o
-    VirusTotal e a prevalência na própria frota (ou no hub, com instalações
-    suficientes). Votos de outras contas não reprovam aqui.
-    """
+    """(reprovado, prevalente, frase). Só decide o que a conta dona pode afirmar;
+    votos de outras contas não reprovam aqui."""
     if own_problem:
         return True, False, "você já confirmou este programa como problema"
     if rep is not None and (rep.vt_malicious or 0) > 0:
@@ -176,11 +141,8 @@ def _from_reputation(rep: Optional[HashReputation], owner_machines: int = 0,
 
 
 def evaluate_all(db: Session, machine_id: int, processes: Iterable[Any]) -> Dict[Tuple[str, str], Trust]:
-    """Confiança de todos os processos de uma coleta, com uma consulta só.
-
-    Uma ida ao banco por processo seria uma por detector por processo — é por
-    isso que o cálculo acontece aqui e o resultado viaja no contexto.
-    """
+    """Confiança de todos os processos de uma coleta, com uma consulta só
+    (o resultado viaja no contexto em vez de uma ida ao banco por detector)."""
     processes = list(processes)
     keys = {
         identity_key(getattr(p, "name", None), getattr(p, "exe", None), getattr(p, "sha256", None))

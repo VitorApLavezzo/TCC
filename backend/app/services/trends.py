@@ -1,14 +1,7 @@
-"""
-Tendências de longo prazo.
+"""Tendências de longo prazo: refrigeração e impacto de mudanças (três dias antes e depois).
 
-- Refrigeração: a temperatura do processador *para a mesma carga* subindo
-  semana a semana é poeira ou ventilador perdendo força. O verão também
-  esquenta o computador — mas esquenta igual em repouso e sob carga; poeira
-  pesa mais sob carga, quando o ventilador precisa trabalhar. Por isso a regra
-  compara as duas faixas.
-- Impacto de mudanças: três dias antes e três depois de cada programa
-  instalado, atualização ou driver novo, incluindo o tempo que o computador
-  leva para "acalmar" depois de ligar.
+Refrigeração compara a temperatura sob carga com a em repouso: o calor do ambiente sobe as duas
+por igual, poeira ou ventilador fraco pesa mais sob carga.
 """
 import statistics
 from collections import defaultdict
@@ -36,10 +29,6 @@ CHANGE_LABELS = {
     "agent_update": "a atualização do",
 }
 
-
-# ---------------------------------------------------------------------------
-# Refrigeração
-# ---------------------------------------------------------------------------
 
 def cooling_trend(db: Session, machine: Machine, weeks: int = 6) -> Dict[str, Any]:
     start = utcnow() - timedelta(weeks=weeks)
@@ -130,10 +119,6 @@ def cooling_all(db: Session) -> int:
         created += int(anomaly is not None)
     return created
 
-
-# ---------------------------------------------------------------------------
-# Impacto de mudanças
-# ---------------------------------------------------------------------------
 
 def boot_settle_seconds(rows) -> List[float]:
     """Quanto tempo depois de ligar o processador baixa de 30% — o computador "pronto".

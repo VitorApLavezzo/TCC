@@ -1,11 +1,5 @@
-"""
-Diário do computador.
-
-Toda segunda-feira, um texto corrido sobre a semana anterior: o que mudou, o
-que piorou, o que se repetiu. Os números vêm de consultas determinísticas
-(`weekly_stats`); a IA só escreve o texto — e sem IA, o texto sai de um molde
-com os mesmos destaques.
-"""
+"""Diário semanal do computador: os números vêm de consultas determinísticas (`weekly_stats`);
+a IA só escreve o texto, e sem IA ele sai de um molde com os mesmos destaques."""
 import statistics
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone

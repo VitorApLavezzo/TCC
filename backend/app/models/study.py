@@ -4,14 +4,8 @@ from app.database import Base
 
 
 class StudySession(Base):
-    """Uma pessoa participando do estudo de compreensão.
-
-    A tese do trabalho é que um leigo entende a explicação da IA melhor do que
-    entende a métrica crua. Isso não se demonstra com a opinião de quem
-    programou: cada participante recebe os mesmos avisos, metade com explicação
-    e metade só com os números, em ordem sorteada, e o sistema mede tempo,
-    acerto da causa e confiança — além do questionário SUS no fim.
-    """
+    """Uma pessoa participando do estudo de compreensão: metade dos avisos com explicação e metade
+    só com os números, em ordem sorteada; mede tempo, acerto da causa, confiança e SUS."""
     __tablename__ = "study_sessions"
 
     id = Column(Integer, primary_key=True, index=True)

@@ -88,26 +88,22 @@ def latest_benchmark(db: Session = Depends(get_db), user: User = Depends(get_cur
 @router.post("/benchmark")
 def start_benchmark(real_machine_id: Optional[int] = None, db: Session = Depends(get_db),
                     user: User = Depends(get_current_user)):
-    """Dispara uma rodada em segundo plano.
-
-    São ~15 cenários com aquecimento de 110 leituras cada: longe demais para
-    uma requisição síncrona. O painel busca o resultado depois.
-    """
+    """Dispara uma rodada em segundo plano (longa demais para uma requisição síncrona)."""
     from app.services import jobs
     jobs.submit(_run_benchmark, user.id, real_machine_id, owner_id=user.id)
     return {"started": True}
 
 
 def _run_benchmark(db: Session, user_id: int, real_machine_id: Optional[int]):
-    resultado = benchmark.run(db, user_id)
+    result = benchmark.run(db, user_id)
     if real_machine_id:
         machine = db.query(Machine).filter(
             Machine.id == real_machine_id, Machine.owner_id == user_id).first()
         if machine:
-            resultado.scenarios.append(
+            result.scenarios.append(
                 benchmark.run_real_scenario(db, machine.id, user_id))
-            resultado.metrics = benchmark.confusion(resultado.scenarios)
-    benchmark_store.save(db, user_id, resultado)
+            result.metrics = benchmark.confusion(result.scenarios)
+    benchmark_store.save(db, user_id, result)
 
 
 @router.get("/benchmark/{run_id}/download")
@@ -118,9 +114,9 @@ def download_benchmark(run_id: int, fmt: str = "md", db: Session = Depends(get_d
     run = db.query(BenchmarkRun).filter(BenchmarkRun.id == run_id, BenchmarkRun.user_id == user.id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Rodada não encontrada")
-    corpo = run.csv if fmt == "csv" else run.markdown
-    nome = f"benchmark-deteccao-{run_id}.{'csv' if fmt == 'csv' else 'md'}"
-    return PlainTextResponse(corpo or "", headers={"Content-Disposition": f'attachment; filename="{nome}"'})
+    body = run.csv if fmt == "csv" else run.markdown
+    filename = f"benchmark-deteccao-{run_id}.{'csv' if fmt == 'csv' else 'md'}"
+    return PlainTextResponse(body or "", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/fidelity")
@@ -194,10 +190,10 @@ def real_evaluation(machine_id: int, days: int = 14, db: Session = Depends(get_d
     """Avaliação em dado real: sessões rotuladas × avisos de verdade, e a última reprodução."""
     from app.services import real_eval
     _own_machine(db, machine_id, user)
-    fim = utcnow()
-    inicio = fim - timedelta(days=max(1, min(days, 90)))
+    end = utcnow()
+    start = end - timedelta(days=max(1, min(days, 90)))
     return {
-        "live": real_eval.live(db, machine_id, inicio, fim),
+        "live": real_eval.live(db, machine_id, start, end),
         "replay": _REAL_REPLAY_CACHE.get((user.id, machine_id), {"status": "none"}),
     }
 
@@ -214,13 +210,13 @@ def start_real_replay(machine_id: int, days: int = 14, db: Session = Depends(get
 
 def _run_real_replay(db, user_id: int, machine_id: int, days: int):
     from app.services import real_eval
-    chave = (user_id, machine_id)
-    _REAL_REPLAY_CACHE[chave] = {"status": "running"}
-    fim = utcnow()
+    key = (user_id, machine_id)
+    _REAL_REPLAY_CACHE[key] = {"status": "running"}
+    end = utcnow()
     try:
-        _REAL_REPLAY_CACHE[chave] = {
+        _REAL_REPLAY_CACHE[key] = {
             "status": "done", "days": days,
-            **real_eval.replay(db, machine_id, user_id, fim - timedelta(days=days), fim),
+            **real_eval.replay(db, machine_id, user_id, end - timedelta(days=days), end),
         }
     except Exception as e:
-        _REAL_REPLAY_CACHE[chave] = {"status": "error", "detail": str(e)}
+        _REAL_REPLAY_CACHE[key] = {"status": "error", "detail": str(e)}

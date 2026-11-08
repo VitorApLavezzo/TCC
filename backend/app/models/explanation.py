@@ -27,7 +27,6 @@ class AIExplanation(Base):
     # números do texto existem de fato nos dados
     evidence = Column(JSON)
     verification = Column(JSON)
-    # "Se você fechar X, a memória cai para Y"
     counterfactual = Column(JSON)
 
     # Auditoria: texto exatamente como foi enviado, resposta crua, tentativas

@@ -4,12 +4,8 @@ from app.database import Base
 
 
 class ProcessIdentity(Base):
-    """Um executável específico numa máquina — caminho e hash, não só o nome.
-
-    A lista de processos seguros era por nome: um vírus chamado `svchost.exe`
-    passava direto. Aqui cada combinação (nome, caminho) é conhecida
-    separadamente, com o hash e a assinatura digital vistos.
-    """
+    """Um executável específico numa máquina — caminho e hash, não só o nome, que é o que um
+    vírus chamado `svchost.exe` imita."""
     __tablename__ = "process_identities"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -55,9 +51,7 @@ class HashReputation(Base):
 class ReputationVote(Base):
     """Um "é normal" / "é problema" por executável e por conta.
 
-    O contador global somava cada clique de qualquer conta: um só "é problema"
-    de quem nem tinha o programa reprovava o antivírus dos outros. O voto
-    vale para as máquinas da própria conta; para as demais, os contadores de
+    O voto vale para as máquinas da própria conta; para as demais, os contadores de
     HashReputation são só opinião coletiva, contada uma vez por conta.
     """
     __tablename__ = "reputation_votes"

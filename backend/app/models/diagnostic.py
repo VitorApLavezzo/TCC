@@ -4,11 +4,7 @@ from app.database import Base
 
 
 class Diagnostic(Base):
-    """Resposta a "está lento agora, por quê?".
-
-    O agente coleta vinte segundos em alta resolução (uma leitura por segundo),
-    o servidor resume quem está consumindo o quê e a IA responde em uma frase.
-    """
+    """Resposta a "está lento agora, por quê?": vinte segundos em alta resolução, resumidos pela IA."""
     __tablename__ = "diagnostics"
 
     id = Column(Integer, primary_key=True, index=True)

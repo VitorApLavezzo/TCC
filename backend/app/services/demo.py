@@ -1,15 +1,5 @@
-"""
-Modo demonstração.
-
-Cria um computador falso e injeta leituras sintéticas que passam pelo MESMO
-caminho de ingestão das reais — detectores, modelo, IA, incidentes,
-notificações. Nada é desenhado na tela à mão: o que a banca vê é o que o
-sistema de fato detectou, só que a partir de dados fabricados de forma
-controlada, sem precisar travar um computador de verdade.
-
-Reaproveita a ideia do harness de fault injection (cbox), mas dentro do
-próprio backend, disparável pelo painel.
-"""
+"""Modo demonstração: um computador falso cujas leituras sintéticas passam pelo MESMO caminho
+de ingestão das reais (detectores, modelo, IA, incidentes, notificações)."""
 import math
 import random
 import secrets
@@ -33,10 +23,7 @@ SCENARIOS: Dict[str, Dict[str, Any]] = {
                  "expect": "cpu_loop"},
     "memory_leak": {"label": "Vazamento de memória", "warmup": 12, "attack": 12, "expect": "memory_leak"},
     "ransomware": {"label": "Sequestro de dados (ransomware)", "warmup": 8, "attack": 4, "expect": "ransomware_canary"},
-    # Passos de uma hora virtual, só aqui: a previsão de disco projeta tendência
-    # de horas a dias e exige meio dia de histórico. A 30 s por passo ela era
-    # impossível por construção, e a demonstração mostrava "sem tendência"
-    # num cenário chamado "disco enchendo".
+    # Passos de uma hora virtual: a previsão de disco exige meio dia de histórico.
     "disk_filling": {"label": "Disco enchendo rápido", "warmup": 20, "attack": 10, "expect": "disk_forecast",
                      "interval": 3600},
     "masquerade": {"label": "Vírus disfarçado de svchost.exe", "warmup": 8, "attack": 3, "expect": "process_masquerading"},
@@ -52,8 +39,7 @@ NORMAL_PROCS = [
 ]
 
 
-# Pid e pais de cada programa comum. Tudo aberto pela pessoa descende do
-# explorer.exe; o svchost vem do services.exe.
+# Tudo aberto pela pessoa descende do explorer.exe; o svchost vem do services.exe.
 NORMAL_PIDS = {"explorer.exe": 1500, "chrome.exe": 2500, "Code.exe": 3100, "Spotify.exe": 3400,
                "svchost.exe": 900}
 NORMAL_ANCESTORS = {"explorer.exe": [700], "chrome.exe": [1500, 700], "Code.exe": [1500, 700],
@@ -63,9 +49,7 @@ NORMAL_ANCESTORS = {"explorer.exe": [700], "chrome.exe": [1500, 700], "Code.exe"
 def _base_metric(step: int) -> Dict[str, Any]:
     wave = math.sin(step / 4) * 6
     return {
-        # Alguém navegando: teclado e mouse mexidos há segundos, o Chrome na
-        # frente. Sem `random` de propósito: mudar a sequência do gerador
-        # mudaria todos os números já publicados dos cenários.
+        # Sem `random` de propósito: mudar a sequência do gerador mudaria os números já publicados.
         "user_idle_seconds": 3.0 + (step % 9) * 6,
         "foreground_pid": NORMAL_PIDS["chrome.exe"],
         "foreground_name": "chrome.exe",
@@ -103,7 +87,6 @@ def _normal_processes() -> List[Dict[str, Any]]:
     return out
 
 
-# Cada cenário: dado o passo dentro da fase de ataque, ajusta métrica/processos/eventos
 def _scenario_step(scenario: str, phase: str, k: int, metric: Dict, procs: List[Dict]) -> Dict[str, Any]:
     events, beacons, starts = [], [], []
     if phase == "warmup":
@@ -119,9 +102,7 @@ def _scenario_step(scenario: str, phase: str, k: int, metric: Dict, procs: List[
         procs.append({"name": "leaky_app.exe", "cpu_percent": 6.0, "mem_percent": min(4 + k * 4.0, 55),
                       "exe": "C:\\Program Files\\LeakyApp\\leaky_app.exe", "signed": "signed", "username": "demo"})
     elif scenario == "disk_filling":
-        # O tamanho do disco é o da leitura-base. Recalcular com um total
-        # próprio (100 GB contra os 500 do aquecimento) fazia o uso em GB cair
-        # enquanto o percentual subia: a previsão via o disco esvaziando.
+        # Mantém o tamanho do disco da leitura-base, senão o uso em GB cai enquanto o percentual sobe.
         total = metric["disk_used"] + metric["disk_free"]
         metric["disk_percent"] = min(58 + k * 3.5, 99)
         metric["disk_used"] = metric["disk_percent"] / 100 * total
@@ -132,11 +113,8 @@ def _scenario_step(scenario: str, phase: str, k: int, metric: Dict, procs: List[
                       "username": "demo", "cmdline": "svchost.exe -k netsvcs"})
     elif scenario == "beaconing":
         metric["net_connections"] += 2
-        # IP público de verdade, e não a faixa de documentação (203.0.113.0/24):
-        # o detector exige destino público, e o Python classifica TODAS as
-        # faixas reservadas para documentação da RFC 5737 como privadas — o
-        # cenário era descartado antes de ser avaliado e nunca detectou nada.
-        # 45.33.32.156 é scanme.nmap.org, host mantido publicamente para testes.
+        # IP público real (scanme.nmap.org): o detector exige destino público e o Python
+        # classifica as faixas de documentação da RFC 5737 como privadas.
         beacons.append({"process": "updater_x.exe", "exe": "C:\\Users\\demo\\AppData\\Roaming\\updater_x.exe",
                         "remote_ip": "45.33.32.156", "remote_port": 443, "events": 6 + k,
                         "median_interval": 60.0, "jitter": 0.03})
@@ -223,26 +201,22 @@ def step(db: Session, session: DemoSession) -> Dict[str, Any]:
     if extra["beacons"]:
         created += agent_events.evaluate_beacons(db, machine, extra["beacons"], virtual_ts)
     if session.scenario == "disk_filling" and phase == "attack":
-        # A mesma reconferência que o agendador faz em produção a cada 15
-        # minutos. Antes só se escrevia a frase da previsão no log; quem cria
-        # o aviso "Disco Vai Encher em Breve" é o check_machine.
+        # Mesma reconferência que o agendador faz em produção; quem cria o aviso é o check_machine.
         from app.services import forecasting
-        previsto = forecasting.check_machine(db, machine)
-        if previsto is not None:
-            created.append(previsto)
+        forecast_anomaly = forecasting.check_machine(db, machine)
+        if forecast_anomaly is not None:
+            created.append(forecast_anomaly)
         if attack_k == spec["attack"] - 1:
             f = forecasting.disk_forecast(db, machine)
             session.log = (session.log or []) + [f"Previsão de disco: {f.get('sentence') or f.get('reason')}"]
 
     log = list(session.log or [])
     for anomaly in created:
-        # O log aparece na tela da demonstração, na frente da banca: nome do aviso
-        # como a pessoa o vê, não o identificador interno.
+        # O log aparece na tela da demonstração: nome do aviso como a pessoa o vê.
         label = ANOMALY_TYPE_LABELS.get(anomaly.anomaly_type, anomaly.anomaly_type)
         sev = SEVERITY_LABELS.get(anomaly.severity, anomaly.severity).lower()
         log.append(f"Leitura {k + 1} · aviso: {label} (gravidade {sev})")
 
-    # Broadcast em tempo real, como uma máquina real
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():

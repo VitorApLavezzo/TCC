@@ -4,7 +4,7 @@ from typing import Optional
 
 # Valores que já circularam publicamente (código, .env.example, compose):
 # quem conhece um deles assina sessão de qualquer conta.
-_CHAVES_PUBLICAS = {"change-this-in-production", "dev-secret-key-change-in-production"}
+_PUBLISHED_KEYS = {"change-this-in-production", "dev-secret-key-change-in-production"}
 
 
 class Settings(BaseSettings):
@@ -21,31 +21,25 @@ class Settings(BaseSettings):
     # Login com Google (OAuth) — vazio desativa o botão no frontend
     GOOGLE_CLIENT_ID: str = ""
 
-    # Fallback em nuvem (API compatível com OpenAI — Groq por padrão)
-    # Se CLOUD_LLM_API_KEY estiver vazia, o fallback em nuvem fica desativado
+    # Fallback em nuvem (API compatível com OpenAI); CLOUD_LLM_API_KEY vazia o desativa
     CLOUD_LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
     CLOUD_LLM_API_KEY: str = ""
     CLOUD_LLM_MODEL: str = "llama-3.3-70b-versatile"
 
-    # Claude Code CLI em modo headless (usa a assinatura autenticada em ~/.claude)
-    # Quando habilitado, vira o primeiro provedor da cadeia de explicações.
+    # Claude Code CLI headless (assinatura em ~/.claude); habilitado, é o primeiro provedor da cadeia
     CLAUDE_CLI_ENABLED: bool = False
     CLAUDE_CLI_PATH: str = "claude"
     CLAUDE_CLI_MODEL: str = "sonnet"
     CLAUDE_CLI_TIMEOUT: int = 120
 
-    # Que fração do próprio histórico da máquina o modelo consideraria fora do
-    # padrão (em %). O limite é recalculado a cada treino a partir dessa fração,
-    # em vez de um número fixo: o antigo ANOMALY_SCORE_THRESHOLD=-0.15 era
-    # comparado com score_samples, que fica perto de -0.45 em leituras normais —
-    # na prática toda leitura era "anômala".
+    # Fração (%) do próprio histórico da máquina considerada fora do padrão; o limite é recalculado
+    # a cada treino, porque um número fixo não acompanha a escala de score_samples.
     ML_ALERT_PERCENTILE: float = 0.5
-    # Quanto do caminho até o limite de alerta a leitura anterior precisa ter
-    # andado para confirmar a atual. 1,0 exigiria duas leituras de alerta pleno
-    # (mata a revocação); 0,0 volta ao comportamento antigo de comparar com zero.
+    # Quanto do caminho até o limite de alerta a leitura anterior precisa ter andado para confirmar
+    # a atual (1,0 exigiria duas leituras de alerta pleno e mataria a revocação).
     ML_CONFIRM_FACTOR: float = 0.5
     MIN_TRAINING_SAMPLES: int = 100
-    # 3% de contaminação: menos alarmes falsos que os 5% originais
+    # 3% de contaminação: menos alarmes falsos que 5%
     ISOLATION_FOREST_CONTAMINATION: float = 0.03
     # Janela de treino (nº de coletas mais recentes) e frequência de retreino
     TRAINING_WINDOW: int = 5000
@@ -97,26 +91,20 @@ class Settings(BaseSettings):
     METRIC_RETENTION_DAYS: int = 120
     PROCESS_SNAPSHOT_RETENTION_DAYS: int = 21
 
-    # Origens autorizadas a chamar a API pelo navegador, separadas por vírgula
-    # ("*" libera qualquer uma, e nesse caso as credenciais de origem cruzada
-    # ficam desligadas — a combinação "*" + credenciais é inválida no padrão
-    # CORS e os navegadores recusam). O painel autentica por Bearer no
-    # cabeçalho, não por cookie, então nada se perde com isso.
+    # Origens autorizadas a chamar a API pelo navegador, separadas por vírgula. Com "*" as
+    # credenciais de origem cruzada ficam desligadas (inválido no CORS); o painel usa Bearer.
     ALLOWED_ORIGINS: str = "*"
 
     # Limite de tentativas por IP em login, cadastro e pareamento
     RATE_LIMIT_ENABLED: bool = True
-    # Redes dos proxies que escrevem o IP real do cliente em X-Real-IP (o
-    # Nginx do Compose fica na rede bridge 172.16.0.0/12). De qualquer outro
-    # endereço o cabeçalho é ignorado: senão cada cliente escolhia o próprio
-    # balde do limite.
+    # Redes dos proxies que escrevem o IP real em X-Real-IP (o Nginx do Compose fica em
+    # 172.16.0.0/12). De outro endereço o cabeçalho é ignorado, senão cada cliente escolhe o balde.
     TRUSTED_PROXY_CIDRS: str = ""
 
     # Chave do selo do livro de auditoria, guardada fora do banco. Vazia,
     # deriva da SECRET_KEY — quem só tem acesso ao banco não refaz os selos.
     LEDGER_HMAC_KEY: str = ""
 
-    # --- Deriva do modelo -------------------------------------------------
     # Distância (Jensen-Shannon média entre as métricas) a partir da qual o
     # normal aprendido não descreve mais a máquina
     DRIFT_WARN: float = 0.20
@@ -124,14 +112,12 @@ class Settings(BaseSettings):
     # Quantas leituras recentes entram na comparação com a janela de treino
     DRIFT_RECENT_SAMPLES: int = 300
 
-    # --- Playbooks (automação com autonomia graduada) ---------------------
     # Janela de arrependimento: uma ação automática é anunciada e só acontece
     # depois deste tempo, para a pessoa poder cancelar antes
     PLAYBOOK_UNDO_SECONDS: int = 120
     # Teto de execuções automáticas por playbook por dia (trava de segurança)
     PLAYBOOK_DAILY_LIMIT: int = 10
 
-    # --- Notificação no celular (Web Push) --------------------------------
     # Geradas uma vez com `docker compose exec backend python -m app.services.push`
     VAPID_PUBLIC_KEY: str = ""
     VAPID_PRIVATE_KEY: str = ""
@@ -142,9 +128,9 @@ class Settings(BaseSettings):
 
     @field_validator("SECRET_KEY")
     @classmethod
-    def _chave_forte(cls, v: str) -> str:
+    def _strong_key(cls, v: str) -> str:
         v = v.strip()
-        if v in _CHAVES_PUBLICAS or len(v) < 32:
+        if v in _PUBLISHED_KEYS or len(v) < 32:
             raise ValueError("SECRET_KEY precisa ser um valor aleatório próprio, com pelo menos 32 caracteres "
                              "(gere com: python3 -c 'import secrets; print(secrets.token_urlsafe(48))')")
         return v

@@ -64,8 +64,7 @@ def get_metrics(
     machine = db.query(Machine).filter(Machine.id == machine_id, Machine.owner_id == current_user.id).first()
     if not machine:
         return []
-    # A versão anterior devolvia as 500 leituras MAIS ANTIGAS do período: num
-    # gráfico de 7 dias, o momento do aviso nunca aparecia.
+    # Reduz o período inteiro em vez de cortar no limite: o momento do aviso precisa aparecer.
     since = aware(start) if start else utcnow() - timedelta(hours=hours)
     query = db.query(Metric).filter(Metric.machine_id == machine_id, Metric.timestamp >= since)
     if end:
@@ -98,11 +97,7 @@ def get_learning_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Quanto o sistema já aprendeu sobre esta máquina.
-
-    O painel usa isso para dizer ao usuário que a detecção ainda está
-    calibrando — sem isso, "nenhuma anomalia" é indistinguível de "quebrado".
-    """
+    """Quanto o sistema já aprendeu sobre esta máquina ("nenhuma anomalia" ≠ "ainda calibrando")."""
     machine = _owned_machine(db, machine_id, current_user)
     collected = db.query(Metric).filter(Metric.machine_id == machine_id).count()
     needed = settings.MIN_TRAINING_SAMPLES
@@ -114,9 +109,8 @@ def get_learning_status(
         "ml_ready": bool(info) and collected >= needed,
         "retrain_every": settings.RETRAIN_EVERY,
         "model": info,
-        # As duas camadas usam a mesma régua: enquanto isto for verdade, os
-        # detectores que dependem de histórico ficam quietos e os avisos que
-        # saem não viram notificação
+        # Mesma régua das duas camadas: enquanto aprende, detectores que dependem de histórico ficam
+        # quietos e os avisos não viram notificação
         **learning.status(db, machine).as_dict(),
     }
 

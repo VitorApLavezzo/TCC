@@ -1,17 +1,7 @@
-"""
-Detector de padrões comportamentais avançados.
-Vai além de thresholds — analisa tendências, novos processos, padrões suspeitos.
+"""Detectores comportamentais: tendências, processos novos e padrões suspeitos.
 
-Revisões desta versão:
-- Todos os detectores rodam e todos os achados voltam (antes só o mais grave
-  sobrevivia, e os demais sintomas se perdiam — agora alimentam a cadeia de
-  causa do incidente).
-- Janelas por tempo, não por contagem: a coleta é adaptativa, e "3 de 5
-  coletas" a cada 5 s eram 25 s de pico — pouco para chamar de travamento.
-- Sensibilidade por máquina (feedback "é normal") multiplica os limites dos
-  detectores de desempenho.
-- A lista de processos do sistema considera o caminho do executável quando o
-  agente informa: um `svchost.exe` fora de System32 não é o do Windows.
+Janelas por tempo, não por contagem: a coleta é adaptativa, e "3 de 5 coletas"
+a cada 5 s eram 25 s de pico — pouco para chamar de travamento.
 """
 import ntpath
 import re
@@ -29,7 +19,6 @@ from app.models.process_baseline import ProcessBaseline
 from app.services import trust
 
 
-# Processos do sistema operacional considerados seguros (whitelist básica)
 SYSTEM_PROCESSES_WINDOWS = {
     "system", "system idle process", "svchost.exe", "lsass.exe", "winlogon.exe",
     "explorer.exe", "csrss.exe", "smss.exe", "wininit.exe", "services.exe",
@@ -71,9 +60,8 @@ PROTECTED_WINDOWS_BINARIES = {
     "explorer.exe": ("\\windows\\",),
 }
 
-# Quantas aparições um processo precisa ter para a média dele valer como
-# referência. `is_known` (5) diz "já vi isso aqui"; uma média de 5 leituras
-# não descreve um programa que fica ocioso e acorda para trabalhar.
+# Aparições para a média valer como referência: 5 (`is_known`) não descrevem
+# um programa que fica ocioso e acorda para trabalhar.
 MIN_BASELINE_SAMPLES = 20
 
 # Nomes parecidos com binários do sistema que são programas legítimos
@@ -84,8 +72,8 @@ MALWARE_NAMES = {
     "cryptominer", "xmrig", "minerd", "cgminer", "bfgminer", "nanominer", "lolminer",
     "phoenixminer", "nbminer", "ethminer", "t-rex", "mimikatz", "lazagne", "rubeus",
 }
-# Ferramentas legítimas do Windows muito usadas por ataques: só contam como
-# indício junto com outros sinais — rodam o dia todo em computadores normais
+# Ferramentas legítimas do Windows usadas por ataques: só contam como indício
+# junto com outros sinais — rodam o dia todo em computadores normais
 LOLBINS = {
     "powershell_ise", "mshta", "wscript", "cscript", "regsvr32", "rundll32",
     "certutil", "bitsadmin", "msbuild", "installutil",
@@ -137,7 +125,7 @@ def _is_system_process(name: str, exe: Optional[str] = None) -> bool:
     if n not in _SYSTEM_PROCESSES:
         return False
     if not exe:
-        # Agente antigo ou sem permissão para ler o caminho: confia no nome, como antes
+        # Agente antigo ou sem permissão para ler o caminho: confia no nome
         return True
     expected = PROTECTED_WINDOWS_BINARIES.get(n)
     if expected and _looks_windows_path(exe):
@@ -166,11 +154,9 @@ class DetectionContext:
     sensitivity: Dict[str, float] = field(default_factory=dict)
     # Programas que nasceram desde a última coleta, com pai e caminho
     process_starts: List[Dict[str, Any]] = field(default_factory=list)
-    # Confiança de cada processo desta coleta, calculada uma vez por coleta:
-    # a consulta de reputação é uma ida ao banco, e são dez detectores
+    # Calculada uma vez por coleta: a reputação é uma ida ao banco, e são dez detectores
     trust_levels: Dict[Tuple[str, str], trust.Trust] = field(default_factory=dict)
-    # Máquina ainda conhecendo o próprio normal — quem compara com histórico
-    # não tem com o que comparar
+    # Máquina ainda aprendendo o próprio normal: não há histórico para comparar
     learning: bool = False
 
     def s(self, detector: str) -> float:
@@ -225,10 +211,7 @@ def _span_seconds(metrics: List[Metric]) -> float:
 
 
 def analyze_behavior(metric: Metric, db: Session, ctx: Optional[DetectionContext] = None) -> List[BehaviorAnalysis]:
-    """
-    Executa todos os detectores comportamentais.
-    Retorna todos os achados, do mais grave para o menos grave.
-    """
+    """Executa todos os detectores; devolve todos os achados, do mais grave ao menos grave."""
     ctx = ctx or DetectionContext()
     processes = (
         db.query(ProcessSnapshot)
@@ -244,7 +227,6 @@ def analyze_behavior(metric: Metric, db: Session, ctx: Optional[DetectionContext
         .all()
     )
 
-    # Uma vez por coleta, não uma por detector: a reputação vem do banco
     if not ctx.trust_levels:
         ctx.trust_levels = trust.evaluate_all(db, metric.machine_id, processes)
 
@@ -277,13 +259,9 @@ def analyze_behavior(metric: Metric, db: Session, ctx: Optional[DetectionContext
 
 def detect_memory_leak(metric: Metric, processes: List[ProcessSnapshot],
                        history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """
-    Detecta programa com crescimento contínuo de memória ao longo do tempo.
+    """Memória de um programa crescendo continuamente.
 
-    A série é a memória total do programa (soma das instâncias com o mesmo
-    nome) por leitura, em ordem de tempo. A versão anterior misturava as
-    instâncias e não ordenava os pontos — o "crescimento" era da ordem em que
-    o banco devolvia as linhas.
+    A série é a soma das instâncias de mesmo nome por leitura, em ordem de tempo.
     """
     s = ctx.s("memory_leak")
     window = sorted([metric] + _before(history, metric, 20 * 60), key=_ts)[-15:]
@@ -348,10 +326,7 @@ def detect_memory_leak(metric: Metric, processes: List[ProcessSnapshot],
 
 def detect_cpu_loop(metric: Metric, processes: List[ProcessSnapshot],
                     history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """
-    Detecta processo em loop infinito: CPU alta sustentada em um único processo
-    enquanto o resto do sistema está normal.
-    """
+    """CPU alta sustentada em um único processo enquanto o resto do sistema está normal."""
     if not processes:
         return None
 
@@ -384,12 +359,8 @@ def detect_cpu_loop(metric: Metric, processes: List[ProcessSnapshot],
 
     if sustained_high >= needed and dominance > 0.4:
         analysis = BehaviorAnalysis()
-        # A confiança muda o DIAGNÓSTICO, não só a severidade. Um jogo ou um
-        # compilador assinado e instalado em pasta de programas segurando 90%
-        # do processador por horas não está travado em laço infinito — está
-        # fazendo o que foi projetado para fazer. Chamar isso de "loop
-        # infinito" é afirmar um defeito que não existe; o consumo alto, esse
-        # sim, continua sendo registrado, e `low` sai da notificação sozinho.
+        # A confiança muda o diagnóstico: programa confiável com processador alto
+        # está trabalhando, não travado em laço. O consumo segue registrado; `low` não notifica.
         trusted = ctx.trust(suspect).is_trusted
         analysis.anomaly_type = "high_cpu" if trusted else "cpu_loop"
         if trusted:
@@ -421,12 +392,9 @@ def detect_cpu_loop(metric: Metric, processes: List[ProcessSnapshot],
 
 def detect_ddos_indicators(metric: Metric, processes: List[ProcessSnapshot],
                            history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """
-    Detecta padrões de DDoS ou ataque de rede:
-    - Pico abrupto de conexões
-    - Volume de tráfego anormal
-    - Combinação de alta rede + alta CPU (só reforça — sozinha era qualquer
-      navegador ocupado com cem abas)
+    """Pico abrupto de conexões ou de tráfego.
+
+    Rede + CPU alta só reforça: sozinha era qualquer navegador com cem abas.
     """
     previous = _before(history, metric, 15 * 60)
     if len(previous) < 5:
@@ -467,17 +435,13 @@ def detect_ddos_indicators(metric: Metric, processes: List[ProcessSnapshot],
 
 def detect_new_suspicious_process(metric: Metric, processes: List[ProcessSnapshot],
                                   history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """
-    Detecta processos que nunca foram vistos nesta máquina antes
-    e que estão consumindo recursos significativos.
-    """
+    """Processo nunca visto nesta máquina consumindo recursos significativos."""
     baselines = {
         b.process_name: b
         for b in db.query(ProcessBaseline).filter(ProcessBaseline.machine_id == metric.machine_id).all()
     }
     known = {name for name, b in baselines.items() if b.is_known or b.user_marked_normal}
 
-    # Atualiza baseline com processos desta coleta
     _update_process_baseline(metric.machine_id, processes, db, baselines)
 
     if not known:
@@ -538,12 +502,7 @@ def detect_new_suspicious_process(metric: Metric, processes: List[ProcessSnapsho
 
 def detect_malware_pattern(metric: Metric, processes: List[ProcessSnapshot],
                            history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """
-    Detecta padrão combinado típico de malware:
-    - Processo desconhecido + CPU alta + atividade de rede anormal
-    - Processo rodando como SYSTEM/root consumindo muitos recursos
-    - Processo com nome genérico mas comportamento anormal
-    """
+    """Padrão combinado típico de malware: indícios concretos do arquivo somados aos do momento."""
     previous = _before(history, metric, 15 * 60)
     if len(previous) < 3:
         return None
@@ -576,10 +535,8 @@ def detect_malware_pattern(metric: Metric, processes: List[ProcessSnapshot],
 
         t = ctx.trust(proc)
 
-        # Indícios CIRCUNSTANCIAIS descrevem uma situação que muito programa
-        # honesto vive: um antivírus varrendo é privilegiado, come processador
-        # e baixa assinaturas — os três de uma vez, todo dia. Sozinhos eles não
-        # acusam ninguém.
+        # Indícios circunstanciais descrevem o que muito programa honesto vive (um
+        # antivírus varrendo tem os três de uma vez): sozinhos não acusam ninguém.
         circumstantial = {
             "cpu_com_spike_rede": cpu_high and net_spike,
             "privilegiado_com_cpu_alta": is_privileged and cpu_high,
@@ -635,10 +592,7 @@ def detect_malware_pattern(metric: Metric, processes: List[ProcessSnapshot],
 
 def detect_resource_abuse(metric: Metric, processes: List[ProcessSnapshot],
                           history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """
-    Detecta aplicação conhecida consumindo muito mais recursos que o normal.
-    Diferente de 'CPU alta' genérico — compara com o histórico daquele processo específico.
-    """
+    """Programa conhecido consumindo muito acima do próprio histórico."""
     s = ctx.s("resource_abuse")
     baselines = {
         b.process_name: b
@@ -657,14 +611,12 @@ def detect_resource_abuse(metric: Metric, processes: List[ProcessSnapshot],
 
         baseline = baselines[proc.name]
         if baseline.avg_cpu < 1.0:
-            continue  # Processo normalmente ocioso, skip
+            continue
 
         cpu_ratio = (proc.cpu_percent or 0) / baseline.avg_cpu if baseline.avg_cpu > 0 else 0
         mem_ratio = (proc.mem_percent or 0) / baseline.avg_mem_percent if baseline.avg_mem_percent > 0 else 0
-        # "Fora do padrão" é passar do que este programa JÁ foi visto consumir,
-        # não da média dele: todo programa que faz algo pesado de vez em quando
-        # tem média baixa e pico alto, e comparar só com a média acusava o pico
-        # normal de todo mundo (o caso do antivírus varrendo).
+        # Compara com o máximo já visto, não com a média: quem faz algo pesado de
+        # vez em quando tem média baixa e pico normal alto (antivírus varrendo).
         above_ever_seen = (proc.cpu_percent or 0) > (baseline.max_cpu or 0) * 1.2
 
         if above_ever_seen and cpu_ratio > 5 * s and (proc.cpu_percent or 0) > 20 * s:
@@ -673,8 +625,7 @@ def detect_resource_abuse(metric: Metric, processes: List[ProcessSnapshot],
             analysis.anomaly_type = "resource_abuse"
             analysis.severity = "high" if cpu_ratio > 10 * s else "medium"
             if t.is_security_software:
-                # Antivírus varrendo é o programa fazendo o que promete. Fica
-                # registrado, mas `low` já sai da notificação por padrão.
+                # Antivírus varrendo faz o que promete: fica registrado, mas `low` não notifica
                 analysis.severity = "low"
             analysis.responsible_process = proc.name
             analysis.confidence = min((cpu_ratio - 5) / 10, 1.0)
@@ -703,10 +654,7 @@ def detect_resource_abuse(metric: Metric, processes: List[ProcessSnapshot],
 
 def detect_behavioral_change(metric: Metric, processes: List[ProcessSnapshot],
                              history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """
-    Detecta mudança brusca no comportamento geral da máquina.
-    Compara os últimos 4 minutos com os 4 anteriores (change-point simples).
-    """
+    """Mudança brusca no comportamento geral: últimos 4 minutos contra os 4 anteriores."""
     s = ctx.s("behavioral_change")
     ref = _ts(metric)
     if ref is None:
@@ -729,7 +677,6 @@ def detect_behavioral_change(metric: Metric, processes: List[ProcessSnapshot],
         return sum(vals) / len(vals) if vals else 0
 
     # (atributo, rótulo, variação % mínima, variação absoluta mínima)
-    # O limite de tráfego era 500000 comparado com uma porcentagem — nunca disparava.
     changes = {}
     for attr, label, pct_threshold, abs_threshold in [
         ("cpu_percent", "CPU", 25, 10),
@@ -768,13 +715,10 @@ def detect_behavioral_change(metric: Metric, processes: List[ProcessSnapshot],
 
 def detect_thermal_throttling(metric: Metric, processes: List[ProcessSnapshot],
                               history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """
-    Processador trabalhando, quente, e rodando bem abaixo da velocidade máxima:
-    ele está se limitando para não superaquecer.
+    """Processador ocupado, quente e bem abaixo da velocidade máxima.
 
-    Sem sensor de temperatura só conta uma queda forte (metade da velocidade) e
-    com o carregador ligado — na bateria, velocidade baixa costuma ser
-    economia de energia, não calor.
+    Sem sensor de temperatura só conta queda forte com o carregador ligado — na
+    bateria, velocidade baixa costuma ser economia de energia, não calor.
     """
     s = ctx.s("thermal_throttling")
 
@@ -846,11 +790,8 @@ def _candidates(processes: List[ProcessSnapshot], ctx: DetectionContext) -> List
 
 def detect_process_masquerading(metric: Metric, processes: List[ProcessSnapshot],
                                 history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """
-    Programa se passando por arquivo do Windows:
-    - nome idêntico a um binário protegido, mas fora da pasta do sistema;
-    - nome quase idêntico (scvhost.exe, svch0st.exe), fora do Windows e sem
-      assinatura da Microsoft.
+    """Programa se passando por arquivo do Windows: nome idêntico fora da pasta do
+    sistema, ou quase idêntico (svch0st.exe) fora do Windows e sem assinatura da Microsoft.
     """
     for c in _candidates(processes, ctx):
         name = (c.get("name") or "").lower()
@@ -898,8 +839,8 @@ def detect_process_masquerading(metric: Metric, processes: List[ProcessSnapshot]
                 "exe": exe,
                 "expected_dirs": list(PROTECTED_WINDOWS_BINARIES.get(imitates, ())),
                 "pid": c.get("pid"),
-                # Identidade da instância: com ela o agente encerra só este
-                # processo, e não todos os svchost.exe verdadeiros
+                # Com a identidade da instância o agente encerra só este processo,
+                # e não todos os svchost.exe verdadeiros
                 "create_time": c.get("create_time"),
                 "parent": c.get("parent_name"),
                 "sha256": c.get("sha256"),
@@ -912,12 +853,8 @@ def detect_process_masquerading(metric: Metric, processes: List[ProcessSnapshot]
 
 def detect_suspicious_parent(metric: Metric, processes: List[ProcessSnapshot],
                              history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """
-    Duas formas clássicas de ataque que não consomem recurso nenhum — por isso
-    passam por detectores de consumo:
-    - um documento (Word, Excel, PDF) abrindo PowerShell ou cmd: macro maliciosa;
-    - linhas de comando típicas de ataque: comando codificado, download e
-      execução, exclusão das cópias de segurança do Windows.
+    """Ataques que não consomem recurso: documento abrindo PowerShell/cmd (macro
+    maliciosa) e linhas de comando típicas de ataque.
     """
     best: Optional[BehaviorAnalysis] = None
     for c in _candidates(processes, ctx):
@@ -968,12 +905,7 @@ def detect_suspicious_parent(metric: Metric, processes: List[ProcessSnapshot],
 
 def _update_process_baseline(machine_id: int, processes: List[ProcessSnapshot], db: Session,
                              existing: Optional[Dict[str, ProcessBaseline]] = None):
-    """Atualiza o baseline de processos conhecidos para a máquina.
-
-    Várias instâncias com o mesmo nome contam uma aparição por leitura — antes
-    vinte abas do Chrome eram vinte "aparições" e o programa virava conhecido
-    na primeira coleta.
-    """
+    """Atualiza o baseline da máquina; instâncias de mesmo nome contam uma aparição por leitura."""
     if existing is None:
         existing = {
             b.process_name: b

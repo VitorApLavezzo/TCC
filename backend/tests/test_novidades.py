@@ -101,7 +101,7 @@ class TestRiscoDeHardware:
         fatores = hardware_risk._disk_factors(
             {"device": "C:", "pending_sectors": 4, "reallocated_sectors": 30,
              "power_on_hours": 45000, "temperature": 56},
-            erros_recentes=1,
+            recent_errors=1,
         )
         risco = hardware_risk._risk_from_weights([f["peso"] for f in fatores])
         assert risco > 0.4
@@ -111,7 +111,7 @@ class TestRiscoDeHardware:
         fatores = hardware_risk._disk_factors(
             {"device": "C:", "health": "ok", "pending_sectors": 0, "reallocated_sectors": 0,
              "power_on_hours": 4000, "temperature": 35},
-            erros_recentes=0,
+            recent_errors=0,
         )
         risco = hardware_risk._risk_from_weights([f["peso"] for f in fatores])
         assert risco == 0.0
@@ -216,7 +216,7 @@ class TestAutomacao:
         maquina = db.query(Machine).filter(Machine.id == machine["id"]).first()
         self._regra(db, maquina.owner_id, maquina.id, "automatico")
         disparo = playbooks.on_anomaly(db, maquina, self._aviso(db, maquina.id))[0]
-        playbooks.decide(db, disparo, aceitar=False, user_id=maquina.owner_id)
+        playbooks.decide(db, disparo, accept=False, user_id=maquina.owner_id)
         assert disparo.status == "desfeito"
         assert disparo.command_id is None
 

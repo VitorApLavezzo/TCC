@@ -3,11 +3,8 @@ from app.database import Base
 
 
 class ActivityLabel(Base):
-    """O que a pessoa disse que estava fazendo, de quando a quando.
-
-    É o gabarito da avaliação em dado real — nunca entra na detecção.
-    `ended_at` vazio é a sessão aberta.
-    """
+    """O que a pessoa disse que estava fazendo: gabarito da avaliação em dado real, nunca entra
+    na detecção. `ended_at` vazio é a sessão aberta."""
     __tablename__ = "activity_labels"
 
     id = Column(Integer, primary_key=True, index=True)

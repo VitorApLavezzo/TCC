@@ -4,12 +4,8 @@ from app.database import Base
 
 
 class InventorySnapshot(Base):
-    """Último inventário conhecido de uma máquina, por tipo.
-
-    Tipos: "programs" (instalados), "os" (versão e build), "hotfixes"
-    (atualizações do Windows), "drivers", "disk_health" (SMART) e
-    "hardware_errors". Guardamos só o mais recente de cada tipo: o histórico
-    útil são as diferenças, que viram `ChangeEvent`.
+    """Último inventário conhecido de uma máquina, por tipo ("programs", "os", "hotfixes",
+    "drivers", "disk_health", "hardware_errors"). O histórico útil são as diferenças (`ChangeEvent`).
     """
     __tablename__ = "inventory_snapshots"
 
@@ -22,11 +18,7 @@ class InventorySnapshot(Base):
 
 
 class ChangeEvent(Base):
-    """Algo que mudou no computador: programa instalado, atualização, driver novo.
-
-    `impact` é preenchido dias depois, comparando o comportamento antes e
-    depois — é o que permite dizer "desde a atualização de terça...".
-    """
+    """Algo que mudou no computador. `impact` é preenchido dias depois, comparando antes e depois."""
     __tablename__ = "change_events"
 
     id = Column(Integer, primary_key=True, index=True)

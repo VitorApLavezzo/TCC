@@ -1,15 +1,5 @@
-"""
-O que o agente informa além das medidas.
-
-- `system_info`: processador, tipo de aparelho, discos, fuso, versão do sistema.
-- `inventory`: programas instalados, atualizações, drivers, saúde do disco
-  (SMART) e erros de hardware. As diferenças entre inventários viram a linha do
-  tempo de mudanças; SMART ruim e erros novos viram avisos.
-- `events`: arquivo-isca alterado, desligamento anterior (pelo registro do
-  sistema), rede restaurada localmente.
-- `beacons`: conexões periódicas a um mesmo destino.
-- reinício: o `boot_time` mudou entre uma coleta e outra.
-"""
+"""O que o agente informa além das medidas: system_info, inventário (vira a linha do
+tempo de mudanças), eventos pontuais, beacons e reinício (`boot_time` mudou)."""
 import hashlib
 import ipaddress
 import json
@@ -58,10 +48,6 @@ def apply_system_info(db: Session, machine: Machine, info: Dict[str, Any]):
         machine.os_pretty = pretty
 
 
-# ---------------------------------------------------------------------------
-# Reinício e desligamento inesperado
-# ---------------------------------------------------------------------------
-
 def note_goodbye(db: Session, machine: Machine, reason: str):
     machine.last_goodbye_at = utcnow()
     machine.last_goodbye_reason = (reason or "unknown")[:40]
@@ -72,12 +58,8 @@ def check_reboot(db: Session, machine: Machine, boot_time: Optional[float], even
                  previous_metric: Optional[Metric], now) -> Optional[Anomaly]:
     """Detecta reinício e decide se o desligamento anterior foi inesperado.
 
-    Evidência, em ordem de confiança:
-    1. o agente leu no registro do sistema (Kernel-Power 41, 6008, tela azul);
-    2. Linux sem "tchau": o systemd avisa os processos no desligamento normal,
-       e o agente sempre se despede quando é avisado.
-    Sem nenhuma das duas (Windows sem permissão de ler o registro), não afirma
-    nada — um aviso falso de "desligou de repente" assusta sem motivo.
+    Só afirma com evidência: o registro do sistema (Kernel-Power 41, 6008, tela azul)
+    ou Linux sem "tchau" (o systemd avisa no desligamento normal e o agente se despede).
     """
     if not boot_time:
         return None
@@ -137,10 +119,6 @@ def check_reboot(db: Session, machine: Machine, boot_time: Optional[float], even
         now=now,
     )
 
-
-# ---------------------------------------------------------------------------
-# Inventário e linha do tempo de mudanças
-# ---------------------------------------------------------------------------
 
 def _digest(items) -> str:
     return hashlib.sha1(json.dumps(items, sort_keys=True, default=str).encode()).hexdigest()
@@ -289,10 +267,6 @@ def _evaluate_hardware_errors(db: Session, machine: Machine, previous: List, ite
     )
 
 
-# ---------------------------------------------------------------------------
-# Eventos pontuais
-# ---------------------------------------------------------------------------
-
 def handle_events(db: Session, machine: Machine, events: List[Dict[str, Any]], metric: Optional[Metric], now) -> List[Anomaly]:
     created: List[Anomaly] = []
     for e in events:
@@ -339,10 +313,6 @@ def handle_events(db: Session, machine: Machine, events: List[Dict[str, Any]], m
     return created
 
 
-# ---------------------------------------------------------------------------
-# Beaconing
-# ---------------------------------------------------------------------------
-
 def _public_ip(ip: str) -> bool:
     try:
         addr = ipaddress.ip_address(ip)
@@ -374,9 +344,8 @@ def evaluate_beacons(db: Session, machine: Machine, beacons: List[Dict[str, Any]
         # Programa assinado e presente há dias: provavelmente checagem de atualização
         if established and signed:
             continue
-        # Assinado e comum na frota DESTE dono: provavelmente atualização. A
-        # contagem é da própria conta — o agente de outra conta inflava o
-        # contador global e fazia o beaconing de um implante sumir aqui.
+        # Assinado e comum na frota DESTE dono: provavelmente atualização. A contagem é
+        # da própria conta para que outra conta não esconda um implante inflando-a.
         if ident and signed:
             from app.services import trust
             k = identity_key(ident.name, ident.exe, ident.sha256)
@@ -399,8 +368,7 @@ def evaluate_beacons(db: Session, machine: Machine, beacons: List[Dict[str, Any]
                 responsible=name,
                 details={"type": "beaconing", **b, "signed": ident.signed if ident else None,
                          "exe": b.get("exe") or (ident.exe if ident else None),
-                         # Em texto: um datetime cru aqui quebrava a gravação do JSON
-                         # e, com ela, a ingestão inteira.
+                         # Em texto: datetime cru quebra a gravação do JSON e a ingestão inteira.
                          "first_seen_on_machine": (
                              aware(ident.first_seen).isoformat() if ident and ident.first_seen else None
                          )},

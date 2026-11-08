@@ -1,14 +1,8 @@
-"""
-Visão de vários computadores da mesma conta.
+"""Visão de vários computadores da mesma conta.
 
-- Comparação com pares: cada computador contra a média dos outros com o mesmo
-  perfil (sistema, núcleos, memória, tipo de aparelho). "Usa 3 vezes mais
-  memória que os outros 12 iguais" diz algo que o histórico da própria máquina
-  não diz — se ela sempre foi assim, para ela é o normal.
-- Surto: o mesmo executável aparecendo pela primeira vez em vários
-  computadores numa janela curta.
-- Conselheiro de upgrade: quanto dos avisos dos últimos meses uma troca de
-  hardware específica teria evitado, contado aviso a aviso.
+Comparação com pares de mesmo perfil (diz o que o histórico da própria máquina
+não diz), surto (o mesmo executável surgindo em vários computadores numa janela
+curta) e conselheiro de upgrade (quantos avisos uma troca de hardware teria evitado).
 """
 from collections import defaultdict
 from datetime import timedelta
@@ -161,10 +155,6 @@ def _top_process(db: Session, machine_id: int) -> Optional[Dict[str, Any]]:
     return {"name": name, "mem_percent": round(mem, 1)}
 
 
-# ---------------------------------------------------------------------------
-# Surto
-# ---------------------------------------------------------------------------
-
 def detect_outbreaks(db: Session) -> int:
     now = utcnow()
     since = now - timedelta(minutes=OUTBREAK_WINDOW_MINUTES)
@@ -215,10 +205,6 @@ def detect_outbreaks(db: Session) -> int:
             created += int(anomaly is not None)
     return created
 
-
-# ---------------------------------------------------------------------------
-# Conselheiro de upgrade
-# ---------------------------------------------------------------------------
 
 RAM_SIZES = [4, 8, 12, 16, 24, 32, 48, 64, 96, 128]
 MEMORY_PRESSURE_TYPES = {"high_memory", "resource_exhaustion"}
@@ -338,12 +324,7 @@ def upgrade_advice(db: Session, machine: Machine, days: int = 90) -> Dict[str, A
 
 
 def overview(db: Session, user_id: int) -> List[Dict[str, Any]]:
-    """Uma linha por computador, com o que decide "qual precisa de mim agora".
-
-    Antes, o painel mostrava uma máquina por vez num seletor: com uma dúzia
-    delas, responder essa pergunta exigia abrir uma por uma. Aqui vem o
-    veredito, os três vitais e o aviso mais grave em aberto, numa consulta só.
-    """
+    """Uma linha por computador, com o que decide "qual precisa de mim agora"."""
     from app.core.labels import ANOMALY_TYPE_LABELS, SEVERITY_ORDER
     from app.models.anomaly import Anomaly
     from app.models.machine import Machine
@@ -355,48 +336,42 @@ def overview(db: Session, user_id: int) -> List[Dict[str, Any]]:
         .order_by(Machine.name.asc())
         .all()
     )
-    saida: List[Dict[str, Any]] = []
+    result: List[Dict[str, Any]] = []
     for machine in machines:
-        leitura = (
+        latest = (
             db.query(Metric)
             .filter(Metric.machine_id == machine.id)
             .order_by(Metric.timestamp.desc())
             .first()
         )
-        abertos = (
+        open_anomalies = (
             db.query(Anomaly)
             .filter(Anomaly.machine_id == machine.id, Anomaly.is_resolved == False)  # noqa: E712
             .order_by(Anomaly.detected_at.desc())
             .limit(50)
             .all()
         )
-        pior = max(abertos, key=lambda a: SEVERITY_ORDER.get(a.severity or "low", 1), default=None)
-        saida.append({
+        worst = max(open_anomalies, key=lambda a: SEVERITY_ORDER.get(a.severity or "low", 1), default=None)
+        result.append({
             "id": machine.id,
             "name": machine.name,
             "os": machine.os_pretty or machine.os_type,
             "is_active": bool(machine.is_active),
             "last_seen": machine.last_seen,
-            "cpu": leitura.cpu_percent if leitura else None,
-            "memory": leitura.mem_percent if leitura else None,
-            "disk": leitura.disk_percent if leitura else None,
-            "last_reading_at": leitura.timestamp if leitura else None,
-            "open_count": len(abertos),
-            "worst_severity": pior.severity if pior else None,
-            "worst_label": ANOMALY_TYPE_LABELS.get(pior.anomaly_type, pior.anomaly_type) if pior else None,
-            "worst_anomaly_id": pior.id if pior else None,
+            "cpu": latest.cpu_percent if latest else None,
+            "memory": latest.mem_percent if latest else None,
+            "disk": latest.disk_percent if latest else None,
+            "last_reading_at": latest.timestamp if latest else None,
+            "open_count": len(open_anomalies),
+            "worst_severity": worst.severity if worst else None,
+            "worst_label": ANOMALY_TYPE_LABELS.get(worst.anomaly_type, worst.anomaly_type) if worst else None,
+            "worst_anomaly_id": worst.id if worst else None,
         })
-    return saida
+    return result
 
 
 def timeline(db: Session, machine_id: int, days: int = 30, limit: int = 120) -> List[Dict[str, Any]]:
-    """Tudo o que aconteceu nesta máquina num eixo só.
-
-    Avisos ficavam numa aba, mudanças em outra, ações executadas numa terceira
-    e automações numa quarta. A história real é uma só — "instalaram o
-    programa, ele começou a comer memória, você fechou, voltou ao normal" —
-    e ela só aparece quando os quatro estão na mesma linha do tempo.
-    """
+    """Avisos, mudanças, ações executadas e automações desta máquina num eixo só."""
     from app.core.labels import ANOMALY_TYPE_LABELS
     from app.models.anomaly import Anomaly
     from app.models.command import AgentCommand
@@ -404,13 +379,13 @@ def timeline(db: Session, machine_id: int, days: int = 30, limit: int = 120) -> 
     from app.models.playbook import PlaybookRun
     from app.services.commands import COMMANDS
 
-    desde = utcnow() - timedelta(days=days)
-    eventos: List[Dict[str, Any]] = []
+    since = utcnow() - timedelta(days=days)
+    events: List[Dict[str, Any]] = []
 
     for a in (db.query(Anomaly)
-              .filter(Anomaly.machine_id == machine_id, Anomaly.detected_at >= desde)
+              .filter(Anomaly.machine_id == machine_id, Anomaly.detected_at >= since)
               .order_by(Anomaly.detected_at.desc()).limit(limit).all()):
-        eventos.append({
+        events.append({
             "kind": "anomaly", "at": a.detected_at, "id": a.id,
             "title": ANOMALY_TYPE_LABELS.get(a.anomaly_type, a.anomaly_type),
             "detail": a.responsible_process, "severity": a.severity,
@@ -418,19 +393,19 @@ def timeline(db: Session, machine_id: int, days: int = 30, limit: int = 120) -> 
         })
 
     for c in (db.query(ChangeEvent)
-              .filter(ChangeEvent.machine_id == machine_id, ChangeEvent.detected_at >= desde)
+              .filter(ChangeEvent.machine_id == machine_id, ChangeEvent.detected_at >= since)
               .order_by(ChangeEvent.detected_at.desc()).limit(limit).all()):
-        eventos.append({
+        events.append({
             "kind": "change", "at": c.detected_at, "id": c.id,
             "title": c.name, "detail": (c.impact or {}).get("sentence") or c.kind,
             "severity": None, "resolved": None, "link": None,
         })
 
     for cmd in (db.query(AgentCommand)
-                .filter(AgentCommand.machine_id == machine_id, AgentCommand.created_at >= desde,
+                .filter(AgentCommand.machine_id == machine_id, AgentCommand.created_at >= since,
                         AgentCommand.status.in_(["done", "failed"]))
                 .order_by(AgentCommand.created_at.desc()).limit(limit).all()):
-        eventos.append({
+        events.append({
             "kind": "action", "at": cmd.created_at, "id": cmd.id,
             "title": COMMANDS.get(cmd.command, (cmd.command,))[0],
             "detail": "concluída" if cmd.status == "done" else "falhou",
@@ -438,13 +413,13 @@ def timeline(db: Session, machine_id: int, days: int = 30, limit: int = 120) -> 
         })
 
     for run in (db.query(PlaybookRun)
-                .filter(PlaybookRun.machine_id == machine_id, PlaybookRun.created_at >= desde)
+                .filter(PlaybookRun.machine_id == machine_id, PlaybookRun.created_at >= since)
                 .order_by(PlaybookRun.created_at.desc()).limit(limit).all()):
-        eventos.append({
+        events.append({
             "kind": "playbook", "at": run.created_at, "id": run.id,
             "title": "Automação", "detail": run.detail, "severity": None,
             "resolved": run.status == "executado", "link": None,
         })
 
-    eventos.sort(key=lambda e: aware(e["at"]) or utcnow(), reverse=True)
-    return eventos[:limit]
+    events.sort(key=lambda e: aware(e["at"]) or utcnow(), reverse=True)
+    return events[:limit]

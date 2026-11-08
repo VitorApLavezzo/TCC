@@ -1,17 +1,5 @@
-"""
-Notificações com controle de excesso.
-
-Toda notificação nasce registrada (o painel mostra todas) e passa por uma
-política antes de sair por Telegram ou e-mail:
-
-- severidade mínima (abaixo dela: só no painel, ou no resumo diário);
-- espera para ver se o problema persiste (não avisa o que passou sozinho);
-- horário silencioso, com exceção opcional para o que é crítico;
-- agrupamento: avisos da mesma janela saem numa mensagem só;
-- resumo diário no horário escolhido.
-
-O status de cada notificação conta o caminho que ela fez.
-"""
+"""Notificações com controle de excesso: toda notificação fica registrada no painel e passa
+por gravidade mínima, espera de persistência, horário silencioso, agrupamento e resumo diário."""
 import smtplib
 from datetime import timedelta
 from email.message import EmailMessage
@@ -60,16 +48,13 @@ def on_anomaly(db: Session, anomaly: Anomaly) -> Notification:
     )
 
     if (machine.name or "").startswith("[BENCH]"):
-        # Máquina efêmera do benchmark ou da reprodução de dado real: o aviso
-        # é medição, não acontecimento. A reprodução dura minutos e cada aviso
-        # reproduzido viraria mensagem de verdade no celular.
+        # Máquina efêmera de avaliação: o aviso é medição e não pode virar mensagem real no celular.
         n.status, n.status_reason = "suppressed", "máquina efêmera de avaliação"
     elif anomaly.during_learning:
-        # Sem digest: um resumo diário cheio de ruído da fase de aprendizado
-        # não é melhor que o ruído — é o mesmo ruído, adiado.
-        progresso = learning.status(db, machine).phrase
+        # Sem digest: o ruído da fase de aprendizado num resumo diário é o mesmo ruído, adiado.
+        progress = learning.status(db, machine).phrase
         n.status = "suppressed"
-        n.status_reason = f"máquina ainda aprendendo o que é normal ({progresso})"
+        n.status_reason = f"máquina ainda aprendendo o que é normal ({progress})"
     elif SEVERITY_ORDER.get(anomaly.severity, 0) < SEVERITY_ORDER.get(prefs["min_severity"], 2):
         if prefs["digest"]["enabled"]:
             n.status, n.status_reason = "held", "vai no resumo diário"
@@ -121,17 +106,9 @@ def notify_user(db: Session, user_id: int, title: str, body: str, kind: str = "s
     return n
 
 
-# ---------------------------------------------------------------------------
-# Entrega
-# ---------------------------------------------------------------------------
-
 def _quiet_bounds(quiet: Dict):
-    """(início, fim, dia_inteiro) já dentro de faixas válidas.
-
-    Os valores vêm das preferências do usuário, então podem chegar fora da
-    faixa (24 para "até meia-noite", negativos de um envio malfeito). Um
-    ValueError aqui derrubaria a entrega de TODAS as notificações da conta.
-    """
+    """(início, fim, dia_inteiro) dentro de faixas válidas: as preferências podem vir fora da
+    faixa, e um ValueError aqui derrubaria a entrega de TODAS as notificações da conta."""
     try:
         start = int(quiet.get("from", 22))
         end = int(quiet.get("to", 7))
@@ -160,8 +137,7 @@ def _quiet_end(now, offset: int, quiet: Dict):
     """Próximo instante UTC em que o horário silencioso termina."""
     start, end, all_day = _quiet_bounds(quiet)
     if all_day:
-        # Silêncio o dia todo: reavalia daqui a uma hora em vez de calcular um
-        # fim que não existe (só o que for crítico passa, por outro caminho).
+        # Silêncio o dia todo não tem fim: reavalia daqui a uma hora.
         return now + timedelta(hours=1)
     lt = local_time(now, offset)
     target = lt.replace(hour=end, minute=0, second=0, microsecond=0)
@@ -206,20 +182,18 @@ def _send(db: Session, user: User, prefs: Dict, text: str, notifications: List[N
         except Exception as e:
             sent["email"] = f"erro: {str(e)[:120]}"
 
-    # Notificação do celular: só sai se a pessoa instalou o painel como
-    # aplicativo e autorizou o aviso naquele aparelho.
     if channels.get("push", True):
         try:
             from app.services import push
-            entregues = push.send_to_user(
+            delivered_count = push.send_to_user(
                 db, user.id,
                 title=primary.title or "AnomalyDetect",
                 body=text[:300],
                 link=_link(primary),
                 tag=f"anomaly-{primary.id}",
             )
-            if entregues:
-                sent["push"] = f"ok ({entregues})"
+            if delivered_count:
+                sent["push"] = f"ok ({delivered_count})"
         except Exception as e:
             sent["push"] = f"erro: {str(e)[:120]}"
     return sent
@@ -232,7 +206,6 @@ def send_email(to: str, subject: str, text: str, link: Optional[str] = None, htm
     msg["To"] = to
     msg.set_content(text + (f"\n\nVer no painel: {link}" if link else ""))
     if html:
-        # Versão em HTML com a identidade do painel; o texto acima fica de reserva
         msg.add_alternative(html, subtype="html")
     with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=20) as smtp:
         if settings.SMTP_TLS:
@@ -290,7 +263,6 @@ def dispatch(db: Session) -> int:
 
         if not to_send:
             continue
-        # Agrupa o que ficou pronto junto (janela configurável)
         window = timedelta(minutes=max(int(prefs.get("group_window_minutes") or 0), 0))
         groups: List[List[Notification]] = []
         for n in to_send:

@@ -1,14 +1,5 @@
-"""
-Métricas internas do próprio sistema, no formato de texto do Prometheus.
-
-O agendador roda treze rotinas numa thread. Enquanto o único sinal de vida
-delas era um `print`, uma rotina que parasse de rodar — ou que passasse a
-demorar dois minutos — não aparecia em lugar nenhum até alguém reclamar que o
-diário semanal não chegou.
-
-Aqui fica um registrador minúsculo (contadores, medidores e histogramas
-simples) sem dependência nova: `/metrics` serve isso e qualquer Prometheus,
-Grafana Agent ou `curl` lê.
+"""Métricas internas do próprio sistema (contadores, medidores e durações), servidas em
+`/metrics` no formato de texto do Prometheus, sem dependência nova.
 """
 import threading
 import time

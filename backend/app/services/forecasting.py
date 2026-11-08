@@ -1,13 +1,5 @@
-"""
-Previsões: quando o disco enche, quando a bateria chega ao fim da vida útil,
-em quanto tempo um vazamento de memória esgota a máquina.
-
-Todas por regressão linear sobre o histórico da própria máquina, agregado
-por hora (disco) ou por dia (bateria) para o ruído de curto prazo não virar
-tendência. Cada previsão diz a confiança (r² e tempo de histórico) — uma
-previsão com uma semana de dados irregulares não merece o mesmo tom de uma
-com duas semanas de crescimento constante.
-"""
+"""Previsões de disco, bateria e vazamento de memória por regressão linear sobre o histórico
+agregado por hora ou dia, para o ruído de curto prazo não virar tendência."""
 import statistics
 from collections import defaultdict
 from datetime import timedelta
@@ -40,20 +32,15 @@ def fmt_days(days: float) -> str:
     return f"{round(months)} meses" if months < 24 else f"{br(months / 12)} anos"
 
 
-def frase_previsao(span_dias: float, gb_por_dia: float, eta_dias: float) -> str:
-    """A frase da previsão de disco, do jeito que uma pessoa fala.
-
-    A versão anterior dizia "dos últimos 1 dias" e "enche em cerca de menos de
-    um dia" — e ficou à vista quando a demonstração passou a mostrar a
-    previsão de verdade.
-    """
-    if span_dias >= 10:
-        periodo = "das últimas duas semanas"
+def forecast_sentence(span_days: float, gb_per_day: float, eta_days: float) -> str:
+    """A frase da previsão de disco, do jeito que uma pessoa fala."""
+    if span_days >= 10:
+        period = "das últimas duas semanas"
     else:
-        n = max(round(span_dias), 1)
-        periodo = "do último dia" if n == 1 else f"dos últimos {n} dias"
-    quando = "em menos de um dia" if eta_dias < 1 else f"em cerca de {fmt_days(eta_dias)}"
-    return f"No ritmo {periodo} ({br(gb_por_dia)} GB por dia), o disco enche {quando}."
+        n = max(round(span_days), 1)
+        period = "do último dia" if n == 1 else f"dos últimos {n} dias"
+    when = "em menos de um dia" if eta_days < 1 else f"em cerca de {fmt_days(eta_days)}"
+    return f"No ritmo {period} ({br(gb_per_day)} GB por dia), o disco enche {when}."
 
 
 def _bucketed(rows, value_fn, bucket: str) -> List:
@@ -113,7 +100,7 @@ def disk_forecast(db: Session, machine: Machine, days: int = 14) -> Dict[str, An
         "eta_days": round(eta, 1),
         "eta_date": (utcnow() + timedelta(days=eta)).isoformat(),
         "confidence": confidence,
-        "sentence": frase_previsao(xs[-1], slope, eta),
+        "sentence": forecast_sentence(xs[-1], slope, eta),
     }
 
 

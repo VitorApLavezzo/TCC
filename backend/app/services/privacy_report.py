@@ -1,11 +1,5 @@
-"""
-"O que foi enviado sobre mim."
-
-Uma tela de transparência (importante para a LGPD em empresas): mostra que
-tipos de dados o agente coleta, o que fica só no servidor, o que já foi de
-fato enviado a um provedor de IA — com o prompt exato e o destino — e deixa
-mudar a política de IA daquele computador.
-"""
+"""Transparência (LGPD): o que o agente coleta e o que já foi de fato enviado a um provedor
+de IA, com o prompt exato e o destino."""
 from datetime import timedelta
 from typing import Any, Dict
 

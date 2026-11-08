@@ -1,15 +1,5 @@
-"""
-Contexto da leitura: o que está em volta da carga.
-
-Um jogo e um minerador pesam igual no processador; a diferença está em volta.
-O jogo é o programa na janela da frente (ou descende dele), já é conhecido
-nesta máquina e oscila com a cena; o minerador roda sozinho, com carga plana,
-aberto por ninguém que a pessoa esteja usando.
-
-As colunas são calculadas na chegada e gravadas com a leitura. Recalcular
-depois responderia com o conhecimento de hoje ("este programa é conhecido?")
-e o modelo nunca aprenderia como um programa novo se parece.
-"""
+"""Contexto em volta da carga (janela da frente, programa conhecido, oscilação): separa um jogo
+de um minerador. Gravado na chegada; recalcular depois usaria o conhecimento de hoje."""
 import threading
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -32,27 +22,23 @@ MIN_READINGS = 3
 # Pseudoprocessos que "usam" o processador ocioso
 _IDLE = {"system idle process", "idle"}
 
-# O shell do Windows: com a área de trabalho ou uma pasta na frente, a janela
-# ativa é o explorer.exe — e quase tudo descende dele, inclusive o que roda
-# sozinho desde o login. Com o shell na frente, só ele mesmo conta como
-# conduzido; descender dele não diz nada.
+# Quase tudo descende do shell do Windows, inclusive o que roda sozinho desde o login:
+# com ele na frente, só ele mesmo conta como conduzido pela pessoa.
 SHELL_PROCESSES = {
     "explorer.exe", "shellexperiencehost.exe", "startmenuexperiencehost.exe", "searchhost.exe",
     "searchapp.exe", "textinputhost.exe", "lockapp.exe",
 }
 
-# Chave de reprodução: a avaliação roda o mesmo período com e sem contexto
-# para medir o que ele acrescenta. Em operação fica sempre ligada. Vale só na
-# thread que a trocou: a reprodução leva minutos em segundo plano, e a coleta
-# ao vivo, nas outras threads, não pode ficar sem contexto enquanto isso.
+# Chave da avaliação (com/sem contexto). Por thread: a reprodução leva minutos em segundo
+# plano e a coleta ao vivo, nas outras threads, não pode ficar sem contexto.
 _local = threading.local()
 
 
 def set_context_mode(on: bool) -> bool:
     """Liga ou desliga o contexto nesta thread e devolve o valor anterior."""
-    anterior = context_on()
+    previous = context_on()
     _local.on = bool(on)
-    return anterior
+    return previous
 
 
 def context_on() -> bool:
@@ -61,12 +47,8 @@ def context_on() -> bool:
 
 def is_user_driven(proc: Any, foreground_pid: Optional[int],
                    foreground_name: Optional[str] = None) -> Optional[bool]:
-    """O processo é a janela ativa ou descende dela?
-
-    Por parentesco, nunca por nome: um minerador chamado chrome.exe não
-    descende do Chrome que a pessoa está usando. None quando não há janela
-    ativa para comparar.
-    """
+    """O processo é a janela ativa ou descende dela? Por parentesco, nunca por nome
+    (um minerador chamado chrome.exe não descende do Chrome). None sem janela ativa."""
     if foreground_pid is None:
         return None
     if getattr(proc, "pid", None) == foreground_pid:
@@ -77,17 +59,17 @@ def is_user_driven(proc: Any, foreground_pid: Optional[int],
 
 
 def dominant(processes: List[Any]) -> Optional[Any]:
-    reais = [p for p in processes
+    candidates = [p for p in processes
              if (getattr(p, "name", "") or "").lower() not in _IDLE and getattr(p, "pid", None) != 0]
-    if not reais:
+    if not candidates:
         return None
-    return max(reais, key=lambda p: getattr(p, "cpu_percent", 0.0) or 0.0)
+    return max(candidates, key=lambda p: getattr(p, "cpu_percent", 0.0) or 0.0)
 
 
 def _gpu_load(metric: Metric) -> Optional[float]:
-    cargas = [g.get("load_percent") for g in (metric.gpu_metrics or []) if isinstance(g, dict)]
-    cargas = [float(c) for c in cargas if c is not None]
-    return max(cargas) if cargas else None
+    loads = [g.get("load_percent") for g in (metric.gpu_metrics or []) if isinstance(g, dict)]
+    loads = [float(c) for c in loads if c is not None]
+    return max(loads) if loads else None
 
 
 def _std(values: List[float]) -> Optional[float]:
@@ -98,16 +80,16 @@ def _stability(db: Session, metric: Metric) -> Tuple[Optional[float], Optional[f
     ref = aware(metric.timestamp)
     if ref is None:
         return None, None
-    janela = (
+    recent = (
         db.query(Metric)
         .filter(Metric.machine_id == metric.machine_id, Metric.id != metric.id,
                 Metric.timestamp >= ref - WINDOW, Metric.timestamp < ref)
         .all()
     ) + [metric]
-    cpu = [float(m.cpu_percent) for m in janela if m.cpu_percent is not None]
+    cpu = [float(m.cpu_percent) for m in recent if m.cpu_percent is not None]
     gpu_std = None
     if _gpu_load(metric) is not None:
-        gpu_std = _std([g for g in (_gpu_load(m) for m in janela) if g is not None])
+        gpu_std = _std([g for g in (_gpu_load(m) for m in recent) if g is not None])
     return _std(cpu), gpu_std
 
 
@@ -127,14 +109,14 @@ def compute(db: Session, metric: Metric, processes: List[Any],
     """Preenche as colunas de contexto da leitura (sem commit)."""
     if not context_on():
         return
-    dominante = dominant(processes)
-    if dominante is None:
+    top = dominant(processes)
+    if top is None:
         return
-    nucleos = max(int(metric.cpu_count_logical or 1), 1)
-    metric.top_proc_cpu = min(float(dominante.cpu_percent or 0.0) / nucleos, 100.0)
-    conduzido = is_user_driven(dominante, metric.foreground_pid, metric.foreground_name)
-    metric.top_proc_user_driven = None if conduzido is None else int(conduzido)
-    nivel = trust_levels.get(trust.key_of(dominante))
-    metric.top_proc_trust = nivel.level if nivel else trust.UNKNOWN
-    metric.top_proc_known = _known(db, metric.machine_id, dominante.name)
+    cores = max(int(metric.cpu_count_logical or 1), 1)
+    metric.top_proc_cpu = min(float(top.cpu_percent or 0.0) / cores, 100.0)
+    driven = is_user_driven(top, metric.foreground_pid, metric.foreground_name)
+    metric.top_proc_user_driven = None if driven is None else int(driven)
+    trust_level = trust_levels.get(trust.key_of(top))
+    metric.top_proc_trust = trust_level.level if trust_level else trust.UNKNOWN
+    metric.top_proc_known = _known(db, metric.machine_id, top.name)
     metric.cpu_std_10m, metric.gpu_std_10m = _stability(db, metric)

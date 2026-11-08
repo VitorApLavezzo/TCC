@@ -4,12 +4,8 @@ from app.database import Base
 
 
 class DemoSession(Base):
-    """Cenário de demonstração em andamento.
-
-    As leituras sintéticas passam pelo mesmo caminho de ingestão das reais —
-    detectores, modelo, IA, notificações. Nada na demonstração é desenhado à
-    mão na tela: o que aparece é o que o sistema de fato detectou.
-    """
+    """Cenário de demonstração em andamento. As leituras sintéticas passam pelo mesmo caminho de
+    ingestão das reais: o que aparece é o que o sistema de fato detectou."""
     __tablename__ = "demo_sessions"
 
     id = Column(Integer, primary_key=True, index=True)

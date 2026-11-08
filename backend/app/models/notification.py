@@ -4,13 +4,7 @@ from app.database import Base
 
 
 class Notification(Base):
-    """Uma notificação, do nascimento à entrega.
-
-    Nem toda notificação sai na hora: pode esperar o fim do horário
-    silencioso, esperar para ver se o problema persiste, ser agrupada com
-    outras da mesma janela ou entrar no resumo diário. O status conta qual foi
-    o caminho.
-    """
+    """Uma notificação, do nascimento à entrega; o status conta o caminho que ela fez."""
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, index=True)

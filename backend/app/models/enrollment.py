@@ -4,16 +4,11 @@ from app.database import Base
 
 
 class EnrollmentCode(Base):
-    """Código de pareamento para registrar máquinas automaticamente.
+    """Código de pareamento.
 
-    Dois modos:
-    - Uso único (padrão, `reusable=False`): pensado para 1 pessoa parear 1 máquina
-      pelo painel. Some após o uso (`machine_id` preenchido = consumido).
-    - Reutilizável (`reusable=True`): "chave de instalação em massa" para empresas
-      — a mesma chave é embutida em um script de distribuição (GPO, RMM, etc.) e
-      usada por centenas de máquinas, cada uma virando um registro próprio.
-      Nunca fica com `machine_id` preenchido; controla uso por `max_uses`/`use_count`
-      e pode ser revogada a qualquer momento (`revoked`).
+    - Uso único (`reusable=False`): consumido quando `machine_id` é preenchido.
+    - Reutilizável (`reusable=True`): chave de instalação em massa; nunca preenche `machine_id`,
+      é limitada por `max_uses`/`use_count` e pode ser revogada (`revoked`).
     """
     __tablename__ = "enrollment_codes"
 

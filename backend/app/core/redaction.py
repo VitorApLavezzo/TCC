@@ -1,19 +1,9 @@
-"""
-Remoção de segredos e dados pessoais de textos que saem do computador.
+"""Remoção de segredos e dados pessoais de textos que saem do computador.
 
-Duas camadas, de propósito:
-
-- `redact_secrets`: senhas, tokens e chaves que aparecem em linhas de comando
-  (`--password=...`, `Authorization: Bearer ...`, `postgres://user:senha@`).
-  O agente aplica antes de enviar ao servidor, e o servidor aplica de novo —
-  agentes instalados antes desta versão não tinham o filtro.
-- `redact_personal`: nome de usuário em caminhos e endereços de e-mail. Só é
-  aplicado quando o texto vai para um provedor de IA em nuvem: dentro do
-  servidor esses dados pertencem ao dono da conta e ajudam a investigar; fora
-  dele, não precisam ir.
-
-A mesma lógica de `redact_secrets` existe em `agent/privacy.py`, porque o
-agente é distribuído como arquivos soltos e não importa nada do backend.
+- `redact_secrets`: senhas, tokens e chaves em linhas de comando. O agente aplica antes de
+  enviar e o servidor aplica de novo (agentes antigos não tinham o filtro). A mesma lógica
+  existe em `agent/privacy.py`, porque o agente não importa nada do backend.
+- `redact_personal`: usuário em caminhos e e-mails; só quando o texto vai para IA em nuvem.
 """
 import re
 

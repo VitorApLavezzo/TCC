@@ -1,11 +1,5 @@
-"""
-Rótulos de sessão: o que a pessoa diz que está fazendo, marcado na bandeja.
-
-Servem de gabarito para medir o sistema no uso de verdade: um aviso dentro de
-"jogando" é falso alarme; um minerador de teste sem aviso é um erro. Por isso
-a detecção nunca lê esta tabela (há um teste que garante) — só o cadastro e a
-avaliação.
-"""
+"""Rótulos de sessão marcados na bandeja: gabarito da avaliação no uso real.
+A detecção nunca lê esta tabela (há um teste que garante)."""
 from datetime import datetime
 from typing import Dict, List, Optional
 

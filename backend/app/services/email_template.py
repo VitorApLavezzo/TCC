@@ -1,13 +1,5 @@
-"""
-E-mail de aviso com a identidade do painel.
-
-Clientes de e-mail ignoram CSS externo, <style> em parte deles e quase todo
-layout moderno: por isso tudo aqui é tabela com estilo inline. A paleta é a
-versão clara do painel — a maioria das caixas de entrada tem fundo branco, e
-um e-mail escuro fica ilegível quando o cliente força o tema claro.
-
-Sempre sai uma versão em texto junto, para quem lê e-mail sem HTML.
-"""
+"""E-mail de aviso: tabelas com estilo inline (clientes de e-mail ignoram CSS externo) e paleta
+clara (e-mail escuro fica ilegível quando o cliente força o tema claro). Sempre sai versão em texto."""
 from html import escape
 from typing import List, Optional, Tuple
 
@@ -70,8 +62,7 @@ def _when(n: Notification, machine: Optional[Machine]) -> str:
 
 
 def _title_without_machine(n: Notification, machine: Optional[Machine]) -> str:
-    # O título nasce como "Rótulo em Computador"; o computador já aparece na
-    # linha de detalhe, então não repete.
+    # O computador já aparece na linha de detalhe; não repete no título
     suffix = f" em {machine.name}" if machine else ""
     if suffix and n.title and n.title.endswith(suffix):
         return n.title[: -len(suffix)]

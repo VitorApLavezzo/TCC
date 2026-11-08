@@ -1,17 +1,9 @@
-"""
-Orquestração da detecção.
+"""Orquestração da detecção.
 
-Toda anomalia do sistema — de detector comportamental, do modelo, de evento do
-agente (arquivo-isca, desligamento), de previsão, de tendência ou da frota —
-nasce por `persist_candidate`, que aplica na mesma ordem:
-
-1. modo atividade pesada (silencia desempenho, nunca segurança);
-2. regras "isso é normal para mim";
-3. intervalo entre avisos repetidos;
-4. incidente e cadeia de causa;
-5. explicação da IA na fila e notificação.
-
-Assim nenhuma origem nova esquece um desses passos.
+Toda anomalia, de qualquer origem, nasce por `persist_candidate`, que aplica na
+mesma ordem: modo atividade pesada (silencia desempenho, nunca segurança), regras
+"isso é normal para mim", intervalo entre repetidos, incidente e cadeia de causa,
+explicação da IA na fila e notificação.
 """
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -36,37 +28,31 @@ from app.services.behavior_analyzer import _update_process_baseline as update_pr
 
 ANOMALY_COOLDOWN_MINUTES = 30
 
-# Abaixo disto a evidência é fraca: o aviso desce um nível de gravidade. Como o
-# mínimo padrão de notificação é `medium`, um `medium` fraco vira `low` — fica
-# no painel e para de interromper, sem política nova. Ajustável pelo benchmark.
+# Abaixo disto a evidência é fraca e o aviso desce um nível: um `medium` fraco
+# vira `low`, fica no painel e para de interromper. Ajustável pelo benchmark.
 WEAK_CONFIDENCE = 0.5
 
 _DEMOTE = {"critical": "high", "high": "medium", "medium": "low", "low": "low"}
 _PROMOTE = {"low": "medium", "medium": "high", "high": "critical", "critical": "critical"}
 
 
-# Se a confiança rebaixa ou não. Em operação é sempre True; o False existe para
-# o estudo de ablação rodar os mesmos cenários com e sem a camada e dizer, com
-# número, o que ela acrescenta. Desligar em produção degrada a precisão de
-# propósito — por isso fica aqui, explícito, e não escondido numa flag.
+# Em operação é sempre True; False só para o estudo de ablação medir o que a
+# camada de confiança acrescenta.
 _confidence_on = True
 
 
 def set_confidence_mode(on: bool) -> bool:
     """Liga/desliga o rebaixamento por confiança e devolve o valor anterior."""
     global _confidence_on
-    anterior, _confidence_on = _confidence_on, bool(on)
-    return anterior
+    previous, _confidence_on = _confidence_on, bool(on)
+    return previous
 
 
 def apply_confidence(severity: str, confidence: Optional[float]) -> str:
     """Evidência fraca desce um nível.
 
-    `confidence is None` significa "não aplicável", não "zero": é o caso de
-    tudo que nasce fora dos detectores comportamentais — arquivo-isca, comando
-    suspeito, previsão, tendência, frota. Nunca rebaixa, e é isso que mantém de
-    pé o princípio de que detector de segurança não é dessensibilizado, sem
-    precisar de lista de exceções.
+    `confidence is None` é "não aplicável" (tudo fora dos detectores
+    comportamentais) e nunca rebaixa: detector de segurança não é dessensibilizado.
     """
     if not _confidence_on:
         return severity
@@ -75,15 +61,10 @@ def apply_confidence(severity: str, confidence: Optional[float]) -> str:
     return _DEMOTE.get(severity, severity)
 
 
-# Qual camada de detecção está ativa. Em operação é sempre "ambas"; os outros
-# valores existem para o estudo de ablação (ml_eval.py), que roda o mesmo
-# conjunto de cenários com uma camada de cada vez para responder, com número,
-# o que cada uma acrescenta. Mudar isso em produção degrada a detecção de
-# propósito — por isso fica aqui, explícito, e não escondido numa flag.
+# Em operação é sempre "ambas"; as outras camadas só existem para o estudo de ablação (ml_eval.py)
 DETECTION_LAYERS = ("ambas", "regras", "ml")
-# Por thread: a ablação e a reprodução de dado real rodam em segundo plano por
-# minutos, e a coleta ao vivo (nas threads das requisições) não pode ficar com
-# meia detecção enquanto isso.
+# Por thread: a ablação roda em segundo plano por minutos, e a coleta ao vivo não
+# pode ficar com meia detecção enquanto isso
 _layer_local = threading.local()
 
 
@@ -91,9 +72,9 @@ def set_detection_layer(layer: str) -> str:
     """Troca a camada ativa nesta thread e devolve a anterior (para restaurar depois)."""
     if layer not in DETECTION_LAYERS:
         raise ValueError(f"Camada desconhecida: {layer}")
-    anterior = detection_layer()
+    previous = detection_layer()
     _layer_local.layer = layer
-    return anterior
+    return previous
 
 
 def detection_layer() -> str:
@@ -127,19 +108,9 @@ def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
                     by_condition: bool = False, condition_key: Optional[str] = None) -> Optional[Anomaly]:
     """O aviso vivo deste tipo nesta máquina, para somar a repetição nele.
 
-    A chave é `(máquina, tipo)` — não `(máquina, tipo, programa)`, como era. A
-    regra antiga dizia "dois programas desconhecidos diferentes são dois
-    avisos, não um repetido": certa na intenção, errada no efeito. Como o
-    detector devolve o primeiro programa que casa e para, cada coleta acusava
-    um programa diferente e nenhuma caía no intervalo entre repetidos — eram
-    vinte linhas de "Processo Desconhecido" em três minutos. O programa não se
-    perde: vira item de `affected_metrics["programas"]`.
-
-    A janela conta a partir da hora da leitura (`now`), não do relógio da
-    parede: a demonstração e o benchmark reproduzem horas em segundos e datam
-    os avisos no passado. Com `utcnow()` fixo aqui, a janela nunca casava
-    nesses caminhos e cada repetição virava um aviso novo — exatamente o
-    defeito que esta agregação existe para corrigir.
+    A chave é `(máquina, tipo)`, sem o programa: cada coleta pode acusar um
+    programa diferente, que vira item de `affected_metrics["programas"]`. A janela
+    conta da hora da leitura (`now`): demonstração e benchmark datam no passado.
     """
     cutoff = (now or utcnow()) - timedelta(minutes=minutes)
     query = db.query(Anomaly).filter(
@@ -148,30 +119,24 @@ def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
         Anomaly.detected_at >= cutoff,
         Anomaly.is_resolved == False,  # noqa: E712
     )
-    # Reconferência agendada é da mesma condição ou não é reconferência: sem
-    # isto, o risco de bateria subia a gravidade do aviso que falava do disco.
+    # Reconferência agendada é da mesma condição: sem isto, o risco de bateria
+    # subiria a gravidade do aviso que falava do disco
     if by_condition:
         query = query.filter(Anomaly.condition_key == condition_key) if condition_key is not None \
             else query.filter(Anomaly.condition_key.is_(None))
     return query.order_by(Anomaly.detected_at.desc()).first()
 
 
-# Origens que reconferem a mesma condição periodicamente, pelo agendador: a
-# previsão de disco a cada 15 minutos, a frota a cada 5, tendência, deriva e
-# risco de hardware em horas. Reconferência não é ocorrência nova — somá-la
-# fazia o aviso escalar e notificar de novo em poucas horas sem nada ter
-# acontecido. Leitura do agente (comportamento, modelo) e evento do agente são
-# observações novas e continuam somando. Detector agendado novo entra aqui.
+# Origens que o agendador reconfere periodicamente. Reconferência não é ocorrência
+# nova: somá-la faria o aviso escalar sem nada ter acontecido. Detector agendado novo entra aqui.
 REEVALUATED_SOURCES = frozenset({"forecast", "fleet", "trend", "drift", "hardware"})
 
 
 def _reevaluate(db: Session, machine: Machine, existing: Anomaly, c: Candidate) -> Optional[Anomaly]:
     """Reconferência agendada de uma condição que já tem aviso aberto.
 
-    Igual, não faz nada — é o que acontecia antes da agregação. Mais grave
-    (o disco que enchia em 5 dias agora enche em 1), sobe a gravidade, troca
-    a evidência pela nova, refaz a explicação e avisa. Só subir a gravidade
-    deixava a tela dizendo "alta" com "enche em 5 dias" ao lado.
+    Igual, não faz nada. Mais grave, sobe a gravidade e troca a evidência junto,
+    para a tela não dizer "alta" com a evidência antiga ao lado.
     """
     if SEVERITY_ORDER.get(c.severity, 0) <= SEVERITY_ORDER.get(existing.severity, 0):
         db.commit()
@@ -182,12 +147,11 @@ def _reevaluate(db: Session, machine: Machine, existing: Anomaly, c: Candidate) 
     existing.responsible_process = _normalize_process_name(c.responsible) or existing.responsible_process
     db.commit()
     _queue_explanation(db, existing, machine)
-    _announce(db, machine, existing, motivo="agravado")
+    _announce(db, machine, existing, reason="agravado")
     return existing
 
 
-# Quantas ocorrências ficam guardadas com detalhe. O suficiente para a pessoa
-# ver o que entrou no agregado sem transformar a coluna JSON num depósito.
+# Ocorrências guardadas com detalhe, sem transformar a coluna JSON num depósito
 OCCURRENCE_HISTORY = 10
 
 
@@ -197,55 +161,46 @@ def absorb(db: Session, machine: Machine, existing: Anomaly, c: Candidate, now) 
     `detected_at` não muda: o aviso continua datado de quando o problema
     começou, e `last_seen_at` guarda a ocorrência mais recente.
     """
-    nome = _normalize_process_name(c.responsible)
+    name = _normalize_process_name(c.responsible)
     existing.occurrences = (existing.occurrences or 1) + 1
     existing.last_seen_at = now
 
     affected = dict(existing.affected_metrics or {})
-    programas = list(affected.get("programas") or [])
-    for candidato in (existing.responsible_process, nome):
-        if candidato and candidato not in programas:
-            programas.append(candidato)
-    affected["programas"] = programas
+    programs = list(affected.get("programas") or [])
+    for candidate in (existing.responsible_process, name):
+        if candidate and candidate not in programs:
+            programs.append(candidate)
+    affected["programas"] = programs
 
-    # A evidência da ocorrência absorvida não pode se perder: era aqui que o
-    # destino do servidor de comando, o caminho do executável e a assinatura
-    # do segundo programa iam para o lixo, sobrando só o nome dele numa lista.
-    ocorrencias = list(affected.get("ocorrencias") or [])
-    ocorrencias.append({
-        "programa": nome,
+    # A evidência da ocorrência absorvida não pode se perder, só o nome não basta
+    occurrence_log = list(affected.get("ocorrencias") or [])
+    occurrence_log.append({
+        "programa": name,
         "gravidade": c.severity,
         "em": now.isoformat() if hasattr(now, "isoformat") else str(now),
         "detalhe": c.details or c.affected or None,
     })
-    affected["ocorrencias"] = ocorrencias[-OCCURRENCE_HISTORY:]
+    affected["ocorrencias"] = occurrence_log[-OCCURRENCE_HISTORY:]
 
-    antes = existing.severity
-    # A severidade do conjunto é a maior vista: um aviso crítico entrando na
-    # agregação puxa para cima em vez de se diluir entre os brandos. A
-    # confiança acompanha, senão a linha fica "crítica" com a certeza frouxa
-    # da primeira ocorrência.
+    before = existing.severity
+    # A severidade do conjunto é a maior vista; a confiança acompanha, senão a
+    # linha fica "crítica" com a certeza frouxa da primeira ocorrência
     if SEVERITY_ORDER.get(c.severity, 0) > SEVERITY_ORDER.get(existing.severity, 0):
         existing.severity = c.severity
         existing.confidence = c.confidence
 
-    # Igualdade, não "maior ou igual": o contador sobe de um em um, então a
-    # promoção acontece exatamente uma vez. A 11ª e a 20ª ocorrência não
-    # promovem de novo, e não é preciso guardar marca nenhuma no JSON — que é
-    # o que antes vazava para a tela como uma linha "escalado: true".
+    # Igualdade, não "maior ou igual": a promoção acontece exatamente uma vez,
+    # sem guardar marca no JSON
     if existing.occurrences == ESCALATION_OCCURRENCES:
         existing.severity = _PROMOTE.get(existing.severity, existing.severity)
 
-    # Dicionário novo, não mutação: o SQLAlchemy não enxerga alteração dentro
-    # de uma coluna JSON existente e a gravação se perderia em silêncio.
+    # Dicionário novo, não mutação: o SQLAlchemy não enxerga alteração dentro de uma coluna JSON
     existing.affected_metrics = affected
     db.commit()
 
-    # Só quando ficou mais grave. A explicação da IA não é refeita a cada
-    # ocorrência — seriam dezenas de chamadas ao modelo por um texto que
-    # ninguém lê duas vezes.
-    if SEVERITY_ORDER.get(existing.severity, 0) > SEVERITY_ORDER.get(antes, 0):
-        _announce(db, machine, existing, motivo="agravado")
+    # Só quando ficou mais grave; a explicação da IA não é refeita a cada ocorrência
+    if SEVERITY_ORDER.get(existing.severity, 0) > SEVERITY_ORDER.get(before, 0):
+        _announce(db, machine, existing, reason="agravado")
     return existing
 
 
@@ -271,19 +226,18 @@ def filter_reason(db: Session, machine: Machine, c: Candidate, now,
     return None, None
 
 
-def _json_safe(valor: Any) -> Any:
+def _json_safe(value: Any) -> Any:
     """Converte o que o JSON do banco não aceita (data, conjunto) em texto/lista.
 
-    Os detalhes de um aviso vêm de detectores diferentes, e bastou um deles pôr
-    um datetime aqui para a gravação falhar e derrubar a ingestão inteira.
+    Um datetime vindo de um detector derrubaria a gravação e a ingestão inteira.
     """
-    if isinstance(valor, dict):
-        return {str(k): _json_safe(v) for k, v in valor.items()}
-    if isinstance(valor, (list, tuple, set)):
-        return [_json_safe(v) for v in valor]
-    if isinstance(valor, (datetime, date)):
-        return valor.isoformat()
-    return valor
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
 
 
 def _affected_of(c: Candidate) -> Dict[str, Any]:
@@ -299,40 +253,30 @@ def _queue_explanation(db: Session, anomaly: Anomaly, machine: Machine) -> None:
     A fila pula aviso que já tem explicação pronta, então refazer uma exige
     voltar a este estado — o mesmo em que todo aviso nasce.
     """
-    explicacao = db.query(AIExplanation).filter(AIExplanation.anomaly_id == anomaly.id).first()
-    if explicacao is None:
-        explicacao = AIExplanation(anomaly_id=anomaly.id)
-        db.add(explicacao)
-    explicacao.summary = "Analisando com Inteligência Artificial..."
-    explicacao.possible_causes = []
-    explicacao.recommendations = []
-    explicacao.model_used = None
+    explanation = db.query(AIExplanation).filter(AIExplanation.anomaly_id == anomaly.id).first()
+    if explanation is None:
+        explanation = AIExplanation(anomaly_id=anomaly.id)
+        db.add(explanation)
+    explanation.summary = "Analisando com Inteligência Artificial..."
+    explanation.possible_causes = []
+    explanation.recommendations = []
+    explanation.model_used = None
     db.commit()
 
     from app.services.explanation_queue import request_explanation
     request_explanation(anomaly.id, anomaly.metric_id, machine.id)
 
 
-def _announce(db: Session, machine: Machine, anomaly: Anomaly, motivo: str) -> None:
-    """O que acontece quando um aviso nasce — ou fica mais grave.
-
-    Um aviso que sobe de gravidade dentro de uma agregação precisa exatamente
-    do mesmo tratamento de um que acabou de nascer: avisar a pessoa, lacrar no
-    livro e deixar a automação decidir. Enquanto isso vivia solto no fim de
-    `persist_candidate`, o `absorb` subia a gravidade no banco e ninguém ficava
-    sabendo — um indício de servidor de comando entrando atrás de um aviso
-    brando do mesmo tipo desaparecia dentro de um contador.
-    """
+def _announce(db: Session, machine: Machine, anomaly: Anomaly, reason: str) -> None:
+    """Notifica, lacra no livro e aciona a automação quando um aviso nasce ou fica mais grave."""
     try:
         from app.services import notifications
         notifications.on_anomaly(db, anomaly)
     except Exception as e:
         print(f"[AnomalyService] Notificação não criada para #{anomaly.id}: {e}")
 
-    # Lacra o aviso no livro encadeado: é o que permite provar depois que o
-    # registro não foi criado nem editado a posteriori. A gravidade agravada
-    # entra como lançamento novo — sem isso o livro guardaria "média" para
-    # sempre numa linha que hoje lê "crítica", e a promessa do livro seria falsa.
+    # O livro encadeado prova que o registro não foi criado nem editado a posteriori;
+    # a gravidade agravada entra como lançamento novo
     try:
         from app.services import integrity
         if integrity.is_auditable(machine):
@@ -348,15 +292,13 @@ def _announce(db: Session, machine: Machine, anomaly: Anomaly, motivo: str) -> N
                     "programa": anomaly.responsible_process,
                     "origem": anomaly.source,
                     "detectado_em": anomaly.detected_at,
-                    "motivo": motivo,
+                    "motivo": reason,
                     "ocorrencias": anomaly.occurrences or 1,
                 },
             )
     except Exception as e:
         print(f"[Livro] Registro do aviso #{anomaly.id} falhou: {e}")
 
-    # Uma regra de automação pode existir para este aviso: quem decide se age,
-    # se pede confirmação ou se só sugere é o playbooks.
     try:
         from app.services import playbooks
         playbooks.on_anomaly(db, machine, anomaly)
@@ -399,8 +341,7 @@ def persist_candidate(
     signals = incidents.collect_signals(metric, [c.anomaly_type, *extra_signal_types])
     affected = _affected_of(c)
 
-    # Ainda conhecendo a máquina: registra, mas não incomoda. Não é filtro —
-    # o aviso existe e aparece no painel; o que muda é a notificação.
+    # Ainda conhecendo a máquina: o aviso aparece no painel, mas não notifica
     during_learning = (
         c.anomaly_type not in LEARNING_EXEMPT
         and learning.is_learning(db, machine, now)
@@ -428,11 +369,10 @@ def persist_candidate(
     db.flush()
     incidents.attach(db, anomaly, signals, now)
 
-    # Explicação vazia indica que a IA ainda está trabalhando
     _queue_explanation(db, anomaly, machine)
     db.refresh(anomaly)
 
-    _announce(db, machine, anomaly, motivo="criado")
+    _announce(db, machine, anomaly, reason="criado")
     return anomaly
 
 
@@ -449,13 +389,12 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     ctx = DetectionContext(offset_minutes=offset, sensitivity=sensitivity, process_starts=process_starts or [],
                            learning=learning.is_learning(db, machine, now))
 
-    # 1. Análise comportamental (padrões avançados)
-    camada = detection_layer()
-    findings = analyze_behavior(metric, db, ctx) if camada != "ml" else []
+    layer = detection_layer()
+    findings = analyze_behavior(metric, db, ctx) if layer != "ml" else []
 
     # O cadastro de programas conhecidos é aprendizado, não detector: na camada
-    # "só ML" quem o atualiza (um detector) não roda
-    if camada == "ml":
+    # "só ML" quem o atualiza não roda
+    if layer == "ml":
         update_process_baseline(machine.id, db.query(ProcessSnapshot)
                                 .filter(ProcessSnapshot.metric_id == metric.id).all(), db)
 
@@ -466,28 +405,24 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
             ctx.trust_levels = trust.evaluate_all(db, machine.id, processes)
         context.compute(db, metric, processes, ctx.trust_levels)
 
-    # 2. Isolation Forest (desvio estatístico)
     ml_threshold = ml_service.alert_threshold(machine.id, sensitivity.get("ml", 1.0))
     is_statistical, score = ml_service.predict_anomaly(machine.id, metric, offset, sensitivity.get("ml", 1.0))
     metric.ml_score = score
     if is_statistical:
-        # Uma leitura isolada fora do padrão é ruído; duas seguidas são sinal.
-        # A régua da anterior é o limite desta máquina, não o zero: zero é a
-        # fronteira do `contamination`, por onde passam ~3% das leituras
-        # normais — frouxo demais para confirmar o que ele deveria confirmar.
-        confirma_abaixo_de = (ml_threshold or 0.0) * settings.ML_CONFIRM_FACTOR
+        # Uma leitura isolada fora do padrão é ruído; duas seguidas são sinal. A régua
+        # da anterior é o limite da máquina: o zero do `contamination` é frouxo demais.
+        confirm_below = (ml_threshold or 0.0) * settings.ML_CONFIRM_FACTOR
         previous = (
             db.query(Metric.ml_score)
             .filter(Metric.machine_id == machine.id, Metric.id != metric.id)
             .order_by(Metric.timestamp.desc())
             .first()
         )
-        is_statistical = bool(previous and previous[0] is not None and previous[0] < confirma_abaixo_de)
-    if camada == "regras":
+        is_statistical = bool(previous and previous[0] is not None and previous[0] < confirm_below)
+    if layer == "regras":
         is_statistical = False
     db.commit()
 
-    # Retreino incremental — mais frequente = modelo acompanha melhor o comportamento atual
     sample_count = db.query(Metric).filter(Metric.machine_id == machine.id).count()
     if sample_count % settings.RETRAIN_EVERY == 0 or sample_count == settings.MIN_TRAINING_SAMPLES:
         ml_service.train_model(machine.id, db)
@@ -511,20 +446,15 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
         classification = ml_service.classify_anomaly(metric, db, contributions)
         ml_conf = ml_service.confidence_from_score(score, ml_threshold)
         top = _find_top_process(metric, db, classification["anomaly_type"])
-        # Quem culpar e em quem confiar são perguntas diferentes. Num desvio de
-        # disco não há culpado a nomear, mas o programa que está trabalhando
-        # continua tendo reputação — e é dela que sai o rebaixamento de uma
-        # varredura de antivírus. Ligar as duas coisas desfazia, em silêncio, o
-        # que a rodada anterior de falsos positivos tinha resolvido.
-        reputado = top if top is not None else _find_top_process(metric, db, "high_cpu")
-        bruta = ml_severity(classification["anomaly_type"], classification["severity"],
-                            ctx.trust(reputado) if reputado is not None else None)
+        # Quem culpar e em quem confiar são perguntas diferentes: num desvio de disco
+        # não há culpado, mas o programa trabalhando ainda tem reputação (antivírus varrendo)
+        reputed = top if top is not None else _find_top_process(metric, db, "high_cpu")
+        raw_severity = ml_severity(classification["anomaly_type"], classification["severity"],
+                                   ctx.trust(reputed) if reputed is not None else None)
         candidates.append(Candidate(
             anomaly_type=classification["anomaly_type"],
-            # Duas razões podem rebaixar o mesmo aviso — produto de segurança
-            # fazendo o que promete, e desvio que mal passou do limite. As duas
-            # agem, e o piso é `low`.
-            severity=apply_confidence(bruta, ml_conf),
+            # As duas razões de rebaixamento agem; o piso é `low`
+            severity=apply_confidence(raw_severity, ml_conf),
             affected=classification["affected_metrics"],
             responsible=top.name if top is not None else None,
             details={"source": "isolation_forest", "score": score, "contributions": contributions},
@@ -542,8 +472,8 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
         processes = db.query(ProcessSnapshot).filter(ProcessSnapshot.metric_id == metric.id).all()
         for c in candidates:
             proc = _reference_process(processes, c.responsible)
-            nivel = ctx.trust(proc).level if proc is not None else None
-            c.severity, c.user_driven = context_severity(c.anomaly_type, c.severity, metric, proc, nivel)
+            level = ctx.trust(proc).level if proc is not None else None
+            c.severity, c.user_driven = context_severity(c.anomaly_type, c.severity, metric, proc, level)
 
     local_hour = local_time(now, offset).hour
     allowed: List[Candidate] = []
@@ -581,9 +511,8 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     )
 
 
-# Tipos de carga: os únicos que o contexto de uso pode rebaixar. Segurança
-# nunca; vazamento de memória também não — é defeito mesmo no programa que a
-# pessoa está usando.
+# Os únicos tipos que o contexto de uso pode rebaixar. Segurança nunca; vazamento
+# de memória também não — é defeito mesmo no programa que a pessoa está usando.
 LOAD_TYPES = {
     "high_cpu", "background_load", "gpu_anomaly", "resource_abuse", "resource_exhaustion",
     "cpu_loop", "thermal_throttling", "behavioral_anomaly",
@@ -596,9 +525,9 @@ PRESENT_IDLE_SECONDS = 120
 def _reference_process(processes, responsible: Optional[str]):
     """O processo do aviso: o responsável, ou o dominante quando não há um."""
     if responsible:
-        mesmos = [p for p in processes if p.name == responsible]
-        if mesmos:
-            return max(mesmos, key=lambda p: p.cpu_percent or 0.0)
+        same_name = [p for p in processes if p.name == responsible]
+        if same_name:
+            return max(same_name, key=lambda p: p.cpu_percent or 0.0)
     return context.dominant(processes)
 
 
@@ -613,22 +542,20 @@ def context_severity(anomaly_type: str, severity: str, metric, process,
     | segundo plano, desconhecido (0)                      | mantém           |
     | sem informação de contexto                           | mantém           |
 
-    Ferramentas do próprio Windows usadas por ataques (LOLBINS) nunca são
-    rebaixadas por confiança: um minerador dentro do rundll32 assinado pela
-    Microsoft é a técnica clássica. Convive com `ml_severity` e
-    `apply_confidence`; o piso é `low`.
+    LOLBINS nunca são rebaixados por confiança: minerador dentro do rundll32
+    assinado é a técnica clássica. O piso é `low`.
     """
     if not context.context_on() or anomaly_type not in LOAD_TYPES or process is None:
         return severity, False
     foreground = getattr(metric, "foreground_pid", None)
-    conduzido = context.is_user_driven(process, foreground, getattr(metric, "foreground_name", None))
+    driven = context.is_user_driven(process, foreground, getattr(metric, "foreground_name", None))
     idle = getattr(metric, "user_idle_seconds", None)
-    presente = idle is not None and idle < PRESENT_IDLE_SECONDS
-    if conduzido is True and presente:
+    present = idle is not None and idle < PRESENT_IDLE_SECONDS
+    if driven is True and present:
         return "low", True
-    if conduzido is False:
-        nome = (getattr(process, "name", "") or "").lower()
-        if nome.removesuffix(".exe") in LOLBINS:
+    if driven is False:
+        name = (getattr(process, "name", "") or "").lower()
+        if name.removesuffix(".exe") in LOLBINS:
             return severity, False
         if trust_level is not None and trust_level >= trust.TRUSTED:
             return "low", False
@@ -638,21 +565,10 @@ def context_severity(anomaly_type: str, severity: str, metric, process,
 
 
 def ml_severity(anomaly_type: str, severity: str, trust_info) -> str:
-    """Rebaixa o aviso do modelo quando o desvio é um produto de segurança
-    fazendo exatamente o que promete.
+    """Rebaixa o aviso do modelo quando o desvio é um produto de segurança fazendo o que promete.
 
-    Uma varredura de antivírus É uma leitura fora do padrão — o modelo está
-    certo. Só que "fora do padrão" e "problema" não são a mesma coisa, e
-    interromper alguém porque o antivírus está varrendo ensina a pessoa a
-    ignorar os avisos.
-
-    A regra é estreita de propósito: vale só para o nível 3 (produto de
-    segurança reconhecido, com assinatura conferida) e nunca para um aviso de
-    segurança. Qualquer programa assinado rebaixando o modelo abriria espaço
-    para um binário legítimo sequestrado passar em silêncio.
-
-    Rebaixado não é silenciado: `low` continua no painel e some da notificação
-    porque a severidade mínima padrão é `medium`.
+    Estreita de propósito: só nível 3 e nunca aviso de segurança — qualquer programa
+    assinado rebaixando abriria espaço para um binário legítimo sequestrado.
     """
     if trust_info is None or not getattr(trust_info, "is_security_software", False):
         return severity
@@ -661,12 +577,8 @@ def ml_severity(anomaly_type: str, severity: str, trust_info) -> str:
     return "low"
 
 
-# De qual medida do processo sai o culpado, por tipo de aviso. Tipo que não
-# está aqui não tem culpado identificável: `ProcessSnapshot` guarda CPU e
-# memória por processo, mas não E/S de disco nem conexões de rede. Acusar o
-# maior consumidor de CPU por um desvio de disco produzia "Atividade de Disco
-# Fora do Padrão — responsável: chrome.exe", que ensina a pessoa a desconfiar
-# do sistema inteiro. Ficar calado é a resposta honesta.
+# De qual medida do processo sai o culpado. Tipo fora daqui não tem culpado:
+# `ProcessSnapshot` não guarda E/S de disco nem conexões por processo.
 BLAME_FIELD = {
     "high_cpu": "cpu_percent",
     "background_load": "cpu_percent",
@@ -680,16 +592,13 @@ BLAME_FIELD = {
 def _find_top_process(metric: Metric, db: Session, anomaly_type: Optional[str] = None):
     """O processo que explica este aviso, ou None quando não dá para saber.
 
-    Devolve a leitura inteira, não só o nome: a confiança é do executável
-    (caminho, assinatura, fabricante), e o nome sozinho é o que um vírus imita.
+    A leitura inteira, não só o nome: a confiança é do executável, e o nome é o que um vírus imita.
     """
     from app.models.process import ProcessSnapshot
     field = BLAME_FIELD.get(anomaly_type or "")
     if field is None:
         return None
-    # `nulls_last`: no PostgreSQL, `DESC` põe NULL na frente — uma leitura
-    # antiga sem esta medida seria devolvida como "a maior". O SQLite dos
-    # testes faz o contrário e esconderia isso até chegar em produção.
+    # `nulls_last`: no PostgreSQL, `DESC` põe NULL na frente (o SQLite dos testes faz o contrário)
     return (
         db.query(ProcessSnapshot)
         .filter(ProcessSnapshot.metric_id == metric.id)

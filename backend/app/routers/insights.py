@@ -66,14 +66,14 @@ def drift_status(machine_id: int, history: bool = False, db: Session = Depends(g
     """Se o normal aprendido ainda descreve esta máquina."""
     from app.services import drift
     machine = _machine(db, machine_id, user)
-    atual = drift.latest(db, machine.id)
-    if atual is None:
+    current = drift.latest(db, machine.id)
+    if current is None:
         # Nada medido ainda: mede agora, para a tela não ficar vazia à toa
-        atual = drift.check_machine(db, machine)
-    resposta = {"current": atual}
+        current = drift.check_machine(db, machine)
+    response = {"current": current}
     if history:
-        resposta["history"] = drift.history(db, machine.id)
-    return resposta
+        response["history"] = drift.history(db, machine.id)
+    return response
 
 
 @router.get("/machine/{machine_id}/hardware-risk")
@@ -82,10 +82,10 @@ def hardware_risk(machine_id: int, db: Session = Depends(get_db),
     """Chance de cada peça falhar no horizonte, com o que pesou na conta."""
     from app.services import hardware_risk as hw
     machine = _machine(db, machine_id, user)
-    riscos = hw.latest(db, machine.id)
-    if not riscos:
-        riscos = hw.compute(db, machine)
-    return {"risks": riscos, "horizon_days": hw.HORIZON_DAYS}
+    risks = hw.latest(db, machine.id)
+    if not risks:
+        risks = hw.compute(db, machine)
+    return {"risks": risks, "horizon_days": hw.HORIZON_DAYS}
 
 
 @router.get("/fleet/changes")

@@ -1,11 +1,5 @@
-"""
-Coleta adaptativa.
-
-O intervalo fixo de 30 s é lento demais quando algo começa a sair do normal
-(a caixa-preta e as janelas dos detectores ficam pobres) e desperdiça bateria
-quando o notebook está parado. O servidor sugere o próximo intervalo na
-resposta de cada coleta; o agente respeita dentro de limites seguros.
-"""
+"""Coleta adaptativa: o servidor sugere o próximo intervalo na resposta de cada coleta
+(mais curto quando algo sai do normal, mais longo parado na bateria)."""
 from datetime import timedelta
 from typing import Optional
 
@@ -57,13 +51,8 @@ def next_interval(db: Session, machine: Machine, metric: Metric, new_anomaly: Op
 
 
 def resolve_interval(machine: Machine, adaptive_value: int, now) -> int:
-    """Decide o intervalo que vale para esta coleta.
-
-    Prioridade: tempo real ativo (5s) > frequência escolhida na tela > sugestão
-    adaptativa do servidor. `now` e `machine.realtime_until` podem vir com ou
-    sem fuso (Postgres é aware, SQLite é naive) — normaliza os dois com
-    `aware()` antes de comparar.
-    """
+    """Prioridade: tempo real ativo > frequência escolhida na tela > sugestão adaptativa.
+    Postgres devolve datas aware e SQLite naive, por isso o `aware()` antes de comparar."""
     from app.core.timeutil import aware
 
     realtime_until = aware(machine.realtime_until) if machine.realtime_until else None

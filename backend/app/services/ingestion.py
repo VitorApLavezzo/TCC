@@ -1,10 +1,5 @@
-"""
-Ingestão de uma coleta.
-
-Separada da rota HTTP para que a demonstração use exatamente o mesmo caminho
-das coletas reais: o que aparece na demonstração é o que o sistema detecta de
-verdade, não uma encenação.
-"""
+"""Ingestão de uma coleta, separada da rota HTTP para a demonstração usar exatamente o
+mesmo caminho das coletas reais."""
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -57,9 +52,8 @@ def anomaly_ws_payload(anomaly: Anomaly) -> dict:
     }
 
 
-# Uma leitura atrasada da fila do agente pode ser de horas atrás; mais velha
-# que isto é lixo (relógio errado, máquina parada por semanas) e entra com a
-# hora da chegada.
+# Leitura da fila do agente mais velha que isto é lixo (relógio errado, máquina parada por
+# semanas) e entra com a hora da chegada.
 MAX_BACKFILL_HOURS = 48
 
 
@@ -68,12 +62,12 @@ def _reading_time(payload: MetricCreate, now):
     if not payload.collected_at:
         return now
     try:
-        quando = datetime.fromtimestamp(float(payload.collected_at), tz=timezone.utc)
+        read_at = datetime.fromtimestamp(float(payload.collected_at), tz=timezone.utc)
     except (OverflowError, OSError, ValueError):
         return now
-    if quando > now or quando < now - timedelta(hours=MAX_BACKFILL_HOURS):
+    if read_at > now or read_at < now - timedelta(hours=MAX_BACKFILL_HOURS):
         return now
-    return quando
+    return read_at
 
 
 def ingest(db: Session, machine: Machine, payload: MetricCreate, now=None) -> IngestResult:
@@ -129,38 +123,36 @@ def ingest(db: Session, machine: Machine, payload: MetricCreate, now=None) -> In
         db.rollback()
         print(f"[Ingest] Identidade dos processos não registrada: {e}")
 
-    # Cada detector roda isolado. A leitura já está gravada; se um detector
-    # quebra, perde-se só o aviso dele. Antes a exceção subia, a ingestão
-    # respondia 500 e o agente reenviava a mesma leitura para sempre — um
-    # defeito num detector de segurança parava a coleta do computador inteiro.
-    def detectar(etapa: str, fn):
+    # Cada detector roda isolado: a leitura já está gravada, e uma exceção que subisse
+    # viraria 500 e o agente reenviaria a mesma leitura para sempre.
+    def run_detector(stage: str, fn):
         try:
-            resultado = fn()
+            result = fn()
             db.commit()
-            return resultado
+            return result
         except Exception as e:
             db.rollback()
-            print(f"[Ingest] Detector '{etapa}' falhou na máquina {machine.id}: {e!r}")
+            print(f"[Ingest] Detector '{stage}' falhou na máquina {machine.id}: {e!r}")
             return None
 
     anomalies: List[Anomaly] = []
-    reboot = detectar(
+    reboot = run_detector(
         "reinício", lambda: agent_events.check_reboot(db, machine, payload.boot_time, events, previous_metric, now)
     )
     if reboot:
         anomalies.append(reboot)
 
-    anomaly = detectar("leitura", lambda: process_metric(metric, machine, db, process_starts=starts, now=now))
+    anomaly = run_detector("leitura", lambda: process_metric(metric, machine, db, process_starts=starts, now=now))
     if anomaly:
         anomalies.insert(0, anomaly)
     if payload.inventory:
-        anomalies += detectar(
+        anomalies += run_detector(
             "inventário", lambda: agent_events.apply_inventory(db, machine, payload.inventory, now)
         ) or []
     if events:
-        anomalies += detectar("eventos", lambda: agent_events.handle_events(db, machine, events, metric, now)) or []
+        anomalies += run_detector("eventos", lambda: agent_events.handle_events(db, machine, events, metric, now)) or []
     if payload.beacons:
-        anomalies += detectar(
+        anomalies += run_detector(
             "beaconing",
             lambda: agent_events.evaluate_beacons(db, machine, [b.model_dump() for b in payload.beacons], now),
         ) or []

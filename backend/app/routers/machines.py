@@ -47,10 +47,7 @@ def create_enrollment_code(db: Session = Depends(get_db), current_user: User = D
 
 @router.post("/enroll-keys", response_model=BulkKeyOut, status_code=status.HTTP_201_CREATED)
 def create_bulk_key(body: BulkKeyCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Cria uma chave de instalação REUTILIZÁVEL, para implantar o agente em massa
-    (centenas de máquinas) via GPO, RMM ou script de TI — ao contrário do código de
-    pareamento único, esta chave não expira em 30 minutos nem é consumida no 1º uso.
-    """
+    """Cria uma chave de instalação reutilizável, para implantar o agente em massa (GPO, RMM, script)."""
     key = EnrollmentCode(
         code=_generate_enroll_code(),
         user_id=current_user.id,
@@ -77,8 +74,7 @@ def list_bulk_keys(db: Session = Depends(get_db), current_user: User = Depends(g
 
 @router.delete("/enroll-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_bulk_key(key_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """Revoga a chave — máquinas já registradas continuam funcionando normalmente,
-    apenas novos registros com esta chave passam a ser recusados."""
+    """Revoga a chave: máquinas já registradas continuam funcionando, só novos registros são recusados."""
     key = db.query(EnrollmentCode).filter(
         EnrollmentCode.id == key_id, EnrollmentCode.user_id == current_user.id, EnrollmentCode.reusable == True
     ).first()
@@ -88,42 +84,32 @@ def revoke_bulk_key(key_id: int, db: Session = Depends(get_db), current_user: Us
     db.commit()
 
 
-# O pareamento aceita um código de seis caracteres de quem ainda não tem token:
-# 30 tentativas por hora por IP mantêm a instalação legítima confortável e
-# tornam a varredura do espaço de códigos inviável.
+# O pareamento aceita código de quem ainda não tem token: 30 tentativas por hora por IP tornam
+# a varredura do espaço de códigos inviável.
 def _consume_enrollment(db: Session, enrollment: EnrollmentCode) -> bool:
     """Gasta um uso do código no próprio banco. Devolve False se não sobrava uso.
 
-    Conferir `use_count` lido antes e gravar `use_count + 1` calculado em
-    Python deixava pedidos simultâneos passarem todos pela conferência: uma
-    chave com limite de 1 máquina pareou 5, e o contador ficou em 1. O UPDATE
-    condicional decide com o valor que está no banco na hora de gravar.
+    O UPDATE condicional decide com o valor do banco na hora de gravar, para pedidos simultâneos
+    não passarem todos por uma conferência feita em Python.
     """
-    filtros = [EnrollmentCode.id == enrollment.id, EnrollmentCode.revoked == False]  # noqa: E712
+    filters = [EnrollmentCode.id == enrollment.id, EnrollmentCode.revoked == False]  # noqa: E712
     if enrollment.reusable:
-        filtros.append(or_(EnrollmentCode.max_uses.is_(None), EnrollmentCode.use_count < EnrollmentCode.max_uses))
+        filters.append(or_(EnrollmentCode.max_uses.is_(None), EnrollmentCode.use_count < EnrollmentCode.max_uses))
     else:
-        filtros += [EnrollmentCode.machine_id.is_(None), EnrollmentCode.use_count == 0]
-    gastos = db.query(EnrollmentCode).filter(*filtros).update(
+        filters += [EnrollmentCode.machine_id.is_(None), EnrollmentCode.use_count == 0]
+    updated = db.query(EnrollmentCode).filter(*filters).update(
         {EnrollmentCode.use_count: EnrollmentCode.use_count + 1}, synchronize_session=False)
-    return gastos == 1
+    return updated == 1
 
 
 @router.post("/enroll", response_model=AgentEnrollResponse,
              dependencies=[Depends(limit("enroll", 30, 3600))])
 def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
-    """Chamado pelo agente: troca o código/chave pelo token definitivo desta máquina.
-
-    O agente envia hostname/SO detectados automaticamente — ninguém digita nada.
-    Aceita tanto o código de pareamento de uso único quanto uma chave reutilizável
-    de instalação em massa (ver /enroll-keys).
-    """
+    """Chamado pelo agente: troca o código de uso único ou a chave reutilizável pelo token da máquina."""
     code = payload.code.strip().upper().replace(" ", "")
     enrollment = db.query(EnrollmentCode).filter(EnrollmentCode.code == code).first()
 
-    # `expires_at` volta COM fuso no PostgreSQL e SEM fuso no SQLite — comparar
-    # direto com uma data com fuso quebra em um dos dois (era TypeError no
-    # pareamento inteiro, com SQLite). `aware()` normaliza os dois casos.
+    # `expires_at` volta com fuso no PostgreSQL e sem no SQLite: `aware()` normaliza os dois casos.
     if not enrollment or aware(enrollment.expires_at) < utcnow() or enrollment.revoked:
         raise HTTPException(status_code=400, detail="Código de pareamento inválido, expirado ou revogado")
 
@@ -146,7 +132,6 @@ def enroll_agent(payload: AgentEnrollRequest, db: Session = Depends(get_db)):
     db.flush()
 
     if not enrollment.reusable:
-        # marca o código de uso único como consumido
         db.query(EnrollmentCode).filter(EnrollmentCode.id == enrollment.id).update(
             {EnrollmentCode.machine_id: machine.id}, synchronize_session=False)
 
@@ -210,11 +195,7 @@ def set_realtime(machine_id: int, body: RealtimeRequest, db: Session = Depends(g
 
 
 def delete_machine_cascade(machine_id: int, db: Session):
-    """Remove a máquina e todas as dependências na ordem certa.
-
-    enrollment_codes e process_baselines não têm cascade no ORM e violavam
-    a FK, fazendo o delete falhar com 500.
-    """
+    """Remove a máquina e todas as dependências na ordem certa (nem todas têm cascade no ORM)."""
     from sqlalchemy import select
     from app.models.metric import Metric
     from app.models.process import ProcessSnapshot
@@ -242,30 +223,23 @@ def delete_machine_cascade(machine_id: int, db: Session):
     anomaly_ids = select(Anomaly.id).where(Anomaly.machine_id == machine_id)
 
     # Guardado antes de apagar: depois não há de quem falar no registro
-    alvo = db.query(Machine).filter(Machine.id == machine_id).first()
-    nome = alvo.name if alvo else None
-    dono_id = alvo.owner_id if alvo else None
-    avisos = db.query(Anomaly).filter(Anomaly.machine_id == machine_id).count()
+    target = db.query(Machine).filter(Machine.id == machine_id).first()
+    name = target.name if target else None
+    owner_id = target.owner_id if target else None
+    anomaly_count = db.query(Anomaly).filter(Anomaly.machine_id == machine_id).count()
 
-    # Tabelas novas que apontam para esta máquina ou para os avisos dela. Sem
-    # soltar estas referências, o Postgres recusa apagar as anomalias e a
-    # remoção inteira falha — inclusive a das máquinas efêmeras do benchmark,
-    # que ficavam para trás no painel (o SQLite dos testes não impõe FK, então
-    # a suíte passava).
+    # Sem soltar estas referências o Postgres recusa apagar as anomalias (o SQLite dos testes
+    # não impõe FK, então a suíte não pega isso).
     db.query(ExplanationOutcome).filter(ExplanationOutcome.machine_id == machine_id).delete(
         synchronize_session=False)
     db.query(PlaybookRun).filter(PlaybookRun.machine_id == machine_id).delete(synchronize_session=False)
     db.query(Playbook).filter(Playbook.machine_id == machine_id).delete(synchronize_session=False)
     db.query(DriftCheck).filter(DriftCheck.machine_id == machine_id).delete(synchronize_session=False)
     db.query(HardwareRisk).filter(HardwareRisk.machine_id == machine_id).delete(synchronize_session=False)
-    # As respostas do estudo são dado de pesquisa: sobrevivem à máquina, só
-    # perdem o ponteiro para o aviso que já não existe.
+    # As respostas do estudo são dado de pesquisa: sobrevivem à máquina, só perdem o ponteiro.
     db.query(StudyResponse).filter(StudyResponse.anomaly_id.in_(anomaly_ids)).update(
         {StudyResponse.anomaly_id: None}, synchronize_session=False)
-    # O livro de auditoria idem, e por um motivo mais forte: apagar entrada de
-    # um registro que existe para ser inviolável seria contraditório. O elo da
-    # cadeia não usa machine_id, então soltar a referência preserva a
-    # verificação intacta.
+    # O livro de auditoria é inviolável: só solta a referência (o elo da cadeia não usa machine_id).
     db.query(LedgerEntry).filter(LedgerEntry.machine_id == machine_id).update(
         {LedgerEntry.machine_id: None}, synchronize_session=False)
 
@@ -273,10 +247,8 @@ def delete_machine_cascade(machine_id: int, db: Session):
     db.query(AIExplanation).filter(AIExplanation.anomaly_id.in_(anomaly_ids)).delete(synchronize_session=False)
     db.query(ShareLink).filter(ShareLink.anomaly_id.in_(anomaly_ids)).delete(synchronize_session=False)
     db.query(BlackboxCapture).filter(BlackboxCapture.machine_id == machine_id).delete(synchronize_session=False)
-    # Estas tabelas apontam para as anomalias com FK NO ACTION: sem soltar a
-    # referência antes, o Postgres recusa apagar as anomalias e a remoção inteira
-    # falha com 500 (o SQLite dos testes não impõe FK, por isso passava). As
-    # linhas desta máquina são apagadas logo abaixo; as de outros donos ficam.
+    # FK NO ACTION para as anomalias: solta a referência antes; as linhas desta máquina são
+    # apagadas logo abaixo.
     db.query(Notification).filter(Notification.anomaly_id.in_(anomaly_ids)).update(
         {Notification.anomaly_id: None}, synchronize_session=False)
     db.query(AgentCommand).filter(AgentCommand.anomaly_id.in_(anomaly_ids)).update(
@@ -290,9 +262,7 @@ def delete_machine_cascade(machine_id: int, db: Session):
     db.query(ProcessBaseline).filter(ProcessBaseline.machine_id == machine_id).delete(synchronize_session=False)
     db.query(DetectionRule).filter(DetectionRule.machine_id == machine_id).delete(synchronize_session=False)
     db.query(DetectorCalibration).filter(DetectorCalibration.machine_id == machine_id).delete(synchronize_session=False)
-    # diagnostics.command_id aponta para agent_commands com FK NO ACTION: solta a
-    # referência e apaga os diagnósticos antes dos comandos, senão a remoção
-    # inteira falha com 500 para qualquer computador que já rodou um diagnóstico.
+    # diagnostics.command_id aponta para agent_commands com FK NO ACTION: diagnósticos antes dos comandos.
     command_ids = select(AgentCommand.id).where(AgentCommand.machine_id == machine_id)
     db.query(Diagnostic).filter(Diagnostic.command_id.in_(command_ids)).update(
         {Diagnostic.command_id: None}, synchronize_session=False)
@@ -303,39 +273,33 @@ def delete_machine_cascade(machine_id: int, db: Session):
     db.query(ChangeEvent).filter(ChangeEvent.machine_id == machine_id).delete(synchronize_session=False)
     db.query(InventorySnapshot).filter(InventorySnapshot.machine_id == machine_id).delete(synchronize_session=False)
     db.query(ProcessIdentity).filter(ProcessIdentity.machine_id == machine_id).delete(synchronize_session=False)
-    # O modelo treinado vive em arquivo, fora do banco: sem apagá-lo aqui ele
-    # fica para sempre no volume, e um id reaproveitado (banco restaurado,
-    # ambiente recriado) carregaria o modelo de outra máquina.
+    # O modelo treinado vive em arquivo: um id reaproveitado carregaria o modelo de outra máquina.
     ml_service._discard(machine_id)
     db.query(Notification).filter(Notification.machine_id == machine_id).delete(synchronize_session=False)
     db.query(EnrollmentCode).filter(EnrollmentCode.machine_id == machine_id).delete(synchronize_session=False)
-    _seal_removal(db, machine_id, nome, dono_id, avisos)
+    _seal_removal(db, machine_id, name, owner_id, anomaly_count)
     db.query(Machine).filter(Machine.id == machine_id).delete(synchronize_session=False)
     db.commit()
 
 
-def _seal_removal(db: Session, machine_id: int, nome: Optional[str],
-                  dono_id: Optional[int], avisos: int) -> None:
+def _seal_removal(db: Session, machine_id: int, name: Optional[str],
+                  owner_id: Optional[int], anomaly_count: int) -> None:
     """Lacra no livro que a máquina foi removida.
 
-    Remover apaga métricas, avisos e histórico de uma vez, e até aqui não
-    deixava rastro nenhum: depois do fato não havia como saber se quem apagou
-    foi o painel, o desinstalador ou uma rotina. O registro fica sem
-    `machine_id` de propósito — a máquina deixa de existir na linha seguinte.
-    Máquina sintética (demonstração ou benchmark) não entra, pelo mesmo motivo
-    que os avisos dela não entram.
+    O registro fica sem `machine_id` de propósito (a máquina deixa de existir em seguida);
+    máquina sintética do benchmark não entra.
     """
     from app.services import integrity
 
-    if nome and nome.startswith("[BENCH]"):
+    if name and name.startswith("[BENCH]"):
         return
     try:
         integrity.append(
             db,
             kind="machine_removed",
             ref_id=machine_id,
-            user_id=dono_id,
-            payload={"nome": nome, "avisos_apagados": avisos},
+            user_id=owner_id,
+            payload={"nome": name, "avisos_apagados": anomaly_count},
             commit=False,
         )
     except Exception as e:  # noqa: BLE001

@@ -1,17 +1,6 @@
-"""
-"Pergunte ao seu computador".
-
-A pessoa pergunta em português ("por que ficou lento ontem às 15h?", "o que
-mudou desde semana passada?") e a IA responde consultando os dados reais —
-não um prompt com tudo despejado, mas um pequeno conjunto de consultas que ela
-escolhe e o servidor executa.
-
-Como nem todo provedor da cadeia expõe chamada de ferramentas de forma
-uniforme, o laço é feito à mão sobre o `llm.complete`: a IA responde em JSON
-pedindo uma consulta OU a resposta final; o servidor executa a consulta,
-devolve o resultado e repete, até a resposta final ou um limite de passos.
-As consultas são fechadas e só leem dados do dono — a IA não escreve nada.
-"""
+"""Pergunte ao seu computador: nem todo provedor expõe ferramentas de forma uniforme, então o
+laço é à mão sobre `llm.complete`: a IA pede uma consulta OU responde, em JSON.
+As consultas são fechadas e só leem dados do dono — a IA não escreve nada."""
 import json
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
@@ -109,16 +98,15 @@ def answer_async(db: Session, message_id: int):
     user = db.query(User).filter(User.id == msg.user_id).first()
     machine = db.query(Machine).filter(Machine.id == msg.machine_id).first() if msg.machine_id else None
 
-    # Só o histórico do mesmo escopo: a tela não reinicia a conversa ao trocar
-    # de máquina, e a resposta sobre uma máquina "só IA local" seguiria no
-    # prompt para a nuvem na pergunta seguinte, sobre outra.
-    mesmo_escopo = (ChatMessage.machine_id == msg.machine_id) if msg.machine_id is not None \
+    # Só o histórico do mesmo escopo: senão a resposta sobre uma máquina "só IA local"
+    # seguiria no prompt para a nuvem numa pergunta seguinte sobre outra.
+    same_scope = (ChatMessage.machine_id == msg.machine_id) if msg.machine_id is not None \
         else ChatMessage.machine_id.is_(None)
     history_rows = (
         db.query(ChatMessage)
         .filter(ChatMessage.user_id == msg.user_id,
                 ChatMessage.conversation_id == msg.conversation_id, ChatMessage.id < msg.id,
-                ChatMessage.status == "done", mesmo_escopo)
+                ChatMessage.status == "done", same_scope)
         .order_by(ChatMessage.id.desc())
         .limit(HISTORY_TURNS * 2)
         .all()

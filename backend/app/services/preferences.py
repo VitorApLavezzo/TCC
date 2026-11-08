@@ -1,10 +1,5 @@
-"""
-Preferências do usuário com padrões.
-
-A coluna `users.preferences` guarda só o que a pessoa mudou. Toda leitura passa
-por `get_preferences`, que completa o resto — assim uma preferência nova não
-exige migrar os registros existentes.
-"""
+"""`users.preferences` guarda só o que a pessoa mudou; `get_preferences` completa com os
+padrões, assim uma preferência nova não exige migrar os registros existentes."""
 import copy
 from typing import Any, Dict
 

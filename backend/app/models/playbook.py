@@ -4,14 +4,8 @@ from app.database import Base
 
 
 class Playbook(Base):
-    """Regra de automação com autonomia graduada.
-
-    Até aqui toda ação dependia de alguém ver o aviso e clicar. Um playbook diz
-    "quando isto acontecer de novo, faça aquilo" — mas nasce sempre no nível
-    mais tímido: sugerir. Subir para confirmar ou para automático é decisão
-    explícita do dono, e mesmo em automático existe teto diário, modo de ensaio
-    e janela para desfazer.
-    """
+    """Regra de automação com autonomia graduada: nasce em "sugerir"; subir é decisão explícita do
+    dono, e mesmo em automático há teto diário, modo de ensaio e janela para desfazer."""
     __tablename__ = "playbooks"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -21,12 +15,10 @@ class Playbook(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     name = Column(String, nullable=False)
-    # Gatilho
     anomaly_type = Column(String, nullable=False, index=True)
     process_name = Column(String)            # opcional: só para este programa
     min_severity = Column(String, default="medium")
 
-    # Ação
     action = Column(String, nullable=False)  # kill_process | clean_temp | stop_sync_client
     params = Column(JSON)
 

@@ -50,17 +50,14 @@ app = FastAPI(
 
 
 @app.exception_handler(jobs.Busy)
-async def _fila_cheia(_request, _exc):
+async def _queue_full(_request, _exc):
     # Cota de trabalhos de IA por conta (services/jobs.py)
     return JSONResponse(status_code=429, headers={"Retry-After": "30"},
                         content={"detail": "Você já tem tarefas demais em andamento. Espere uma terminar."})
 
 
-# "*" com allow_credentials=True é inválido no padrão CORS: o navegador recusa
-# a resposta e a chamada falha em produção. Como o painel manda o token no
-# cabeçalho Authorization (e não em cookie), liberar a origem sem credenciais
-# é o que corresponde ao uso real; quem publica o sistema fecha a lista no
-# ALLOWED_ORIGINS.
+# "*" com allow_credentials=True é inválido no CORS; o painel manda o token no cabeçalho
+# Authorization (não em cookie), então "*" vai sem credenciais.
 _origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
 _wildcard = "*" in _origins
 
@@ -85,8 +82,7 @@ async def _observe_requests(request, call_next):
         status_code = response.status_code
         return response
     finally:
-        # A rota do template ("/api/machines/{machine_id}"), e não o caminho com
-        # o id: com o caminho, cada máquina viraria uma série de métrica nova.
+        # A rota do template, e não o caminho com o id: senão cada máquina viraria uma série nova.
         route = request.scope.get("route")
         path = getattr(route, "path", None) or "desconhecida"
         labels = {"route": path, "method": request.method, "status": f"{status_code // 100}xx"}
@@ -109,9 +105,7 @@ def health():
 def metrics():
     """Métricas do processo no formato do Prometheus.
 
-    Sem autenticação de propósito: não há dado de usuário aqui, só contadores
-    do próprio serviço, e é assim que um coletor consegue raspar a rota. Quem
-    publica na internet fecha /metrics no Nginx.
+    Sem autenticação de propósito: só contadores do serviço; quem publica na internet fecha no Nginx.
     """
     from app.core import observability
     return observability.render()

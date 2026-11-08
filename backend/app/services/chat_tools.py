@@ -1,15 +1,5 @@
-"""
-Ferramentas de leitura que a conversa pode chamar.
-
-Cada ferramenta é uma consulta fechada aos dados do próprio dono, com escopo
-sempre limitado às máquinas dele — a IA nunca monta SQL nem alcança dados de
-outra conta. Todas são somente leitura.
-
-E o escopo respeita a privacidade de cada máquina (`reachable`): com foco, a
-conversa alcança só a máquina em foco; sem foco, todas menos as "sem IA". Antes
-uma ferramenta chamada com `machine_id` de outra máquina escapava do foco, e
-uma máquina "só IA local" chegava à nuvem mesmo com outra selecionada.
-"""
+"""Ferramentas de leitura que a conversa pode chamar: consultas fechadas, somente leitura, sempre
+limitadas às máquinas do dono e à privacidade de cada uma (`reachable`); a IA nunca monta SQL."""
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
@@ -35,17 +25,13 @@ def reachable(db: Session, user, machine: Optional[Machine]) -> List[Machine]:
             if llm.privacy_of(m) != llm.PRIVACY_NO_AI]
 
 
-def conversation_privacy(machine: Optional[Machine], alcance: List[Machine]) -> str:
-    """A privacidade mais restrita entre o que a conversa alcança.
-
-    Com foco é a da máquina (inclusive "sem IA", que não chama ninguém). Sem
-    foco, basta uma máquina "só IA local" ao alcance para a conversa inteira
-    ficar no modelo local.
-    """
+def conversation_privacy(machine: Optional[Machine], in_reach: List[Machine]) -> str:
+    """A privacidade mais restrita entre o que a conversa alcança: sem foco, basta uma máquina
+    "só IA local" ao alcance para a conversa inteira ficar no modelo local."""
     from app.services import llm
     if machine is not None:
         return llm.privacy_of(machine)
-    if any(llm.privacy_of(m) == llm.PRIVACY_LOCAL_ONLY for m in alcance):
+    if any(llm.privacy_of(m) == llm.PRIVACY_LOCAL_ONLY for m in in_reach):
         return llm.PRIVACY_LOCAL_ONLY
     return llm.PRIVACY_ANY
 
@@ -70,15 +56,15 @@ def _parse_dt(value: Optional[str], offset: int, default) -> datetime:
 
 def _resolve_machine(db: Session, user, machine: Optional[Machine], args: Dict) -> Optional[Machine]:
     """A máquina pedida, se estiver ao alcance desta conversa."""
-    alcance = reachable(db, user, machine)
+    in_reach = reachable(db, user, machine)
     mid = args.get("machine_id")
     if mid is None:
-        return machine if machine in alcance else None
+        return machine if machine in in_reach else None
     try:
         mid = int(mid)
     except (TypeError, ValueError):
         return None
-    return next((m for m in alcance if m.id == mid), None)
+    return next((m for m in in_reach if m.id == mid), None)
 
 
 def t_list_machines(db: Session, user, machine, args) -> Any:

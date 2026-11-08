@@ -1,8 +1,6 @@
 """Nomes em português e classificações compartilhadas dos tipos de aviso.
 
-Os nomes são os mesmos de `frontend/src/types/index.ts` — um teste do
-frontend compara os dois. Escritos como frase ("Disco quase cheio"), para
-quem não é da área: é o título da notificação, do e-mail e da linha do tempo.
+Os nomes são os mesmos de `frontend/src/types/index.ts` — um teste do frontend compara os dois.
 """
 
 ANOMALY_TYPE_LABELS = {
@@ -70,22 +68,16 @@ SECURITY_TYPES = {
     "outbreak_suspected",
 }
 
-# Avisos cuja evidência não depende de histórico: uma isca de ransomware
-# tocada é uma isca tocada também no primeiro minuto de vida da máquina.
-# Estes atravessam o período de aprendizado e notificam normalmente.
+# Avisos cuja evidência não depende de histórico: atravessam o período de
+# aprendizado e notificam normalmente.
 LEARNING_EXEMPT = {
     "ransomware_canary", "process_masquerading", "suspicious_command",
     "suspicious_parent", "suspicious_process",
-    # Desgaste de peça e regressão depois de uma atualização saem do
-    # inventário e da comparação antes/depois, não da faixa aprendida.
     "hardware_failure_risk", "change_regression",
 }
 
-# Onde o cartão "e se eu fechar?" faz sentido. Ele fala de memória e
-# processador liberados, então só cabe onde o problema É memória ou
-# processador. Num aviso de rede ou de disco a conta está certa e a
-# recomendação é irrelevante; num aviso de segurança é pior que irrelevante,
-# porque enquadra uma ameaça como incômodo de desempenho.
+# Onde o cartão "e se eu fechar?" faz sentido: só onde o problema é memória ou
+# processador. Num aviso de segurança enquadraria uma ameaça como incômodo.
 COUNTERFACTUAL_TYPES = {
     "high_cpu", "background_load", "high_memory", "resource_exhaustion", "memory_leak",
     "cpu_loop", "resource_abuse", "thermal_throttling",

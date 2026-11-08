@@ -4,12 +4,8 @@ from app.database import Base
 
 
 class DetectionRule(Base):
-    """Regra criada quando a pessoa diz "isso é normal para mim".
-
-    Um aviso marcado assim não some só daquela vez: vira regra da máquina.
-    Com programa, vale só para ele; com faixa de horário, só naquele período
-    (o backup das 3h continua sendo estranho às 15h).
-    """
+    """Regra criada quando a pessoa diz "isso é normal para mim". Com programa, vale só para ele;
+    com faixa de horário, só naquele período."""
     __tablename__ = "detection_rules"
 
     id = Column(Integer, primary_key=True, index=True)

@@ -31,9 +31,8 @@ class ExplanationOut(BaseModel):
 
     @model_validator(mode="after")
     def _strip_citation_markers(self):
-        """As explicações são gravadas com [[chave]] de propósito (conferência de
-        números); nunca deve chegar assim ao frontend. Ponto único para tudo que
-        sai por AnomalyOut/ExplanationOut."""
+        """As explicações são gravadas com [[chave]] (conferência de números); ponto único que as
+        remove antes de chegar ao frontend."""
         self.summary = strip_citations(self.summary)
         self.detailed_explanation = strip_citations(self.detailed_explanation)
         self.severity_justification = strip_citations(self.severity_justification)
@@ -55,9 +54,7 @@ class AnomalyOut(BaseModel):
     severity: str
     anomaly_score: Optional[float]
     confidence: Optional[float] = None
-    # Quem decide o que é "fraco" é o servidor, e manda a resposta pronta: a
-    # tela repetir o corte por conta própria faria a etiqueta mentir assim que
-    # a constante fosse ajustada.
+    # Quem decide o que é "fraco" é o servidor, para a tela não repetir o corte com outra constante.
     weak_signal: bool = False
     # A pessoa estava usando o computador e o programa pesado era o da tela
     user_driven: Optional[bool] = False
@@ -86,7 +83,7 @@ class AnomalyOut(BaseModel):
         from_attributes = True
 
     @model_validator(mode="after")
-    def _marca_sinal_fraco(self):
+    def _mark_weak_signal(self):
         from app.services.anomaly_service import WEAK_CONFIDENCE
         self.weak_signal = self.confidence is not None and self.confidence < WEAK_CONFIDENCE
         return self

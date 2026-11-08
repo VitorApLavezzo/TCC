@@ -4,9 +4,8 @@ from app.database import Base
 
 
 class BenchmarkRun(Base):
-    """Uma execução do benchmark de detecção, guardada para o painel e para a
-    monografia. O Markdown fica gravado junto: o relatório de um resultado
-    citado no texto não pode mudar de forma quando o código muda."""
+    """Uma execução do benchmark de detecção. O Markdown fica gravado junto para que o relatório
+    citado na monografia não mude quando o código muda."""
     __tablename__ = "benchmark_runs"
 
     id = Column(Integer, primary_key=True, index=True)

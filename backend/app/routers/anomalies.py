@@ -213,25 +213,18 @@ class BulkResolve(BaseModel):
 @router.post("/resolve-bulk")
 def resolve_bulk(body: BulkResolve, db: Session = Depends(get_db),
                  user: User = Depends(get_current_user)):
-    """Resolve (ou reabre) vários avisos de uma vez.
-
-    Um por um é aceitável com três avisos e inviável com cinquenta — e é com
-    cinquenta que a pessoa desiste de manter a lista limpa. Só mexe no que é
-    dela: os ids de outra conta são ignorados em silêncio, e a resposta diz
-    quantos mudaram de fato.
-    """
+    """Resolve (ou reabre) vários avisos de uma vez; ids de outra conta são ignorados em silêncio."""
     ids = [m.id for m in db.query(Machine.id).filter(Machine.owner_id == user.id).all()]
-    alvos = (
+    targets = (
         db.query(Anomaly)
         .filter(Anomaly.id.in_(body.ids), Anomaly.machine_id.in_(ids))
         .all()
     )
-    agora = utcnow()
-    for anomaly in alvos:
+    now = utcnow()
+    for anomaly in targets:
         anomaly.is_resolved = body.is_resolved
-        anomaly.resolved_at = agora if body.is_resolved else None
-        # Verificação automática não faz sentido em lote: ninguém declarou a
-        # causa de cinquenta avisos, e reabrir tudo sozinho seria pior.
+        anomaly.resolved_at = now if body.is_resolved else None
+        # Verificação automática não faz sentido em lote: ninguém declarou a causa de cada aviso.
         anomaly.verification_status = None
     db.commit()
-    return {"changed": len(alvos)}
+    return {"changed": len(targets)}

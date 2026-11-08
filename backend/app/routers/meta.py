@@ -1,24 +1,7 @@
-"""
-Política do produto, numa fonte só.
+"""Política do produto numa fonte só: o servidor diz os números e a tela escreve a frase ao redor.
 
-Os números que descrevem como o sistema trabalha — quanto dura o aprendizado,
-de quanto em quanto tempo a máquina manda leitura, por quanto tempo vale um
-código de pareamento — apareciam na tela escritos à mão no frontend. Divergiam:
-quatro telas afirmavam "a cada 30 segundos" quando a coleta é adaptativa e vai
-de 10 a 60 conforme o que está acontecendo, e o texto do aprendizado precisava
-ser editado em dois lugares toda vez que a régua mudava.
-
-Aqui o servidor diz os números, e a tela escreve a frase ao redor deles.
-
-Os rótulos vêm prontos porque plural é formatação, e este projeto já decidiu
-que formatação de tempo mora num lugar só (vide `remaining_hours_label` em
-`learning.py`): "1 hora" e "2 horas" não podem depender de quem está montando
-a frase.
-
-Exposição deliberadamente mínima: só o que de fato aparece na tela. Num sistema
-de detecção, cada limiar publicado é informação para quem quiser se esconder
-dele — o intervalo entre avisos repetidos, por exemplo, não está aqui porque
-nenhuma tela precisa dele.
+Os rótulos vêm prontos porque plural é formatação, que mora num lugar só. Exposição mínima de
+propósito: cada limiar publicado ajuda quem quer se esconder da detecção.
 """
 from fastapi import APIRouter, Depends
 
@@ -30,19 +13,19 @@ from app.services import adaptive, learning
 router = APIRouter(prefix="/api/meta", tags=["meta"])
 
 
-def _plural(quantidade: int, singular: str, plural: str) -> str:
-    return f"{quantidade} {singular if quantidade == 1 else plural}"
+def _plural(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
 
 
 @router.get("/policy")
 def policy(_: User = Depends(get_current_user)):
-    horas = learning.NEEDED_HOURS
-    leituras = learning.NEEDED_SAMPLES
+    hours = learning.NEEDED_HOURS
+    samples = learning.NEEDED_SAMPLES
     return {
         "aprendizado": {
-            "leituras": leituras,
-            "horas": horas,
-            "rotulo": f"{_plural(leituras, 'leitura', 'leituras')} e {_plural(horas, 'hora', 'horas')}",
+            "leituras": samples,
+            "horas": hours,
+            "rotulo": f"{_plural(samples, 'leitura', 'leituras')} e {_plural(hours, 'hora', 'horas')}",
         },
         "coleta": {
             "rapido_segundos": adaptive.FAST,

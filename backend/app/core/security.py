@@ -18,9 +18,7 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    # utcnow() daqui, e não datetime.utcnow(): todo o resto do sistema usa o
-    # horário com fuso de timeutil, e misturar os dois já quebrou comparação
-    # de data antes (o "exp" do JWT é numérico, mas a regra vale para todos).
+    # utcnow() de timeutil, e não datetime.utcnow(): misturar datas com e sem fuso quebra comparações.
     expire = utcnow() + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)

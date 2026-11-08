@@ -1,19 +1,8 @@
-"""
-Explicações de avisos em linguagem natural.
+"""Explicações de avisos em linguagem natural.
 
-O que mudou em relação à primeira versão:
-
-- Fatos citáveis: o prompt entrega à IA uma lista de fatos medidos com chave
-  (`[[ram_agora]]`), e ela deve citar a chave ao lado de cada número. Cada
-  número do texto é conferido contra os dados; se a IA inventou valores, a
-  resposta é rejeitada e o próximo provedor é tentado.
-- Nível de linguagem (leigo, intermediário, técnico), escolhido por pessoa, e
-  versões extras sob demanda sem perder a original.
-- Passos para a versão do sistema (Windows 10 e 11 têm menus diferentes).
-- Contrafactual: "se você fechar X, a memória cai para cerca de Y%",
-  calculado a partir dos processos da leitura, não imaginado pela IA.
-- Memória: avisos parecidos anteriores e a causa que a pessoa registrou.
-- Auditoria: texto enviado, resposta crua, tentativas e destino dos dados.
+O prompt entrega fatos medidos com chave (`[[ram_agora]]`) e cada número do
+texto é conferido contra eles: resposta com valores inventados é rejeitada e o
+próximo provedor é tentado.
 """
 import json
 import re
@@ -62,10 +51,6 @@ LEVEL_RULES = {
 - recommendations: 3 a 5 passos com comandos exatos para este sistema (PowerShell no Windows; bash no Linux), começando por como coletar evidências antes de agir""",
 }
 
-
-# ---------------------------------------------------------------------------
-# Contexto
-# ---------------------------------------------------------------------------
 
 def os_guidance(machine: Machine) -> str:
     os_type = (machine.os_type or "").lower()
@@ -149,11 +134,8 @@ def _grouped_processes(db: Session, metric: Optional[Metric]) -> List[Dict[str, 
 def counterfactual(anomaly: Anomaly, metric: Optional[Metric], groups: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Quanto a máquina aliviaria se o programa responsável fosse fechado.
 
-    Só aparece quando o aviso é sobre memória ou processador e quando existe
-    um programa responsável de verdade. Antes, qualquer aviso sem responsável
-    caía no maior consumidor de memória da máquina: um aviso de possível
-    ataque pela rede sugeria fechar o navegador para liberar 2 GB, o que não
-    tem relação nenhuma com tráfego e ensina a pessoa a ignorar o cartão.
+    Só para avisos de memória ou processador com responsável real: sugerir fechar
+    o navegador num aviso de rede ensina a pessoa a ignorar o cartão.
     """
     if metric is None or not groups:
         return None
@@ -220,25 +202,25 @@ def usage_context(metric: Optional[Metric]) -> Optional[str]:
     """
     if metric is None:
         return None
-    partes = []
+    parts = []
     idle = metric.user_idle_seconds
     if idle is not None:
-        partes.append("alguém estava usando o computador naquele momento" if idle < 120
-                      else "ninguém mexia no teclado nem no mouse havia alguns minutos")
+        parts.append("alguém estava usando o computador naquele momento" if idle < 120
+                     else "ninguém mexia no teclado nem no mouse havia alguns minutos")
     if metric.top_proc_user_driven == 1:
-        partes.append("o programa mais pesado era o que estava na tela (ou foi aberto por ele)")
+        parts.append("o programa mais pesado era o que estava na tela (ou foi aberto por ele)")
     elif metric.top_proc_user_driven == 0:
-        partes.append("o programa mais pesado não era o que estava na tela: rodava em segundo plano")
-    sobre = []
+        parts.append("o programa mais pesado não era o que estava na tela: rodava em segundo plano")
+    traits = []
     if metric.top_proc_trust in _TRUST_PHRASES:
-        sobre.append(_TRUST_PHRASES[metric.top_proc_trust])
+        traits.append(_TRUST_PHRASES[metric.top_proc_trust])
     if metric.top_proc_known == 1:
-        sobre.append("já conhecido neste computador")
+        traits.append("já conhecido neste computador")
     elif metric.top_proc_known == 0:
-        sobre.append("nunca visto antes neste computador")
-    if sobre:
-        partes.append("esse programa é " + ", ".join(sobre))
-    return "; ".join(partes) + "." if partes else None
+        traits.append("nunca visto antes neste computador")
+    if traits:
+        parts.append("esse programa é " + ", ".join(traits))
+    return "; ".join(parts) + "." if parts else None
 
 
 def build_context(db: Session, anomaly: Anomaly, metric: Optional[Metric], machine: Machine) -> Dict[str, Any]:
@@ -318,10 +300,6 @@ def build_context(db: Session, anomaly: Anomaly, metric: Optional[Metric], machi
     }
 
 
-# ---------------------------------------------------------------------------
-# Verificação dos números
-# ---------------------------------------------------------------------------
-
 CITATION_RE = re.compile(r"\[\[([a-z0-9_]+)\]\]")
 CLAIM_RE = re.compile(
     r"(?<![\w.,])(\d{1,4}(?:[.,]\d+)?)\s*(%|°\s?c\b|graus|min(?:utos)?\b|conex(?:ões|oes|ão|ao)\b|vezes\b|gb\b|mb\b)",
@@ -336,11 +314,8 @@ def strip_citations(text):
 
 
 def sanitize_explanation(data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Tira os marcadores [[chave]] de citação de tudo que vai para o frontend
-    (summary, detailed_explanation, causas, recomendações, justificativa de
-    severidade — inclusive dentro de `variants`), sem tocar o que fica gravado
-    no banco. Ponto único: todo lugar que devolve uma explicação passa por
-    aqui antes de responder."""
+    """Tira os marcadores [[chave]] de tudo que vai ao frontend (inclusive `variants`),
+    sem tocar o que fica gravado; todo lugar que devolve uma explicação passa por aqui."""
     if not data:
         return data
     out = dict(data)
@@ -441,10 +416,6 @@ def _normalize(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Prompt
-# ---------------------------------------------------------------------------
-
 def build_prompt(anomaly: Anomaly, machine: Machine, ctx: Dict[str, Any], level: str) -> str:
     type_label = ANOMALY_TYPE_LABELS.get(anomaly.anomaly_type, anomaly.anomaly_type)
     severity = SEVERITY_LABELS.get(anomaly.severity, anomaly.severity)
@@ -460,8 +431,8 @@ def build_prompt(anomaly: Anomaly, machine: Machine, ctx: Dict[str, Any], level:
     if ctx["similar"]["sentence"]:
         extra.append(f"HISTÓRICO: {ctx['similar']['sentence']}")
     for c in ctx["past_causes"]:
-        vezes = "1 vez" if c["count"] == 1 else f"{c['count']} vezes"
-        extra.append(f"CAUSA REGISTRADA PELA PESSOA EM AVISOS PARECIDOS ({vezes}): \"{c['cause']}\"")
+        times = "1 vez" if c["count"] == 1 else f"{c['count']} vezes"
+        extra.append(f"CAUSA REGISTRADA PELA PESSOA EM AVISOS PARECIDOS ({times}): \"{c['cause']}\"")
     if ctx["counterfactual"]:
         extra.append(f"CÁLCULO DO SISTEMA: {ctx['counterfactual']['sentence']}")
     if ctx.get("usage"):
@@ -493,10 +464,6 @@ REGRAS DE ESCRITA (siga TODAS):
 - NUNCA invente números. Use só os FATOS MEDIDOS e escreva a chave entre colchetes duplos logo depois de cada número, ex: "a memória está em 91% [[ram_agora]]". Sem fato para algo, descreva sem número
 - severity_justification: 1 frase dizendo o nível de urgência em linguagem cotidiana. Ex: "Gravidade alta: vale resolver ainda hoje, pois o computador pode travar" """
 
-
-# ---------------------------------------------------------------------------
-# Geração
-# ---------------------------------------------------------------------------
 
 def _owner_level(db: Session, machine: Machine) -> str:
     from app.models.user import User
@@ -585,10 +552,6 @@ def generate_variant(db: Session, anomaly: Anomaly, level: str) -> Dict[str, Any
         db.commit()
     return variant
 
-
-# ---------------------------------------------------------------------------
-# Análise local (sem IA)
-# ---------------------------------------------------------------------------
 
 CAUSES_MAP = {
     "background_load": [
@@ -951,8 +914,7 @@ def _generate_fallback_explanation(anomaly: Anomaly, metric: Optional[Metric], m
         detailed += f"\n\n{history}"
 
     return {
-        # O rótulo já é uma frase ("Programa desconhecido detectado"): somar
-        # "detectado com severidade" repetia a palavra e trazia jargão.
+        # O rótulo já é uma frase ("Programa desconhecido detectado")
         "summary": f"{type_label}, com gravidade {sev_label.lower()}.{process_text}",
         "detailed_explanation": detailed,
         "possible_causes": causes[:5],

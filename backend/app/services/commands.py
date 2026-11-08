@@ -1,10 +1,5 @@
-"""
-Canal de comandos do painel para o agente.
-
-O agente busca comandos pendentes a cada poucos segundos (e também recebe os
-pendentes na resposta de cada coleta). Cada comando tem prazo: um "encerrar
-programa" pedido ontem não deve ser executado hoje quando o computador ligar.
-"""
+"""Canal de comandos do painel para o agente. Cada comando tem prazo: um "encerrar
+programa" pedido ontem não deve ser executado hoje quando o computador ligar."""
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
@@ -106,8 +101,7 @@ def complete(db: Session, machine: Machine, command_id: int, ok: bool, result: O
             anomaly.is_resolved = True
             anomaly.resolved_at = now
             resolution.start(db, anomaly, f"Ação '{COMMANDS[cmd.command][0]}' executada. Conferindo se resolveu.")
-            # A explicação previu aonde a máquina chegaria depois desta ação.
-            # Aqui a promessa fica registrada para ser conferida daqui a pouco.
+            # Registra a previsão da explicação para conferir daqui a pouco
             try:
                 fidelity.register_from_action(db, anomaly.id, machine.id, cmd.command, cmd.id)
             except Exception as e:

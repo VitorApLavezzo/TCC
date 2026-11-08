@@ -1,11 +1,5 @@
-"""
-Pacote para o técnico.
-
-Um link temporário, somente leitura, com tudo de um incidente — sem exigir
-que quem vai ajudar tenha conta. Pensado para o leigo mandar a um filho ou a
-uma assistência: números do aviso, explicação técnica, caixa-preta, o que já
-foi tentado. Segredos já saíram no momento da coleta; o pacote não reexpõe nada.
-"""
+"""Pacote para o técnico: link temporário, somente leitura, com tudo de um aviso, sem exigir
+conta. Segredos já saíram na coleta; o pacote não reexpõe nada."""
 import secrets
 from datetime import timedelta
 from typing import Any, Dict, Optional
@@ -24,11 +18,11 @@ from app.services import ai_service
 
 
 def create(db: Session, anomaly: Anomaly, user_id: int, hours: int = 72) -> Any:
-    link = ShareLinkFactory(db, anomaly, user_id, hours)
+    link = new_share_link(db, anomaly, user_id, hours)
     return link
 
 
-def ShareLinkFactory(db: Session, anomaly: Anomaly, user_id: int, hours: int):
+def new_share_link(db: Session, anomaly: Anomaly, user_id: int, hours: int):
     from app.models.notification import ShareLink
     token = secrets.token_urlsafe(24)
     row = ShareLink(token=token, anomaly_id=anomaly.id, created_by=user_id,
@@ -99,7 +93,6 @@ def build_package(db: Session, anomaly_id: int) -> Optional[Dict[str, Any]]:
         "incident": {"title": incident.title, "narrative": incident.narrative, "chain": incident.chain}
         if incident else None,
         "blackbox": {"samples": blackbox.samples, "forensic": blackbox.forensic} if blackbox else None,
-        # Sem histórico de outros avisos: o link dá leitura de UM aviso. O
-        # histórico era recalculado a cada visita e entregava a quem tinha o
-        # link os avisos seguintes da máquina e as notas privadas do dono.
+        # Sem histórico de outros avisos: o link dá leitura de UM aviso, nunca dos
+        # avisos seguintes da máquina nem das notas privadas do dono.
     }

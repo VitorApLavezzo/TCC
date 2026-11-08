@@ -1,11 +1,5 @@
-"""
-"Está lento agora, por quê?"
-
-O botão pede ao agente vinte segundos de medidas em alta resolução (uma por
-segundo, com consumo por programa). O servidor aponta o gargalo com regras
-simples e mensuráveis, e a IA transforma isso numa resposta curta. Sem IA, a
-resposta sai do próprio resumo.
-"""
+"""Está lento agora, por quê? O agente mede 20 s em alta resolução, regras simples apontam o
+gargalo e a IA redige a resposta; sem IA, ela sai do próprio resumo."""
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -123,8 +117,8 @@ def receive_samples(db: Session, diagnostic: Diagnostic, samples: List[Dict], pr
     diagnostic.samples = {"samples": samples[:120], "processes": processes[:40]}
     diagnostic.status = "analyzing"
     db.commit()
-    dono = db.query(Machine.owner_id).filter(Machine.id == diagnostic.machine_id).scalar()
-    jobs.submit(analyze, diagnostic.id, owner_id=dono)
+    owner_id = db.query(Machine.owner_id).filter(Machine.id == diagnostic.machine_id).scalar()
+    jobs.submit(analyze, diagnostic.id, owner_id=owner_id)
 
 
 def analyze(db: Session, diagnostic_id: int):

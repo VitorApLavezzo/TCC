@@ -1,15 +1,5 @@
-"""
-"O problema ainda está acontecendo?"
-
-Uma pergunta, dois usos:
-- resolução verificada: depois de "marcar como resolvido" ou de uma ação, o
-  sistema confere as leituras seguintes;
-- notificação que só sai se o problema persistir por N minutos.
-
-Cada tipo de aviso tem uma condição concreta e uma frase com os números que
-a sustentam. Tipos sem condição mensurável devolvem None — e o sistema diz
-que não tem como conferir, em vez de fingir que conferiu.
-"""
+"""O problema ainda está acontecendo? Usado pela resolução verificada e pela notificação adiada.
+Tipos sem condição mensurável devolvem None: o sistema diz que não tem como conferir."""
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session

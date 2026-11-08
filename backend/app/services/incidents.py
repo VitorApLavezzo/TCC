@@ -1,15 +1,5 @@
-"""
-Incidentes com cadeia de causa e efeito.
-
-Um computador sem espaço em disco começa a usar mal a memória virtual, fica
-lento, e o processador vai para a fila. Eram três avisos soltos; agora os
-sintomas presentes são ligados por um grafo de causalidade conhecido, e o
-incidente conta a história: "disco quase cheio → disco sendo usado como
-memória → processador no limite".
-
-As arestas são conhecimento de domínio escrito à mão, não inferência
-estatística: a cadeia só liga sinais que foram de fato observados juntos.
-"""
+"""Incidentes com cadeia de causa e efeito. As arestas são conhecimento de domínio escrito à
+mão, não inferência estatística: a cadeia só liga sinais observados juntos."""
 from datetime import timedelta
 from typing import Dict, Iterable, List, Set
 

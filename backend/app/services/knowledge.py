@@ -1,12 +1,5 @@
-"""
-Memória de incidentes da máquina.
-
-Duas perguntas que a IA não tem como responder sozinha:
-- "Isso já aconteceu antes?" — avisos parecidos nesta máquina e, se houver,
-  um padrão de horário ("quase sempre às segundas de manhã").
-- "O que era da última vez?" — a causa que a própria pessoa registrou ao
-  resolver. Na próxima vez, a explicação começa por ela.
-"""
+"""Memória de incidentes da máquina: avisos parecidos, padrão de horário e as causas que a
+própria pessoa registrou ao resolver."""
 from collections import Counter
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
@@ -84,8 +77,8 @@ def similar_anomalies(db: Session, anomaly: Anomaly, limit: int = 5) -> Dict[str
     pattern = time_pattern(all_local) if count >= 2 else None
     sentence = None
     if count:
-        vezes = "1 vez" if count == 1 else f"{count} vezes"
-        sentence = f"Isso já aconteceu {vezes} neste computador nos últimos meses"
+        times = "1 vez" if count == 1 else f"{count} vezes"
+        sentence = f"Isso já aconteceu {times} neste computador nos últimos meses"
         if pattern:
             sentence += f", {pattern}"
         sentence += "."

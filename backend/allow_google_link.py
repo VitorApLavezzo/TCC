@@ -1,17 +1,15 @@
 """
 Libera o login com Google para uma conta que já existe.
 
-O login com Google passou a prender a conta à identidade Google (o "sub"),
-e não mais ao e-mail: antes, quem cadastrasse o e-mail de outra pessoa com
-uma senha sua ficava com a conta em que ela entraria pelo Google. Contas
-criadas pelo botão do Google antes disso não têm o vínculo e têm uma senha
-aleatória que ninguém sabe, então ficam de fora. Este comando marca a conta
-para que o próximo login Google com o mesmo e-mail a vincule.
+O login com Google vincula a conta à identidade Google (o "sub"), não ao e-mail.
+Contas criadas pelo botão do Google antes desse vínculo têm senha aleatória e
+ficam de fora; este comando marca a conta para que o próximo login Google com o
+mesmo e-mail a vincule.
 
 Só libere contas que você sabe serem da pessoa dona do e-mail.
 
-Execute: python liberar_google.py pessoa@exemplo.com
-No Docker: docker compose exec backend python liberar_google.py pessoa@exemplo.com
+Execute: python allow_google_link.py pessoa@exemplo.com
+No Docker: docker compose exec backend python allow_google_link.py pessoa@exemplo.com
 """
 import sys
 
@@ -21,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 
 
-def liberar(db: Session, email: str) -> bool:
+def allow_google_link(db: Session, email: str) -> bool:
     user = db.query(User).filter(func.lower(User.email) == email.strip().lower()).first()
     if not user or user.google_sub:
         return False
@@ -40,7 +38,7 @@ def main(argv) -> int:
     upgrade_schema(engine)
     db = SessionLocal()
     try:
-        if liberar(db, argv[1]):
+        if allow_google_link(db, argv[1]):
             print(f"Liberado: o próximo login com Google de {argv[1]} vincula a conta.")
             return 0
         print(f"Nada feito: não há conta com {argv[1]}, ou ela já está vinculada a uma conta Google.")

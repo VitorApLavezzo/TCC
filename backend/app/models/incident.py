@@ -4,12 +4,7 @@ from app.database import Base
 
 
 class Incident(Base):
-    """Sintomas que aconteceram juntos, contados como uma história só.
-
-    Disco cheio, memória virtual estourando e processador no limite chegavam
-    como três avisos soltos. O incidente agrupa os que caem na mesma janela de
-    tempo e guarda a cadeia de causa e efeito entre eles.
-    """
+    """Sintomas da mesma janela de tempo agrupados, com a cadeia de causa e efeito entre eles."""
     __tablename__ = "incidents"
 
     id = Column(Integer, primary_key=True, index=True)

@@ -1,19 +1,8 @@
-"""
-Isolation Forest por máquina.
+"""Isolation Forest por máquina.
 
-Três mudanças em relação à primeira versão, todas motivadas por defeitos reais:
-
-- Nota e limite: a nota agora é `decision_function` (0 é a fronteira aprendida,
-  negativo é fora do padrão) e o limite de alerta é o percentil
-  ML_ALERT_PERCENTILE do próprio histórico da máquina, gravado junto do
-  modelo. Antes o limite fixo -0.15 era comparado com `score_samples`, que
-  vale cerca de -0.45 em leituras normais: toda leitura era "anômala".
-- Hora e dia da semana entram como atributos cíclicos (seno/cosseno): o
-  backup das 3h de toda madrugada deixa de ser estranho, e o mesmo pico às 15h
-  de um domingo passa a ser.
-- Explicação: `explain_contributions` mede quanto cada grupo de medidas pesou
-  na nota, trocando o grupo pelo valor típico e vendo quanto a leitura volta
-  ao normal.
+A nota é `decision_function` (0 é a fronteira aprendida, negativo é fora do
+padrão) e o limite de alerta é o percentil ML_ALERT_PERCENTILE do histórico da
+máquina, gravado junto do modelo. Hora e dia da semana entram como atributos cíclicos.
 """
 import math
 import os
@@ -190,11 +179,9 @@ def _metric_to_vector(metric, offset_minutes: Optional[int] = None, keys: Option
 def available_features(metrics) -> List[str]:
     """Os atributos que o histórico desta máquina sustenta.
 
-    Os 17 originais sempre; cada opcional só com pelo menos
-    MIN_TRAINING_SAMPLES leituras preenchidas. Logo depois da atualização do
-    agente, toda leitura nova traria um valor que o modelo nunca viu — e a
-    máquina encheria de alarme por dias. No Linux, presença e janela ativa
-    nunca chegam, então nunca entram.
+    Os 17 originais sempre; cada opcional só com MIN_TRAINING_SAMPLES leituras
+    preenchidas — senão, logo depois da atualização do agente, toda leitura nova
+    traria um valor que o modelo nunca viu.
     """
     from app.services import context
     keys = list(BASE_FEATURE_KEYS)
@@ -355,12 +342,7 @@ def predict_anomaly(
 
 
 def alert_threshold(machine_id: int, sensitivity: float = 1.0) -> Optional[float]:
-    """Limite de alerta desta máquina, com a sensibilidade já aplicada.
-
-    O mesmo cálculo que `predict_anomaly` faz por dentro, exposto para quem
-    precisa da régua: a confirmação de duas leituras e a confiança pela margem.
-    `_load_bundle` tem cache em memória, então não custa uma leitura de disco.
-    """
+    """Limite de alerta desta máquina com a sensibilidade aplicada (o mesmo de `predict_anomaly`)."""
     bundle = _load_bundle(machine_id)
     if bundle is None:
         return None
@@ -370,11 +352,7 @@ def alert_threshold(machine_id: int, sensitivity: float = 1.0) -> Optional[float
 def confidence_from_score(score: Optional[float], threshold: Optional[float]) -> Optional[float]:
     """Quanto a nota passou do limite: 0 encostou, 1 estourou.
 
-    É isto que faz a gravidade do modelo responder ao tamanho do desvio. Antes
-    a severidade saía de limiar fixo (CPU > 90 -> alta) e uma leitura que
-    encostou no limite valia o mesmo que uma que o estourou.
-
-    Sem limite útil não há régua — devolve None, e quem recebe não rebaixa.
+    Sem limite útil devolve None, e quem recebe não rebaixa.
     """
     if score is None or threshold is None or threshold == 0:
         return None
@@ -449,11 +427,7 @@ def explain_contributions(machine_id: int, metric, offset_minutes: Optional[int]
 
 
 def _in_background(metric) -> bool:
-    """O programa dominante roda sem a pessoa: não é a janela ativa nem descende dela.
-
-    Sem janela ativa (nulo) não dá para saber, e o aviso fica com o nome de
-    sempre.
-    """
+    """O programa dominante roda sem a pessoa: não é a janela ativa nem descende dela."""
     from app.services import context
     return context.context_on() and getattr(metric, "top_proc_user_driven", None) == 0
 
@@ -505,8 +479,7 @@ def classify_anomaly(metric, db: Session, contributions: Optional[List[Dict[str,
 
     if len(recent_metrics) >= 10:
         mem_trend = [m.mem_percent or 0 for m in reversed(recent_metrics[:10])]
-        # Sem crescimento real, "nunca caiu" também valia para memória parada
-        # em 40% — e uma leitura isolada alta virava "vazamento".
+        # Exige crescimento real: "nunca caiu" também vale para memória parada
         rising = all(mem_trend[i] <= mem_trend[i + 1] for i in range(len(mem_trend) - 1))
         if rising and mem_trend[-1] - mem_trend[0] >= 5 and current_mem > 70:
             anomaly_type = "memory_leak"

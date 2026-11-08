@@ -1,19 +1,5 @@
-"""
-O sistema aprendendo com a pessoa.
-
-Antes o único retorno possível num aviso era "resolver", que só tirava o
-aviso da lista. Agora:
-
-- "Isso é normal para mim" vira regra da máquina (tipo inteiro, só aquele
-  programa, ou só naquela faixa de horário), marca o programa como conhecido e
-  deixa o detector de desempenho responsável um pouco menos sensível.
-- "Era um problema de verdade" confirma o detector (sensibilidade volta devagar
-  ao padrão) e tira aquela leitura do treino do modelo.
-
-Detectores de segurança nunca ficam menos sensíveis por feedback: a exceção
-vale só para o programa marcado. Um "é normal" apressado não pode cegar o
-sistema para o próximo vírus.
-"""
+"""Marcar "é normal" vira regra da máquina e afrouxa o detector; "era problema" o aperta.
+Detectores de segurança nunca afrouxam: um "é normal" apressado não pode cegar o sistema."""
 from datetime import timedelta
 from typing import Dict, Optional
 

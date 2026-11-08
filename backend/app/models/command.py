@@ -4,12 +4,7 @@ from app.database import Base
 
 
 class AgentCommand(Base):
-    """Ordem do painel para o agente executar no computador monitorado.
-
-    Encerrar um programa, limpar temporários, isolar da rede, coletar um
-    diagnóstico rápido. O agente busca as pendentes a cada poucos segundos e
-    devolve o resultado; tudo fica registrado para auditoria.
-    """
+    """Ordem do painel para o agente executar no computador monitorado; fica registrada para auditoria."""
     __tablename__ = "agent_commands"
 
     id = Column(Integer, primary_key=True, index=True)

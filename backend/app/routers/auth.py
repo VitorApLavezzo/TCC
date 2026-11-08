@@ -64,18 +64,16 @@ def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
 
     user = db.query(User).filter(User.google_sub == sub).first()
     if not user:
-        existente = db.query(User).filter(func.lower(User.email) == email.lower()).first()
-        if existente and existente.google_link_allowed and not existente.google_sub:
+        existing = db.query(User).filter(func.lower(User.email) == email.lower()).first()
+        if existing and existing.google_link_allowed and not existing.google_sub:
             # O administrador conferiu que a conta é desta pessoa
-            existente.google_sub = sub
-            existente.google_link_allowed = False
+            existing.google_sub = sub
+            existing.google_link_allowed = False
             db.commit()
-            user = existente
-        elif existente:
-            # Conta de senha com este e-mail: quem a criou não provou que o
-            # e-mail é seu. Vincular aqui daria a esta pessoa uma conta cuja
-            # senha outro escolheu. O vínculo é feito de dentro da conta, ou
-            # pelo administrador quando a conta foi criada pelo Google.
+            user = existing
+        elif existing:
+            # Conta de senha com este e-mail: quem a criou não provou posse do e-mail, então o
+            # vínculo é feito de dentro da conta ou pelo administrador.
             raise HTTPException(
                 status_code=409,
                 detail="Já existe uma conta com este e-mail. Se ela foi criada pelo botão do Google, "
@@ -111,8 +109,8 @@ def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
 def google_link(body: GoogleLogin, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Vincula a conta Google à conta em que a pessoa já entrou com senha."""
     claims = _claims_google(body.credential)
-    outra = db.query(User).filter(User.google_sub == claims["sub"], User.id != current_user.id).first()
-    if outra:
+    other = db.query(User).filter(User.google_sub == claims["sub"], User.id != current_user.id).first()
+    if other:
         raise HTTPException(status_code=409, detail="Esta conta Google já está vinculada a outra conta.")
     current_user.google_sub = claims["sub"]
     db.commit()

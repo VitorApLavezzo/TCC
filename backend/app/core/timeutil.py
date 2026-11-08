@@ -1,10 +1,7 @@
-"""
-Datas em UTC com fuso explícito.
+"""Datas em UTC com fuso explícito.
 
-As colunas são `DateTime(timezone=True)`: o PostgreSQL devolve datas com fuso,
-o SQLite dos testes devolve sem. Comparar as duas formas com `datetime.utcnow()`
-(sem fuso) gera TypeError — foi o defeito do pareamento corrigido antes. Todo
-código novo passa por `utcnow()` e `aware()` e não depende do banco.
+O PostgreSQL devolve datas com fuso e o SQLite dos testes sem; comparar as duas gera TypeError,
+então todo código passa por `utcnow()` e `aware()`.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional

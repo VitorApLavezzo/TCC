@@ -1,8 +1,4 @@
-"""Serve os arquivos do agente para o instalador automático baixar.
-
-O instalador (.bat/.sh) gerado pelo frontend baixa agent.py, collector.py e
-requirements.txt daqui — assim o usuário leigo não precisa clonar o repositório.
-"""
+"""Serve os arquivos do agente para o instalador automático baixar."""
 import os
 import re
 import shlex
@@ -74,20 +70,20 @@ def download_agent_file(filename: str):
 # Formatos que o próprio servidor gera: código XXXX-XXXX do alfabeto de
 # pareamento (machines.py) e token secrets.token_urlsafe. Qualquer outra
 # coisa é recusada antes de virar texto de script.
-_CODIGO = re.compile(r"[A-HJKMNP-Z2-9]{4}-?[A-HJKMNP-Z2-9]{4}", re.IGNORECASE)
+_ENROLL_CODE = re.compile(r"[A-HJKMNP-Z2-9]{4}-?[A-HJKMNP-Z2-9]{4}", re.IGNORECASE)
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{16,128}")
 _HOST = re.compile(r"[A-Za-z0-9.-]+(:[0-9]{1,5})?|\[[0-9A-Fa-f:.]+\](:[0-9]{1,5})?")
 
 
-def _origem(server: str) -> str:
+def _origin(server: str) -> str:
     try:
-        partes = urlsplit(server.strip())
+        parts = urlsplit(server.strip())
     except ValueError:
-        partes = None
-    if (partes is None or partes.scheme not in ("http", "https") or not _HOST.fullmatch(partes.netloc or "")
-            or partes.path not in ("", "/") or partes.query or partes.fragment):
+        parts = None
+    if (parts is None or parts.scheme not in ("http", "https") or not _HOST.fullmatch(parts.netloc or "")
+            or parts.path not in ("", "/") or parts.query or parts.fragment):
         raise HTTPException(status_code=400, detail="Parâmetro server inválido: use só http(s)://endereço[:porta]")
-    return f"{partes.scheme}://{partes.netloc}"
+    return f"{parts.scheme}://{parts.netloc}"
 
 
 @router.get("/install.sh")
@@ -103,11 +99,11 @@ def install_script(server: str, code: str = "", token: str = ""):
         raise HTTPException(status_code=400, detail="Informe ?code= ou ?token=")
     # Rota aberta cujo resultado vai direto para `| bash`: um valor da URL
     # nunca pode virar comando no script servido pelo próprio servidor.
-    if code and not _CODIGO.fullmatch(code):
+    if code and not _ENROLL_CODE.fullmatch(code):
         raise HTTPException(status_code=400, detail="Código de pareamento inválido")
     if token and not _TOKEN.fullmatch(token):
         raise HTTPException(status_code=400, detail="Token inválido")
-    server = _origem(server)
+    server = _origin(server)
 
     auth_env = f"AGENT_ENROLL_CODE={shlex.quote(code)}" if code else f"AGENT_API_TOKEN={shlex.quote(token)}"
     script = f"""#!/usr/bin/env bash

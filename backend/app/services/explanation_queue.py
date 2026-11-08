@@ -1,11 +1,4 @@
-"""
-Fila serial para geração de explicações.
-Processa uma anomalia por vez para não sobrecarregar o modelo local.
-
-Avisos agora nascem também fora das requisições — no agendador (previsões,
-tendências, surtos) e em tarefas de segundo plano, que rodam em threads sem
-loop de eventos. `request_explanation` aceita os dois contextos.
-"""
+"""Fila serial de explicações: uma anomalia por vez para não sobrecarregar o modelo local."""
 import asyncio
 import threading
 from typing import Optional
@@ -32,10 +25,7 @@ async def enqueue_explanation(anomaly_id: int, metric_id: Optional[int], machine
 
 def request_explanation(anomaly_id: int, metric_id: Optional[int], machine_id: int) -> bool:
     """Pede a explicação de qualquer contexto (requisição, thread do agendador, job).
-
-    Sem o worker rodando (testes, script avulso) não faz nada: a explicação
-    fica "analisando" e pode ser gerada depois pelo botão do painel.
-    """
+    Sem o worker rodando (testes, script avulso) não faz nada; o botão do painel gera depois."""
     loop = _loop
     if loop is None or loop.is_closed():
         return False
@@ -79,7 +69,6 @@ async def explanation_worker():
                 if not anomaly or not machine:
                     continue
 
-                # Já tem explicação? Pula
                 existing = db.query(AIExplanation).filter(AIExplanation.anomaly_id == anomaly_id).first()
                 if existing and existing.possible_causes:
                     continue

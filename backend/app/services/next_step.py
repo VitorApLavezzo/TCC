@@ -1,11 +1,5 @@
-"""
-Passo a passo adaptativo.
-
-A pessoa marca "fiz isso, não resolveu" num passo. A IA recebe os passos
-originais, quais foram tentados sem sucesso e o estado atual da máquina, e
-gera o PRÓXIMO passo — sem repetir o que já falhou, subindo um degrau na
-dificuldade. Fica guardado em `extra_steps`.
-"""
+"""Passo a passo adaptativo: depois de "fiz isso, não resolveu", a IA gera o próximo passo
+sem repetir o que falhou; fica guardado em `extra_steps`."""
 from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session

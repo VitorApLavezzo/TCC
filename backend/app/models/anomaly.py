@@ -18,15 +18,13 @@ class Anomaly(Base):
     # Quão sustentada é a evidência, de 0 a 1. None = não aplicável: o aviso
     # não veio de detector que calcula confiança, e por isso nunca é rebaixado.
     confidence = Column(Float)
-    # Rebaixado porque a pessoa estava usando o computador e o programa pesado
-    # era o da tela (ou filho dele) — services/anomaly_service.context_severity
+    # Rebaixado porque o programa pesado era o da tela (services/anomaly_service.context_severity)
     user_driven = Column(Boolean, default=False)
     # Repetições somadas neste mesmo aviso, e quando foi a última delas.
     # `detected_at` continua marcando quando o problema começou.
     occurrences = Column(Integer, default=1, server_default="1")
-    # Qual condição este aviso descreve, quando o tipo sozinho não basta: a
-    # peça no risco de hardware, o executável no surto da frota. A
-    # reconferência agendada só casa com o aviso da mesma condição.
+    # Qual condição o aviso descreve quando o tipo não basta (a peça, o executável do surto);
+    # a reconferência agendada só casa com o aviso da mesma condição.
     condition_key = Column(String, index=True)
     last_seen_at = Column(DateTime(timezone=True))
     affected_metrics = Column(JSON)

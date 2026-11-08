@@ -12,9 +12,6 @@ class ProcessData(BaseModel):
     num_threads: int
     status: str
     username: Optional[str] = None
-    # Estes campos eram enviados pelo agente mas não estavam declarados aqui —
-    # o Pydantic descartava em silêncio, e os indicadores de malware baseados
-    # em linha de comando nunca tinham dado para avaliar.
     ppid: Optional[int] = None
     create_time: Optional[float] = None
     cmdline: Optional[str] = None
@@ -77,7 +74,6 @@ class GPUData(BaseModel):
 
 
 class MetricCreate(BaseModel):
-    # CPU
     cpu_percent: float
     cpu_per_core: Optional[List[float]] = None
     cpu_freq_current: Optional[float] = None
@@ -85,18 +81,15 @@ class MetricCreate(BaseModel):
     cpu_count_logical: Optional[int] = None
     cpu_count_physical: Optional[int] = None
 
-    # Memória
     mem_used: float
     mem_available: float
     mem_percent: float
     mem_total: float
 
-    # Swap
     swap_used: Optional[float] = None
     swap_percent: Optional[float] = None
     swap_total: Optional[float] = None
 
-    # Disco
     disk_used: float
     disk_free: float
     disk_percent: float
@@ -104,12 +97,10 @@ class MetricCreate(BaseModel):
     disk_write_bytes: float
     disk_partitions: Optional[List[Any]] = None
 
-    # Rede
     net_bytes_sent: float
     net_bytes_recv: float
     net_connections: int
 
-    # Sistema
     uptime_seconds: float
     load_avg_1: Optional[float] = None
     load_avg_5: Optional[float] = None
@@ -120,20 +111,16 @@ class MetricCreate(BaseModel):
     foreground_pid: Optional[int] = None
     foreground_name: Optional[str] = None
 
-    # GPU
     gpu_metrics: Optional[List[GPUData]] = None
 
-    # Temperatura
     temperatures: Optional[Any] = None
 
-    # Bateria
     battery_percent: Optional[float] = None
     battery_plugged: Optional[bool] = None
     battery_secs_left: Optional[float] = None
     battery_health_percent: Optional[float] = None
     battery_cycle_count: Optional[int] = None
 
-    # Energia
     power_watts: Optional[float] = None
     power_source: Optional[str] = None
 
@@ -150,10 +137,8 @@ class MetricCreate(BaseModel):
     beacons: Optional[List[BeaconCandidate]] = None
     process_starts: Optional[List[ProcessStart]] = None
 
-    # Quando a leitura foi feita no computador (epoch). Só vem preenchido nas
-    # leituras que ficaram guardadas no agente enquanto o servidor estava
-    # inacessível: sem isso, uma hora de fila voltaria toda com o horário da
-    # reconexão e inventaria um pico que nunca existiu.
+    # Quando a leitura foi feita (epoch). Só nas leituras guardadas no agente com o servidor
+    # inacessível: sem isso a fila voltaria com o horário da reconexão e inventaria um pico.
     collected_at: Optional[float] = None
 
 

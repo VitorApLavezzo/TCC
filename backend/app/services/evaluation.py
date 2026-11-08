@@ -1,15 +1,5 @@
-"""
-Avaliação das explicações (para os resultados do TCC).
-
-Uma IA-juíza pontua uma explicação já gerada em quatro eixos, de 1 a 5:
-clareza para leigos, precisão factual (com base na checagem de números),
-acionabilidade dos passos e ausência de alarmismo. É deliberadamente um
-provedor diferente do que escreveu, quando há mais de um configurado — um
-modelo julgando o próprio texto puxa a nota para cima.
-
-`compare_providers` gera a mesma explicação com cada provedor e junta as
-notas: é a tabela comparativa Claude × Ollama × Groq da monografia.
-"""
+"""IA-juíza que pontua explicações em quatro eixos (1 a 5). Sempre que possível é outro
+provedor: um modelo julgando o próprio texto puxa a nota para cima."""
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session

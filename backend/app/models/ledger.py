@@ -4,13 +4,8 @@ from app.database import Base
 
 
 class LedgerEntry(Base):
-    """Registro encadeado por hash dos fatos que importam para auditoria.
-
-    Um relatório de incidente só vale como prova se for possível mostrar que
-    ninguém mexeu nele depois. Cada entrada guarda o hash da anterior: alterar
-    ou apagar um registro antigo quebra a cadeia de todos os seguintes, e a
-    verificação aponta exatamente onde.
-    """
+    """Registro encadeado por hash dos fatos de auditoria: alterar ou apagar uma entrada quebra a
+    cadeia de todas as seguintes."""
     __tablename__ = "ledger_entries"
 
     id = Column(Integer, primary_key=True, index=True)

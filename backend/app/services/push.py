@@ -1,17 +1,5 @@
-"""
-Notificação no celular, com o painel fechado (Web Push).
-
-Telegram e e-mail já existiam, mas os dois dependem de a pessoa ter e usar
-outro aplicativo. Com o painel instalado pela tela inicial do celular (é um
-PWA), o aviso chega como notificação do próprio sistema — sem loja de
-aplicativos e sem aplicativo nativo para manter.
-
-O envio usa VAPID: o servidor assina a mensagem com um par de chaves gerado
-uma vez, e o navegador entrega ao aparelho. Sem chaves configuradas, ou sem a
-biblioteca `pywebpush` instalada, o módulo simplesmente se declara
-indisponível e o resto do sistema segue igual — é o mesmo padrão dos outros
-canais opcionais.
-"""
+"""Notificação no celular com o painel fechado (Web Push, VAPID). Sem chaves ou sem a
+`pywebpush`, o módulo se declara indisponível e o resto do sistema segue igual."""
 import json
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -21,11 +9,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.core.timeutil import utcnow
 
-# O modelo (e, por tabela, o `database.py`) só é carregado quando este módulo
-# vai de fato falar com o banco. Isso mantém `python -m app.services.push`
-# — que só gera o par de chaves — funcionando numa máquina sem PostgreSQL
-# nem driver instalado, que é justamente onde a pessoa está quando precisa
-# gerar as chaves pela primeira vez.
+# O modelo (e o `database.py`) só carrega ao falar com o banco: `python -m app.services.push`
+# gera as chaves numa máquina sem PostgreSQL nem driver instalado.
 if TYPE_CHECKING:  # pragma: no cover
     from app.models.push import PushSubscription
 
@@ -47,9 +32,8 @@ def library_installed() -> bool:
 
 
 def keys_configured() -> bool:
-    """O par VAPID chegou às configurações — no Docker, precisa estar no
-    docker-compose.yml além do .env, porque as variáveis são repassadas uma a
-    uma para o container."""
+    """No Docker, o par VAPID precisa estar no docker-compose.yml além do .env
+    (as variáveis são repassadas uma a uma para o container)."""
     return bool(settings.VAPID_PUBLIC_KEY and settings.VAPID_PRIVATE_KEY)
 
 
@@ -62,30 +46,28 @@ def public_key() -> Optional[str]:
     return settings.VAPID_PUBLIC_KEY or None
 
 
-# Serviços de push dos navegadores. O servidor faz um POST para o endereço da
-# assinatura; aceitando qualquer URL, qualquer conta fazia o backend chamar
-# endereços internos (127.0.0.1, rede do Compose) e lia o resultado pela
-# lista de aparelhos.
+# Só os serviços de push dos navegadores: o servidor faz POST no endereço da assinatura, e
+# aceitar qualquer URL deixaria uma conta fazer o backend chamar endereços internos.
 _PUSH_HOSTS = {"fcm.googleapis.com", "updates.push.services.mozilla.com", "web.push.apple.com"}
-_PUSH_SUFIXOS = (".notify.windows.com", ".push.apple.com")
+_PUSH_SUFFIXES = (".notify.windows.com", ".push.apple.com")
 
 
 def valid_endpoint(endpoint: Optional[str]) -> bool:
     try:
-        partes = urlparse(endpoint or "")
-        porta = partes.port
+        parsed = urlparse(endpoint or "")
+        port = parsed.port
     except ValueError:
         return False
-    host = (partes.hostname or "").lower()
-    return (partes.scheme == "https" and porta in (None, 443) and not partes.username
-            and (host in _PUSH_HOSTS or host.endswith(_PUSH_SUFIXOS)))
+    host = (parsed.hostname or "").lower()
+    return (parsed.scheme == "https" and port in (None, 443) and not parsed.username
+            and (host in _PUSH_HOSTS or host.endswith(_PUSH_SUFFIXES)))
 
 
-def _sem_redirecionamento():
+def _no_redirect_session():
     import requests
-    sessao = requests.Session()
-    sessao.max_redirects = 0
-    return sessao
+    session = requests.Session()
+    session.max_redirects = 0
+    return session
 
 
 def subscribe(db: Session, user_id: int, subscription: Dict[str, Any],
@@ -147,52 +129,52 @@ def send_to_user(db: Session, user_id: int, title: str, body: str,
 
     if not available():
         return 0
-    assinaturas = db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all()
-    if not assinaturas:
+    subscriptions = db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all()
+    if not subscriptions:
         return 0
 
-    carga = json.dumps({"title": title, "body": body, "link": link, "tag": tag or "anomalydetect"},
+    payload = json.dumps({"title": title, "body": body, "link": link, "tag": tag or "anomalydetect"},
                        ensure_ascii=False)
     claims = {"sub": f"mailto:{settings.VAPID_CONTACT_EMAIL or 'admin@localhost'}"}
-    entregues = 0
-    mudou = False
-    sessao = _sem_redirecionamento()
-    for assinatura in assinaturas:
-        if not valid_endpoint(assinatura.endpoint):
+    delivered = 0
+    changed = False
+    session = _no_redirect_session()
+    for subscription in subscriptions:
+        if not valid_endpoint(subscription.endpoint):
             continue
         try:
             webpush(
                 subscription_info={
-                    "endpoint": assinatura.endpoint,
-                    "keys": {"p256dh": assinatura.p256dh, "auth": assinatura.auth},
+                    "endpoint": subscription.endpoint,
+                    "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth},
                 },
-                data=carga,
+                data=payload,
                 vapid_private_key=settings.VAPID_PRIVATE_KEY,
                 vapid_claims=dict(claims),
                 timeout=10,
-                requests_session=sessao,
+                requests_session=session,
             )
-            assinatura.last_ok_at = utcnow()
-            assinatura.failures = 0
-            entregues += 1
-            mudou = True
+            subscription.last_ok_at = utcnow()
+            subscription.failures = 0
+            delivered += 1
+            changed = True
         except WebPushException as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             # 404/410: o navegador descartou a assinatura (app desinstalado,
             # permissão revogada). Insistir nela é lixo para sempre.
             if status in (404, 410):
-                db.delete(assinatura)
+                db.delete(subscription)
             else:
-                assinatura.failures = (assinatura.failures or 0) + 1
-                if assinatura.failures >= MAX_FAILURES:
-                    db.delete(assinatura)
-            mudou = True
-            print(f"[Push] Falha para o aparelho {assinatura.id}: {e}")
+                subscription.failures = (subscription.failures or 0) + 1
+                if subscription.failures >= MAX_FAILURES:
+                    db.delete(subscription)
+            changed = True
+            print(f"[Push] Falha para o aparelho {subscription.id}: {e}")
         except Exception as e:  # pragma: no cover - rede
             print(f"[Push] Erro inesperado: {e}")
-    if mudou:
+    if changed:
         db.commit()
-    return entregues
+    return delivered
 
 
 def generate_keys() -> Dict[str, str]:
@@ -215,7 +197,7 @@ def generate_keys() -> Dict[str, str]:
 
 if __name__ == "__main__":  # pragma: no cover - utilitário de linha de comando
     try:
-        chaves = generate_keys()
+        generated = generate_keys()
     except ImportError:
         print("Falta a biblioteca `cryptography` neste Python.\n"
               "Rode dentro do ambiente do backend:\n"
@@ -224,5 +206,5 @@ if __name__ == "__main__":  # pragma: no cover - utilitário de linha de comando
               "  docker compose exec backend python -m app.services.push")
         raise SystemExit(1)
     print("# Cole as duas linhas abaixo no seu .env e reinicie o backend.")
-    for chave, valor in chaves.items():
-        print(f"{chave}={valor}")
+    for name, value in generated.items():
+        print(f"{name}={value}")

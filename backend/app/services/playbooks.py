@@ -1,22 +1,6 @@
-"""
-Playbooks: automação com autonomia graduada.
-
-Até aqui, toda ação dependia de alguém ver o aviso e clicar. Ferramenta de
-gestão remota paga automatiza isso há anos — e é justamente aí que ela assusta
-o usuário comum, porque a máquina age sozinha sem avisar e sem volta.
-
-A diferença deste desenho está nos degraus. Uma regra nasce em **sugerir**
-(só propõe no aviso). Subir para **confirmar** (pede um toque) ou para
-**automático** é decisão explícita do dono. E mesmo em automático:
-
-- a ação é anunciada e só acontece depois de uma janela de arrependimento,
-  em que um toque cancela;
-- existe teto por dia e intervalo mínimo entre disparos;
-- o modo de ensaio registra o que faria sem mandar nada;
-- a lista de ações automatizáveis é menor que a manual — isolar da rede, por
-  exemplo, nunca é automático;
-- todo disparo entra no livro encadeado de auditoria.
-"""
+"""Playbooks: automação com autonomia graduada (sugerir → confirmar → automático, por decisão
+do dono). Mesmo no automático há janela para cancelar, teto diário, intervalo mínimo, modo de
+ensaio e registro no livro de auditoria."""
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
@@ -69,16 +53,16 @@ def _matches(playbook: Playbook, machine: Machine, anomaly: Anomaly) -> bool:
         return False
     if playbook.process_name and (anomaly.responsible_process or "").lower() != playbook.process_name.lower():
         return False
-    minimo = SEVERITY_ORDER.get(playbook.min_severity or "medium", 2)
-    return SEVERITY_ORDER.get(anomaly.severity or "medium", 2) >= minimo
+    minimum = SEVERITY_ORDER.get(playbook.min_severity or "medium", 2)
+    return SEVERITY_ORDER.get(anomaly.severity or "medium", 2) >= minimum
 
 
 def _runs_today(db: Session, playbook: Playbook, now) -> int:
-    inicio = now - timedelta(hours=24)
+    since = now - timedelta(hours=24)
     return (
         db.query(PlaybookRun)
         .filter(PlaybookRun.playbook_id == playbook.id,
-                PlaybookRun.created_at >= inicio,
+                PlaybookRun.created_at >= since,
                 PlaybookRun.status.in_(["executado", "agendado"]))
         .count()
     )
@@ -91,22 +75,20 @@ def _guard(db: Session, playbook: Playbook, anomaly: Anomaly, now) -> Optional[s
     if playbook.action == "kill_process" and not anomaly.responsible_process:
         return "O aviso não aponta um programa responsável, então não há o que encerrar."
     if playbook.last_run_at:
-        desde = (now - aware(playbook.last_run_at)).total_seconds() / 60
-        if desde < (playbook.cooldown_minutes or 0):
-            return f"Disparou há {desde:.0f} min; o intervalo mínimo é {playbook.cooldown_minutes} min."
-    teto = playbook.daily_limit or settings.PLAYBOOK_DAILY_LIMIT
-    if _runs_today(db, playbook, now) >= teto:
-        return f"Já foram {teto} execuções nas últimas 24 h — teto de segurança."
+        minutes_since = (now - aware(playbook.last_run_at)).total_seconds() / 60
+        if minutes_since < (playbook.cooldown_minutes or 0):
+            return f"Disparou há {minutes_since:.0f} min; o intervalo mínimo é {playbook.cooldown_minutes} min."
+    cap = playbook.daily_limit or settings.PLAYBOOK_DAILY_LIMIT
+    if _runs_today(db, playbook, now) >= cap:
+        return f"Já foram {cap} execuções nas últimas 24 h — teto de segurança."
     return None
 
 
 def _params_for(playbook: Playbook, anomaly: Anomaly) -> Dict[str, Any]:
     """Parâmetros da ação a partir do aviso.
 
-    Encerrar processo leva a identidade da instância (pid, caminho, hora de
-    início) para o agente conferir antes de agir. Pausar sincronização não
-    leva nome nenhum: o agente usa a própria lista de clientes conhecidos, e
-    o nome do aviso (que vem do agente) virava "encerre qualquer programa".
+    Encerrar leva a identidade da instância (pid, exe, create_time) para o agente conferir.
+    Pausar sincronização não leva nome: o do aviso vem do agente e viraria "encerre qualquer programa".
     """
     params = dict(playbook.params or {})
     if playbook.action == "kill_process":
@@ -117,9 +99,9 @@ def _params_for(playbook: Playbook, anomaly: Anomaly) -> Dict[str, Any]:
             params.setdefault("pid", pid)
             if anomaly.responsible_process:
                 params.setdefault("name", anomaly.responsible_process)
-            for chave in ("exe", "create_time"):
-                if details.get(chave) is not None:
-                    params.setdefault(chave, details[chave])
+            for key in ("exe", "create_time"):
+                if details.get(key) is not None:
+                    params.setdefault(key, details[key])
     if playbook.action == "stop_sync_client":
         params.pop("name", None)
     return params
@@ -128,64 +110,64 @@ def _params_for(playbook: Playbook, anomaly: Anomaly) -> Dict[str, Any]:
 def on_anomaly(db: Session, machine: Machine, anomaly: Anomaly) -> List[PlaybookRun]:
     """Chamado para todo aviso novo: decide o que cada regra faz com ele."""
     now = utcnow()
-    regras = (
+    rules = (
         db.query(Playbook)
         .filter(Playbook.user_id == machine.owner_id, Playbook.enabled == True)  # noqa: E712
         .all()
     )
-    disparos: List[PlaybookRun] = []
-    for playbook in regras:
+    runs: List[PlaybookRun] = []
+    for playbook in rules:
         if not _matches(playbook, machine, anomaly):
             continue
-        motivo = _guard(db, playbook, anomaly, now)
-        if motivo:
-            disparos.append(_record(db, playbook, machine, anomaly, "bloqueado", motivo, now))
+        reason = _guard(db, playbook, anomaly, now)
+        if reason:
+            runs.append(_record(db, playbook, machine, anomaly, "bloqueado", reason, now))
             continue
 
         params = _params_for(playbook, anomaly)
-        rotulo = AUTOMATABLE[playbook.action]
+        label = AUTOMATABLE[playbook.action]
         if playbook.dry_run:
-            detalhe = f"Ensaio: teria executado '{rotulo}' com {params or 'nenhum parâmetro'}."
-            disparos.append(_record(db, playbook, machine, anomaly, "ensaio", detalhe, now))
+            detail = f"Ensaio: teria executado '{label}' com {params or 'nenhum parâmetro'}."
+            runs.append(_record(db, playbook, machine, anomaly, "ensaio", detail, now))
             continue
 
         if playbook.autonomy == "sugerir":
-            detalhe = f"Sugestão da automação: {rotulo}."
-            disparos.append(_record(db, playbook, machine, anomaly, "sugerido", detalhe, now))
+            detail = f"Sugestão da automação: {label}."
+            runs.append(_record(db, playbook, machine, anomaly, "sugerido", detail, now))
         elif playbook.autonomy == "confirmar":
-            detalhe = f"{rotulo} — aguardando sua confirmação."
-            run = _record(db, playbook, machine, anomaly, "aguardando", detalhe, now)
+            detail = f"{label} — aguardando sua confirmação."
+            run = _record(db, playbook, machine, anomaly, "aguardando", detail, now)
             run.undo_until = now + timedelta(hours=CONFIRM_TTL_HOURS)
-            disparos.append(run)
-            _notify(db, machine, f"Posso {rotulo.lower()}?",
+            runs.append(run)
+            _notify(db, machine, f"Posso {label.lower()}?",
                     f"{ANOMALY_TYPE_LABELS.get(anomaly.anomaly_type, anomaly.anomaly_type)} em "
                     f"{machine.name}. A automação '{playbook.name}' pede sua confirmação.")
         else:
-            janela = settings.PLAYBOOK_UNDO_SECONDS
-            detalhe = f"{rotulo} — executa em {janela // 60 or 1} min, dá para cancelar antes."
-            run = _record(db, playbook, machine, anomaly, "agendado", detalhe, now)
-            run.undo_until = now + timedelta(seconds=janela)
-            disparos.append(run)
-            _notify(db, machine, f"Vou {rotulo.lower()}",
+            window = settings.PLAYBOOK_UNDO_SECONDS
+            detail = f"{label} — executa em {window // 60 or 1} min, dá para cancelar antes."
+            run = _record(db, playbook, machine, anomaly, "agendado", detail, now)
+            run.undo_until = now + timedelta(seconds=window)
+            runs.append(run)
+            _notify(db, machine, f"Vou {label.lower()}",
                     f"{machine.name}: a automação '{playbook.name}' vai agir em "
-                    f"{janela // 60 or 1} min. Abra o painel para cancelar.")
+                    f"{window // 60 or 1} min. Abra o painel para cancelar.")
 
         playbook.last_run_at = now
         playbook.runs_total = (playbook.runs_total or 0) + 1
-    if disparos:
+    if runs:
         db.commit()
-    return disparos
+    return runs
 
 
 def _record(db: Session, playbook: Playbook, machine: Machine, anomaly: Anomaly,
-            status: str, detalhe: str, now) -> PlaybookRun:
+            status: str, detail: str, now) -> PlaybookRun:
     run = PlaybookRun(
         playbook_id=playbook.id,
         machine_id=machine.id,
         anomaly_id=anomaly.id,
         status=status,
         autonomy=playbook.autonomy,
-        detail=detalhe,
+        detail=detail,
         created_at=now,
     )
     db.add(run)
@@ -193,10 +175,10 @@ def _record(db: Session, playbook: Playbook, machine: Machine, anomaly: Anomaly,
     return run
 
 
-def _notify(db: Session, machine: Machine, titulo: str, corpo: str) -> None:
+def _notify(db: Session, machine: Machine, title: str, body: str) -> None:
     try:
         from app.services import notifications
-        notifications.notify_user(db, machine.owner_id, titulo, corpo,
+        notifications.notify_user(db, machine.owner_id, title, body,
                                   kind="playbook", severity="medium", machine_id=machine.id)
     except Exception as e:
         print(f"[Playbooks] Aviso não enviado: {e}")
@@ -205,26 +187,26 @@ def _notify(db: Session, machine: Machine, titulo: str, corpo: str) -> None:
 def dispatch_due(db: Session) -> int:
     """Rotina periódica: executa o que venceu a janela e expira o que ninguém respondeu."""
     now = utcnow()
-    pendentes = (
+    pending = (
         db.query(PlaybookRun)
         .filter(PlaybookRun.status.in_(["agendado", "aguardando"]))
         .all()
     )
-    agidos = 0
-    for run in pendentes:
-        limite = aware(run.undo_until) if run.undo_until else None
-        if not limite or limite > now:
+    handled = 0
+    for run in pending:
+        deadline = aware(run.undo_until) if run.undo_until else None
+        if not deadline or deadline > now:
             continue
         if run.status == "aguardando":
             run.status = "expirado"
             run.detail = (run.detail or "") + " Ninguém respondeu a tempo; nada foi feito."
-            agidos += 1
+            handled += 1
             continue
         _execute(db, run, now)
-        agidos += 1
-    if agidos:
+        handled += 1
+    if handled:
         db.commit()
-    return agidos
+    return handled
 
 
 def _execute(db: Session, run: PlaybookRun, now) -> None:
@@ -249,11 +231,11 @@ def _execute(db: Session, run: PlaybookRun, now) -> None:
     _seal(db, run, playbook, "executado")
 
 
-def decide(db: Session, run: PlaybookRun, aceitar: bool, user_id: int) -> PlaybookRun:
+def decide(db: Session, run: PlaybookRun, accept: bool, user_id: int) -> PlaybookRun:
     """Resposta da pessoa a um pedido de confirmação, ou cancelamento a tempo."""
     now = utcnow()
     run.decided_by = user_id
-    if not aceitar:
+    if not accept:
         run.status = "desfeito" if run.status == "agendado" else "recusado"
         run.undone_at = now
         run.detail = (run.detail or "") + " Cancelado por você antes de acontecer."
@@ -264,7 +246,7 @@ def decide(db: Session, run: PlaybookRun, aceitar: bool, user_id: int) -> Playbo
     return run
 
 
-def _seal(db: Session, run: PlaybookRun, playbook: Optional[Playbook], resultado: str) -> None:
+def _seal(db: Session, run: PlaybookRun, playbook: Optional[Playbook], result: str) -> None:
     try:
         from app.services import integrity
         integrity.append(
@@ -276,7 +258,7 @@ def _seal(db: Session, run: PlaybookRun, playbook: Optional[Playbook], resultado
                 "regra": playbook.name if playbook else None,
                 "acao": playbook.action if playbook else None,
                 "autonomia": run.autonomy,
-                "resultado": resultado,
+                "resultado": result,
                 "aviso": run.anomaly_id,
                 "comando": run.command_id,
             },

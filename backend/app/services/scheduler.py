@@ -1,19 +1,13 @@
-"""
-Rotinas periódicas do servidor.
-
-Um laço só, que executa cada rotina no seu intervalo numa thread (com sessão
-de banco própria), sem depender de cron nem de biblioteca externa. Uma rotina
-que falha registra o erro e não derruba as outras.
-"""
+"""Rotinas periódicas: um laço só, cada rotina numa thread com sessão própria; uma rotina
+que falha registra o erro e não derruba as outras."""
 import asyncio
 import time
 from typing import Callable, List, Tuple
 
 from app.database import SessionLocal
 
-# Quando cada rotina terminou bem pela última vez. Vira a idade exposta em
-# /metrics: uma rotina que parou de rodar aparece como idade crescendo, que é
-# o único jeito de notar a ausência de algo que deveria acontecer sozinho.
+# Último sucesso de cada rotina, exposto como idade em /metrics: é o único jeito de notar
+# uma rotina que parou de rodar.
 _last_success: dict = {}
 
 

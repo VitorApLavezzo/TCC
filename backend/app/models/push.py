@@ -4,12 +4,8 @@ from app.database import Base
 
 
 class PushSubscription(Base):
-    """Assinatura de notificação do navegador (Web Push), por aparelho.
-
-    É o que permite o aviso chegar no celular com o painel fechado, depois de
-    instalar o sistema como aplicativo pela tela inicial. As chaves são do
-    próprio navegador e servem só para cifrar a mensagem para aquele aparelho.
-    """
+    """Assinatura de notificação do navegador (Web Push), por aparelho. As chaves são do próprio
+    navegador e servem só para cifrar a mensagem para aquele aparelho."""
     __tablename__ = "push_subscriptions"
 
     id = Column(Integer, primary_key=True, index=True)

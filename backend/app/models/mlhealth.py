@@ -4,14 +4,7 @@ from app.database import Base
 
 
 class DriftCheck(Base):
-    """Quanto o normal aprendido ainda descreve a máquina de hoje.
-
-    O modelo de cada máquina aprende o normal dela e depois é usado por meses.
-    Quando a máquina muda de dono, ganha memória, vira servidor ou troca de
-    turno, o normal antigo continua valendo como régua — e a régua errada
-    aparece como avisos demais ou silêncio demais, sem ninguém entender por quê.
-    Esta tabela guarda a medição dessa distância ao longo do tempo.
-    """
+    """Quanto o normal aprendido ainda descreve a máquina de hoje, medido ao longo do tempo."""
     __tablename__ = "drift_checks"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -32,13 +25,7 @@ class DriftCheck(Base):
 
 
 class ExplanationOutcome(Base):
-    """A explicação previu um efeito; isto guarda o que aconteceu de verdade.
-
-    O cartão "se você fechar o Chrome, a memória cai para ~48%" é uma previsão
-    verificável. Medir se ela se cumpriu transforma "a IA escreve bonito" em um
-    número — a fidelidade da explicação — que é o que falta na maioria das
-    ferramentas que geram texto com IA.
-    """
+    """A explicação previu um efeito; isto guarda o que aconteceu de verdade (fidelidade da explicação)."""
     __tablename__ = "explanation_outcomes"
 
     id = Column(Integer, primary_key=True, index=True)

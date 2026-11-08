@@ -1,12 +1,4 @@
-"""
-A faixa do normal aprendida para cada computador, por hora do dia.
-
-A faixa desenhada atrás dos traços era a mesma para todo computador (CPU
-normal até 80%). Um servidor que vive em 70% e um notebook que vive em 5% têm
-"normais" diferentes — e o mesmo notebook tem um normal às 3h e outro às 15h.
-Aqui a faixa sai dos percentis das últimas duas semanas daquela máquina,
-separados pela hora local.
-"""
+"""Faixa do normal de cada computador por hora local, dos percentis das últimas duas semanas."""
 from datetime import timedelta
 from typing import Any, Dict, List
 

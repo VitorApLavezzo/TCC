@@ -482,11 +482,11 @@ class TestRelogioReproduzivel:
 
     def test_ancora_sempre_na_quarta_as_15h_locais(self):
         from datetime import datetime, timedelta, timezone
-        from app.services.benchmark import _relogio_virtual
+        from app.services.benchmark import _virtual_clock
         for agora in (datetime(2026, 10, 19, 3, 5, tzinfo=timezone.utc),
                       datetime(2026, 10, 23, 22, 45, tzinfo=timezone.utc),
                       datetime(2026, 10, 21, 18, 0, tzinfo=timezone.utc)):
-            ancora = _relogio_virtual(agora)
+            ancora = _virtual_clock(agora)
             local = ancora + timedelta(minutes=-180)
             assert (local.weekday(), local.hour, local.minute) == (2, 15, 0)
             assert agora - timedelta(days=7) < ancora <= agora
@@ -554,7 +554,7 @@ class TestAblacaoHonesta:
         anterior = _na_camada("ml")
         try:
             benchmark._feed(db, m, demo._base_metric(0), demo._normal_processes(),
-                            benchmark._relogio_virtual(utcnow()), {})
+                            benchmark._virtual_clock(utcnow()), {})
         finally:
             _na_camada(anterior)
         assert db.query(ProcessBaseline).filter(ProcessBaseline.machine_id == m.id).count() > 0
@@ -590,7 +590,7 @@ class TestLeituraComContexto:
     def test_jogo_pesado_esta_na_tela(self):
         from app.services import benchmark, demo
         data, procs = demo._base_metric(0), demo._normal_processes()
-        benchmark._jogo_pesado(0, data, procs)
+        benchmark._heavy_game(0, data, procs)
         jogo = next(p for p in procs if p["name"] == "jogo.exe")
         assert data["foreground_pid"] == jogo["pid"]
         assert data["user_idle_seconds"] < 120
@@ -598,7 +598,7 @@ class TestLeituraComContexto:
     def test_minerador_roda_por_tras_do_navegador(self):
         from app.services import benchmark, demo
         data, procs = demo._base_metric(0), demo._normal_processes()
-        benchmark._minerador(0, data, procs)
+        benchmark._miner(0, data, procs)
         minerador = next(p for p in procs if p["name"] == "xmrig.exe")
         assert data["foreground_name"] == "chrome.exe"
         assert data["foreground_pid"] not in [minerador["pid"]] + minerador["ancestors"]
