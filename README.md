@@ -580,7 +580,7 @@ acham a pasta dele tanto no checkout quanto no container; os poucos que leem o
 código do frontend são pulados no container, com o motivo escrito, e rodam no CI.
 Cobrem a API, o motor de detecção, a checagem de números das explicações, a
 política de notificações e os módulos do agente (remoção de segredos, arquivos-isca,
-beaconing, autoatualização). `tests/test_novidades.py` cobre o que é novo e
+beaconing, autoatualização). `tests/test_new_features.py` cobre o que é novo e
 erraria em silêncio: o limite de tentativas, a cadeia de auditoria (inclusive
 uma adulteração), a medida de deriva, o risco de hardware, a conferência das
 previsões, os degraus de autonomia da automação, a nota SUS e a fila de

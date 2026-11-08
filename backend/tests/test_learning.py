@@ -1,12 +1,7 @@
 """Período de aprendizado: o que o sistema faz antes de conhecer a máquina.
 
-Uma máquina recém-instalada não tem normal. Tudo que roda nela é "novo", todo
-pico é "fora do padrão" — e era assim que as primeiras horas de monitoramento
-enchiam a pessoa de avisos sobre programas que sempre estiveram ali.
-
-O que aprende continua sendo detectado e registrado; o que não acontece é o
-incômodo. A exceção são os avisos cuja evidência não depende de histórico
-nenhum: uma isca de ransomware tocada é uma isca tocada no primeiro minuto.
+Tudo continua detectado e registrado, mas sem notificar; a exceção são avisos cuja
+evidência não depende de histórico, como uma isca de ransomware tocada.
 """
 from datetime import timedelta
 
@@ -31,63 +26,60 @@ def _machine(db, **over):
     return m
 
 
-def _leituras(db, machine_id, quantas, span_horas):
-    """`quantas` leituras espalhadas pelas últimas `span_horas`."""
-    agora = utcnow()
-    passo = timedelta(hours=span_horas) / max(quantas - 1, 1)
-    for i in range(quantas):
+def _readings(db, machine_id, count, span_hours):
+    """`count` leituras espalhadas pelas últimas `span_hours`."""
+    now = utcnow()
+    step = timedelta(hours=span_hours) / max(count - 1, 1)
+    for i in range(count):
         db.add(Metric(machine_id=machine_id, cpu_percent=20, mem_percent=40,
-                      timestamp=agora - timedelta(hours=span_horas) + passo * i))
+                      timestamp=now - timedelta(hours=span_hours) + step * i))
     db.commit()
 
 
-class TestQuandoTerminaOAprendizado:
-    def test_maquina_sem_nenhuma_leitura_esta_aprendendo(self, db):
+class TestWhenLearningEnds:
+    def test_machine_without_readings_is_learning(self, db):
         from app.services import learning
         m = _machine(db)
         assert learning.is_learning(db, m) is True
 
-    def test_muitas_leituras_em_pouco_tempo_ainda_e_aprendizado(self, db):
-        """A régua de tempo existe para isto: no intervalo acelerado de 10 s,
-        100 leituras fecham em 17 minutos, e 17 minutos não são o normal de
-        ninguém. As leituras já bastam; a hora de relógio não."""
+    def test_many_readings_in_short_time_still_learning(self, db):
+        """No intervalo de 10 s, 100 leituras fecham em 17 minutos, e isso não é o normal de ninguém."""
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 150, span_horas=0.3)
+        _readings(db, m.id, 150, span_hours=0.3)
         assert learning.is_learning(db, m) is True
 
-    def test_oito_horas_com_poucas_leituras_ainda_e_aprendizado(self, db):
+    def test_eight_hours_with_few_readings_still_learning(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 12, span_horas=8)
+        _readings(db, m.id, 12, span_hours=8)
         assert learning.is_learning(db, m) is True
 
-    def test_leituras_e_tempo_completos_encerram_o_aprendizado(self, db):
+    def test_enough_readings_and_time_end_learning(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 150, span_horas=2)
+        _readings(db, m.id, 150, span_hours=2)
         assert learning.is_learning(db, m) is False
 
-    def test_conta_da_primeira_leitura_e_nao_do_cadastro(self, db):
-        """Máquina cadastrada na sexta cujo agente só sobe na segunda não pode
-        'se formar' com zero dado só porque o relógio andou."""
+    def test_counts_from_first_reading_not_registration(self, db):
+        """Máquina cadastrada dias antes de o agente subir não pode 'se formar' sem dado."""
         from app.services import learning
         m = _machine(db)
         m.created_at = utcnow() - timedelta(days=3)
         db.commit()
-        _leituras(db, m.id, 150, span_horas=0.3)
+        _readings(db, m.id, 150, span_hours=0.3)
         assert learning.is_learning(db, m) is True
 
-    def test_maquina_de_demonstracao_nunca_esta_aprendendo(self, db):
+    def test_demo_machine_never_learning(self, db):
         """A demonstração tem 8 a 20 passos de aquecimento e precisa detectar."""
         from app.services import learning
         m = _machine(db, is_demo=True)
         assert learning.is_learning(db, m) is False
 
-    def test_status_informa_o_progresso_das_duas_reguas(self, db):
+    def test_status_reports_progress_of_both_criteria(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 40, span_horas=2)
+        _readings(db, m.id, 40, span_hours=2)
         s = learning.status(db, m)
         assert s.collected == 40
         assert s.needed == learning.NEEDED_SAMPLES
@@ -95,50 +87,50 @@ class TestQuandoTerminaOAprendizado:
         assert s.learning is True
 
 
-class TestAvisosDuranteOAprendizado:
-    def _candidato(self, tipo="unknown_process", severidade="medium"):
+class TestAlertsDuringLearning:
+    def _candidate(self, kind="unknown_process", severity="medium"):
         from app.services.anomaly_service import Candidate
-        return Candidate(anomaly_type=tipo, severity=severidade, responsible="algo.exe")
+        return Candidate(anomaly_type=kind, severity=severity, responsible="algo.exe")
 
-    def test_anomalia_e_registrada_mas_marcada(self, db):
+    def test_anomaly_recorded_but_flagged(self, db):
         from app.services.anomaly_service import persist_candidate
         m = _machine(db)
-        a = persist_candidate(db, m, self._candidato())
+        a = persist_candidate(db, m, self._candidate())
         assert a is not None
         assert a.during_learning is True
 
-    def test_anomalia_durante_aprendizado_nao_notifica(self, db):
+    def test_anomaly_during_learning_does_not_notify(self, db):
         from app.models.notification import Notification
         from app.services.anomaly_service import persist_candidate
         m = _machine(db)
-        a = persist_candidate(db, m, self._candidato())
+        a = persist_candidate(db, m, self._candidate())
         n = db.query(Notification).filter(Notification.anomaly_id == a.id).first()
         assert n is not None
         assert n.status == "suppressed"
         assert "aprend" in (n.status_reason or "")
 
-    def test_isca_de_ransomware_notifica_mesmo_aprendendo(self, db):
+    def test_ransomware_canary_notifies_even_while_learning(self, db):
         from app.models.notification import Notification
         from app.services.anomaly_service import persist_candidate
         m = _machine(db)
-        a = persist_candidate(db, m, self._candidato("ransomware_canary", "critical"))
+        a = persist_candidate(db, m, self._candidate("ransomware_canary", "critical"))
         n = db.query(Notification).filter(Notification.anomaly_id == a.id).first()
         assert a.during_learning is False
         assert n.status == "pending"
 
-    def test_maquina_formada_notifica_normalmente(self, db):
+    def test_trained_machine_notifies_normally(self, db):
         from app.models.notification import Notification
         from app.services.anomaly_service import persist_candidate
         m = _machine(db)
-        _leituras(db, m.id, 150, span_horas=7)
-        a = persist_candidate(db, m, self._candidato(severidade="high"))
+        _readings(db, m.id, 150, span_hours=7)
+        a = persist_candidate(db, m, self._candidate(severity="high"))
         n = db.query(Notification).filter(Notification.anomaly_id == a.id).first()
         assert a.during_learning is False
         assert n.status == "pending"
 
 
-class TestDetectoresDuranteOAprendizado:
-    def test_processo_desconhecido_nao_dispara_enquanto_tudo_e_desconhecido(self, db):
+class TestDetectorsDuringLearning:
+    def test_unknown_process_does_not_fire_while_everything_is_unknown(self, db):
         from app.models.process_baseline import ProcessBaseline
         from app.services.behavior_analyzer import DetectionContext, detect_new_suspicious_process
         from types import SimpleNamespace
@@ -152,7 +144,7 @@ class TestDetectoresDuranteOAprendizado:
                                cmdline="jogo.exe", pid=7, ppid=4, parent_name="explorer.exe")
         assert detect_new_suspicious_process(met, [proc], [], db, DetectionContext(learning=True)) is None
 
-    def test_minerador_dispara_mesmo_durante_o_aprendizado(self, db):
+    def test_miner_fires_even_during_learning(self, db):
         from app.models.process_baseline import ProcessBaseline
         from app.services.behavior_analyzer import DetectionContext, detect_new_suspicious_process
         from types import SimpleNamespace
@@ -168,78 +160,77 @@ class TestDetectoresDuranteOAprendizado:
         assert r is not None and r.anomaly_type == "suspicious_process"
 
 
-class TestComoOProgressoEDito:
+class TestProgressWording:
     """Uma barra de progresso que passa de 100% não informa, assusta."""
 
-    def test_nao_anuncia_mais_leituras_do_que_a_meta(self, db):
+    def test_does_not_announce_more_readings_than_goal(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 186, span_horas=0.28)  # coleta a cada 5s
-        frase = learning.status(db, m).phrase
-        assert "186 de 100" not in frase
-        assert "100" not in frase
+        _readings(db, m.id, 186, span_hours=0.28)  # coleta a cada 5s
+        phrase = learning.status(db, m).phrase
+        assert "186 de 100" not in phrase
+        assert "100" not in phrase
 
-    def test_diz_quanto_tempo_falta_quando_as_leituras_ja_bastam(self, db):
+    def test_says_time_left_when_readings_suffice(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 186, span_horas=0.28)
-        frase = learning.status(db, m).phrase
-        assert "falta" in frase and "min" in frase
-        assert "leituras" not in frase
+        _readings(db, m.id, 186, span_hours=0.28)
+        phrase = learning.status(db, m).phrase
+        assert "falta" in phrase and "min" in phrase
+        assert "leituras" not in phrase
 
-    def test_diz_quantas_leituras_faltam_quando_o_tempo_ja_basta(self, db):
+    def test_says_readings_left_when_time_suffices(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 30, span_horas=8)
-        frase = learning.status(db, m).phrase
-        assert "70 leituras" in frase
-        assert "h" not in frase.replace("leituras", "")
+        _readings(db, m.id, 30, span_hours=8)
+        phrase = learning.status(db, m).phrase
+        assert "70 leituras" in phrase
+        assert "h" not in phrase.replace("leituras", "")
 
-    def test_menciona_os_dois_quando_os_dois_faltam(self, db):
+    def test_mentions_both_when_both_missing(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 40, span_horas=0.5)
-        frase = learning.status(db, m).phrase
-        assert "60 leituras" in frase and "30 min" in frase
+        _readings(db, m.id, 40, span_hours=0.5)
+        phrase = learning.status(db, m).phrase
+        assert "60 leituras" in phrase and "30 min" in phrase
 
-    def test_menos_de_uma_hora_aparece_em_minutos(self, db):
+    def test_under_one_hour_shown_in_minutes(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 200, span_horas=0.9)
-        frase = learning.status(db, m).phrase
-        assert "min" in frase and "0h" not in frase
+        _readings(db, m.id, 200, span_hours=0.9)
+        phrase = learning.status(db, m).phrase
+        assert "min" in phrase and "0h" not in phrase
 
-    def test_maquina_formada_nao_tem_frase(self, db):
+    def test_trained_machine_has_no_phrase(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 150, span_horas=2)
+        _readings(db, m.id, 150, span_hours=2)
         assert learning.status(db, m).phrase == ""
 
 
-class TestCriteriosSeparados:
-    """A tela mostra os dois critérios como itens que se completam, então
-    cada um precisa saber sozinho se já bateu e quanto ainda falta."""
+class TestSeparateCriteria:
+    """Cada critério sabe sozinho se já bateu e quanto ainda falta."""
 
-    def test_leituras_completas_e_tempo_pendente(self, db):
+    def test_readings_done_time_pending(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 209, span_horas=0.3)
+        _readings(db, m.id, 209, span_hours=0.3)
         d = learning.status(db, m).as_dict()
         assert d["samples_done"] is True
         assert d["hours_done"] is False
         assert d["remaining_hours_label"] == "45 min"
 
-    def test_tempo_completo_e_leituras_pendentes(self, db):
+    def test_time_done_readings_pending(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 30, span_horas=8)
+        _readings(db, m.id, 30, span_hours=8)
         d = learning.status(db, m).as_dict()
         assert d["samples_done"] is False
         assert d["hours_done"] is True
         assert d["remaining_samples"] == 70
 
-    def test_rotulo_de_tempo_em_minutos_perto_do_fim(self, db):
+    def test_time_label_in_minutes_near_end(self, db):
         from app.services import learning
         m = _machine(db)
-        _leituras(db, m.id, 200, span_horas=0.9)
+        _readings(db, m.id, 200, span_hours=0.9)
         assert "min" in learning.status(db, m).as_dict()["remaining_hours_label"]

@@ -1,10 +1,7 @@
 """A ingestão não pode parar por causa de um detector.
 
-Caso real (out/2026): o detector de beaconing guardava a data em que o
-programa apareceu (`datetime`) dentro do JSON do aviso. A gravação quebrava
-com "Object of type datetime is not JSON serializable", a ingestão inteira
-respondia 500 e o agente, achando que o envio tinha falhado, reenviava a
-mesma leitura para sempre — no painel, "o agente parou de ler".
+Caso real: um `datetime` no JSON do aviso de beaconing fazia a ingestão responder 500
+e o agente reenviava a mesma leitura para sempre.
 """
 from datetime import datetime, timezone
 
@@ -20,7 +17,7 @@ def _ingest(client, token, **over):
     return client.post("/api/metrics/ingest", json={**BASE, **over}, headers={"X-Agent-Token": token})
 
 
-def test_beacon_de_programa_conhecido_vira_aviso(client, machine, db):
+def test_known_program_beacon_becomes_alert(client, machine, db):
     from app.models.anomaly import Anomaly
     from app.models.identity import ProcessIdentity
 
@@ -32,19 +29,19 @@ def test_beacon_de_programa_conhecido_vira_aviso(client, machine, db):
     res = _ingest(client, machine["agent_token"], beacons=[BEACON])
 
     assert res.status_code == 202
-    aviso = db.query(Anomaly).filter(Anomaly.anomaly_type == "beaconing").first()
-    assert aviso is not None
-    assert aviso.responsible_process == "beacon.exe"
+    alert = db.query(Anomaly).filter(Anomaly.anomaly_type == "beaconing").first()
+    assert alert is not None
+    assert alert.responsible_process == "beacon.exe"
 
 
-def test_detector_com_defeito_nao_derruba_a_ingestao(client, machine, db, monkeypatch):
+def test_broken_detector_does_not_break_ingestion(client, machine, db, monkeypatch):
     from app.models.metric import Metric
     from app.services import agent_events
 
-    def quebrado(*args, **kwargs):
+    def broken(*args, **kwargs):
         raise RuntimeError("defeito simulado no detector")
 
-    monkeypatch.setattr(agent_events, "evaluate_beacons", quebrado)
+    monkeypatch.setattr(agent_events, "evaluate_beacons", broken)
 
     res = _ingest(client, machine["agent_token"], beacons=[BEACON])
 

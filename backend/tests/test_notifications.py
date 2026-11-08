@@ -1,10 +1,5 @@
-"""
-A política de excesso de notificações.
-
-O painel sempre registra tudo; o que estes testes fixam é quando algo sai (ou
-não sai) por fora — severidade mínima, horário silencioso, agrupamento e
-resumo diário. É decisão tomada em nome do usuário, então precisa ser previsível.
-"""
+"""Política de excesso de notificações: quando algo sai por fora do painel (severidade
+mínima, horário silencioso, agrupamento e resumo diário)."""
 from datetime import timedelta
 
 import pytest

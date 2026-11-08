@@ -105,7 +105,7 @@ def test_demo_scenario_runs(client, auth, db):
     assert detected >= 1
 
 
-def _processo(**over):
+def _process(**over):
     base = {"pid": 500, "name": "avp.exe", "cpu_percent": 68.0, "mem_percent": 6.0, "mem_rss": 4e8,
             "num_threads": 30, "status": "running", "username": "SYSTEM",
             "exe": "C:\\Program Files (x86)\\Kaspersky Lab\\KAV\\avp.exe",
@@ -114,109 +114,99 @@ def _processo(**over):
     return {**base, **over}
 
 
-def _maquina_formada(db, machine_id, leituras=150, horas=7, net=50000):
-    """Máquina além do período de aprendizado: histórico de rede e um baseline
-    de processos já estabelecido, senão o detector de processo desconhecido
-    nem chega a rodar e o teste passaria por engano."""
+def _trained_machine(db, machine_id, readings=150, hours=7, net=50000):
+    """Máquina já fora do aprendizado, com histórico de rede e baseline; senão o detector de processo desconhecido nem roda."""
     from datetime import timedelta
     from app.core.timeutil import utcnow
     from app.models.metric import Metric
     from app.models.process_baseline import ProcessBaseline
-    agora = utcnow()
-    passo = timedelta(hours=horas) / leituras
-    for i in range(leituras):
+    now = utcnow()
+    step = timedelta(hours=hours) / readings
+    for i in range(readings):
         db.add(Metric(machine_id=machine_id, cpu_percent=20, mem_percent=40,
                       net_bytes_sent=net, net_bytes_recv=net,
-                      timestamp=agora - timedelta(hours=horas) + passo * i))
-    for nome in ("explorer.exe", "chrome.exe", "Code.exe"):
-        db.add(ProcessBaseline(machine_id=machine_id, process_name=nome, seen_count=40,
+                      timestamp=now - timedelta(hours=hours) + step * i))
+    for name in ("explorer.exe", "chrome.exe", "Code.exe"):
+        db.add(ProcessBaseline(machine_id=machine_id, process_name=name, seen_count=40,
                                is_known=True, avg_cpu=4.0, max_cpu=30.0,
                                avg_mem_percent=3.0, max_mem_percent=10.0))
     db.commit()
 
 
-def test_antivirus_varrendo_nao_vira_aviso_de_malware(client, machine, db):
-    """O caso relatado, pelo caminho real da ingestão: varredura de antivírus
-    é processador alto + rede alta + privilégio, e nada disso é evidência."""
+def test_antivirus_scan_does_not_become_malware_alert(client, machine, db):
+    """Varredura de antivírus é processador alto + rede alta + privilégio, e nada disso é evidência."""
     from app.models.anomaly import Anomaly
-    _maquina_formada(db, machine["id"])
+    _trained_machine(db, machine["id"])
     res = _ingest(client, machine["agent_token"], cpu_percent=72.0,
-                  net_bytes_sent=50000, net_bytes_recv=50000, processes=[_processo()])
+                  net_bytes_sent=50000, net_bytes_recv=50000, processes=[_process()])
     assert res.status_code == 202
-    # Nenhum aviso, não "nenhum aviso daquele tipo": só o candidato mais grave
-    # de cada coleta vira linha no banco, então conferir um tipo específico
-    # passaria por acidente sempre que outro detector chegasse na frente.
+    # Nenhum aviso de tipo algum: só o candidato mais grave de cada coleta vira linha no banco.
     assert db.query(Anomaly).filter(Anomaly.machine_id == machine["id"]).all() == []
 
 
-def test_minerador_no_mesmo_cenario_continua_sendo_pego(client, machine, db):
+def test_miner_in_same_scenario_still_caught(client, machine, db):
     """A contraprova: mesma máquina, mesma carga, executável diferente."""
     from app.models.anomaly import Anomaly
-    _maquina_formada(db, machine["id"])
-    minerador = _processo(name="xmrig.exe", exe="C:\\Users\\vitor\\AppData\\Local\\Temp\\xmrig.exe",
+    _trained_machine(db, machine["id"])
+    miner = _process(name="xmrig.exe", exe="C:\\Users\\vitor\\AppData\\Local\\Temp\\xmrig.exe",
                           signed="unsigned", publisher=None, username="vitor", cpu_percent=95.0)
     res = _ingest(client, machine["agent_token"], cpu_percent=96.0,
-                  net_bytes_sent=4e6, net_bytes_recv=4e6, processes=[minerador])
+                  net_bytes_sent=4e6, net_bytes_recv=4e6, processes=[miner])
     assert res.status_code == 202
-    tipos = {a.anomaly_type for a in db.query(Anomaly).filter(Anomaly.machine_id == machine["id"]).all()}
-    assert tipos & {"malware_pattern", "suspicious_process"}
+    types = {a.anomaly_type for a in db.query(Anomaly).filter(Anomaly.machine_id == machine["id"]).all()}
+    assert types & {"malware_pattern", "suspicious_process"}
 
 
-def test_primeiras_coletas_nao_geram_notificacao(client, machine, db):
+def test_first_collections_do_not_notify(client, machine, db):
     """Máquina recém-instalada: o que for detectado fica no painel, calado."""
     from app.models.notification import Notification
     for _ in range(3):
         _ingest(client, machine["agent_token"], cpu_percent=99.0, mem_percent=97.0,
-                processes=[_processo(name="estranho.exe", exe="C:\\Users\\v\\Downloads\\estranho.exe",
+                processes=[_process(name="estranho.exe", exe="C:\\Users\\v\\Downloads\\estranho.exe",
                                      signed="unsigned", publisher=None, username="v")])
-    entregues = db.query(Notification).filter(Notification.status == "pending").all()
-    assert entregues == []
+    delivered = db.query(Notification).filter(Notification.status == "pending").all()
+    assert delivered == []
 
 
-def test_mesmo_programa_sem_assinatura_vira_processo_desconhecido(client, machine, db):
-    """Contraprova da camada de confiança pelo caminho real: o que separa este
-    caso do anterior é só a identidade do executável, não o comportamento."""
+def test_same_program_unsigned_becomes_unknown_process(client, machine, db):
+    """Contraprova da camada de confiança: muda só a identidade do executável, não o comportamento."""
     from app.models.anomaly import Anomaly
-    _maquina_formada(db, machine["id"])
-    # Mesmo nome, mesma carga, mesmo privilégio — muda só de onde ele roda e
-    # o fato de ninguém ter assinado. Sem indício concreto, para não cair no
-    # detector de malware e mascarar o que este teste quer provar.
-    pirata = _processo(name="avp.exe", exe="D:\\apps\\avp.exe",
+    _trained_machine(db, machine["id"])
+    # Sem indício concreto, para não cair no detector de malware.
+    pirated = _process(name="avp.exe", exe="D:\\apps\\avp.exe",
                        signed="unknown", publisher=None)
-    # Rede no mesmo patamar do histórico: sem pico, para que nenhum detector
-    # mais grave roube o lugar de principal e esconda o que se quer medir.
+    # Rede no patamar do histórico, para nenhum detector mais grave virar o principal.
     res = _ingest(client, machine["agent_token"], cpu_percent=72.0,
-                  net_bytes_sent=50000, net_bytes_recv=50000, processes=[pirata])
+                  net_bytes_sent=50000, net_bytes_recv=50000, processes=[pirated])
     assert res.status_code == 202
-    tipos = {a.anomaly_type for a in db.query(Anomaly).filter(Anomaly.machine_id == machine["id"]).all()}
-    assert "unknown_process" in tipos
+    types = {a.anomaly_type for a in db.query(Anomaly).filter(Anomaly.machine_id == machine["id"]).all()}
+    assert "unknown_process" in types
 
 
-def test_demonstracao_continua_detectando(client, auth, db):
-    """A demonstração da banca tem 8 a 20 passos de aquecimento — bem menos que
-    o período de aprendizado. Ela é isenta, e isto prova que continua isenta."""
+def test_demo_keeps_detecting(client, auth, db):
+    """A demonstração tem menos passos que o período de aprendizado e precisa continuar isenta dele."""
     from app.models.anomaly import Anomaly
     from app.services import demo
     from app.models.demo import DemoSession
 
-    for cenario in ("cpu_loop", "memory_leak", "masquerade", "beaconing"):
-        res = client.post("/api/demo/start", json={"scenario": cenario, "auto_run": False}, headers=auth)
+    for scenario in ("cpu_loop", "memory_leak", "masquerade", "beaconing"):
+        res = client.post("/api/demo/start", json={"scenario": scenario, "auto_run": False}, headers=auth)
         assert res.status_code == 200
-        sessao = db.query(DemoSession).filter(DemoSession.id == res.json()["id"]).first()
-        for _ in range(sessao.total_steps):
-            demo.step(db, sessao)
-            db.refresh(sessao)
-        machine_id = sessao.machine_ids[0]
-        tipos = {a.anomaly_type for a in db.query(Anomaly).filter(Anomaly.machine_id == machine_id).all()}
-        assert demo.SCENARIOS[cenario]["expect"] in tipos, f"{cenario} parou de detectar: {tipos}"
+        session = db.query(DemoSession).filter(DemoSession.id == res.json()["id"]).first()
+        for _ in range(session.total_steps):
+            demo.step(db, session)
+            db.refresh(session)
+        machine_id = session.machine_ids[0]
+        types = {a.anomaly_type for a in db.query(Anomaly).filter(Anomaly.machine_id == machine_id).all()}
+        assert demo.SCENARIOS[scenario]["expect"] in types, f"{scenario} parou de detectar: {types}"
 
 
-def test_janela_ativa_e_pais_chegam_ao_banco(client, machine, db):
+def test_foreground_window_and_ancestors_reach_db(client, machine, db):
     """O contexto de uso depende destes campos; o Pydantic descarta o que não está declarado."""
     from app.models.metric import Metric
     from app.models.process import ProcessSnapshot
     res = _ingest(client, machine["agent_token"], foreground_pid=900, foreground_name="jogo.exe",
-                  processes=[_processo(pid=900, name="jogo.exe", ancestors=[300, 4])])
+                  processes=[_process(pid=900, name="jogo.exe", ancestors=[300, 4])])
     assert res.status_code == 202
     metric = db.query(Metric).filter(Metric.machine_id == machine["id"]).order_by(Metric.id.desc()).first()
     assert metric.foreground_pid == 900

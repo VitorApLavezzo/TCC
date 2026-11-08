@@ -1,6 +1,4 @@
-"""
-Testes do serviço de Machine Learning.
-"""
+"""Testes do serviço de Machine Learning."""
 import pytest
 import numpy as np
 from unittest.mock import MagicMock, patch
@@ -110,24 +108,24 @@ BASE_17 = [
     "disk_read_bytes", "disk_write_bytes", "load_avg_1", "process_count", "swap_percent", "gpu_load",
     "gpu_mem", "hour_sin", "hour_cos", "dow_sin", "dow_cos",
 ]
-CONTEXTO = {"user_idle_seconds": 30.0, "top_proc_cpu": 20.0, "top_proc_user_driven": 1, "top_proc_trust": 2,
+CONTEXT = {"user_idle_seconds": 30.0, "top_proc_cpu": 20.0, "top_proc_user_driven": 1, "top_proc_trust": 2,
             "top_proc_known": 1, "cpu_std_10m": 8.0, "gpu_std_10m": 5.0}
 
 
-def _leitura_solta(**over):
+def _bare_reading(**over):
     from types import SimpleNamespace
-    base = {k: None for k in CONTEXTO}
+    base = {k: None for k in CONTEXT}
     return SimpleNamespace(**{**base, **over})
 
 
-def _historico(db, machine_id, n, com_contexto, inicio_horas, rng):
+def _history(db, machine_id, n, with_context, start_hours, rng):
     from datetime import timedelta
     from app.core.timeutil import utcnow
     from app.models.metric import Metric
-    agora = utcnow()
+    now = utcnow()
     for i in range(n):
         extra = {}
-        if com_contexto:
+        if with_context:
             extra = {"user_idle_seconds": float(rng.uniform(0, 120)), "top_proc_cpu": float(rng.normal(20, 4)),
                      "top_proc_user_driven": 1, "top_proc_trust": 2, "top_proc_known": 1,
                      "cpu_std_10m": float(rng.normal(8, 2)), "gpu_std_10m": float(rng.normal(5, 1))}
@@ -136,44 +134,44 @@ def _historico(db, machine_id, n, com_contexto, inicio_horas, rng):
                       net_connections=int(rng.normal(40, 4)), disk_read_bytes=float(rng.normal(1e5, 1e4)),
                       disk_write_bytes=float(rng.normal(1e5, 1e4)), load_avg_1=1.0, process_count=int(rng.normal(150, 5)),
                       swap_percent=5.0, cpu_count_logical=8,
-                      timestamp=agora - timedelta(hours=inicio_horas) + timedelta(minutes=2 * i), **extra))
+                      timestamp=now - timedelta(hours=start_hours) + timedelta(minutes=2 * i), **extra))
     db.commit()
 
 
-class TestAtributosOpcionais:
+class TestOptionalFeatures:
     """Presença, programa dominante e estabilidade — só onde há histórico deles."""
 
-    def test_os_17_de_sempre_entram_mesmo_sem_contexto(self):
+    def test_base_17_included_even_without_context(self):
         from app.services import ml_service
-        assert ml_service.available_features([_leitura_solta() for _ in range(200)]) == BASE_17
+        assert ml_service.available_features([_bare_reading() for _ in range(200)]) == BASE_17
 
-    def test_opcional_com_99_leituras_fica_fora(self):
+    def test_optional_with_99_readings_excluded(self):
         from app.services import ml_service
-        leituras = [_leitura_solta(top_proc_cpu=10.0) for _ in range(99)] + [_leitura_solta() for _ in range(101)]
-        assert "top_proc_cpu" not in ml_service.available_features(leituras)
+        readings = [_bare_reading(top_proc_cpu=10.0) for _ in range(99)] + [_bare_reading() for _ in range(101)]
+        assert "top_proc_cpu" not in ml_service.available_features(readings)
 
-    def test_opcional_com_100_leituras_entra(self):
+    def test_optional_with_100_readings_included(self):
         from app.services import ml_service
-        leituras = [_leitura_solta(top_proc_cpu=10.0) for _ in range(100)] + [_leitura_solta() for _ in range(100)]
-        escolhidos = ml_service.available_features(leituras)
-        assert "top_proc_cpu" in escolhidos and escolhidos[:17] == BASE_17
+        readings = [_bare_reading(top_proc_cpu=10.0) for _ in range(100)] + [_bare_reading() for _ in range(100)]
+        chosen = ml_service.available_features(readings)
+        assert "top_proc_cpu" in chosen and chosen[:17] == BASE_17
 
-    def test_presenca_vem_do_tempo_ocioso(self):
+    def test_presence_comes_from_idle_time(self):
         from app.services import ml_service
-        leituras = [_leitura_solta(user_idle_seconds=5.0) for _ in range(100)]
+        readings = [_bare_reading(user_idle_seconds=5.0) for _ in range(100)]
         assert ml_service.OPTIONAL_FEATURES["user_presence"] == "user_idle_seconds"
-        assert "user_presence" in ml_service.available_features(leituras)
+        assert "user_presence" in ml_service.available_features(readings)
 
-    def test_contexto_desligado_so_os_17(self):
+    def test_context_off_only_17(self):
         from app.services import context, ml_service
-        leituras = [_leitura_solta(**CONTEXTO) for _ in range(200)]
-        anterior = context.set_context_mode(False)
+        readings = [_bare_reading(**CONTEXT) for _ in range(200)]
+        previous = context.set_context_mode(False)
         try:
-            assert ml_service.available_features(leituras) == BASE_17
+            assert ml_service.available_features(readings) == BASE_17
         finally:
-            context.set_context_mode(anterior)
+            context.set_context_mode(previous)
 
-    def test_presenca_e_logaritmo_do_tempo_ocioso_limitado_a_uma_hora(self):
+    def test_presence_is_log_of_idle_time_capped_at_one_hour(self):
         import math
         from app.services import ml_service
         m = make_mock_metric()
@@ -183,13 +181,13 @@ class TestAtributosOpcionais:
         m.user_idle_seconds = None
         assert ml_service._metric_to_vector(m, keys=keys, fill={"user_presence": 2.5})[-1] == 2.5
 
-    def test_treino_misto_usa_os_novos_e_grava_o_preenchimento(self, db):
+    def test_mixed_training_uses_new_features_and_stores_fill(self, db):
         from app.services import ml_service
         from tests.test_trust import _machine
         rng = np.random.default_rng(1)
         m = _machine(db)
-        _historico(db, m.id, 150, com_contexto=False, inicio_horas=20, rng=rng)
-        _historico(db, m.id, 120, com_contexto=True, inicio_horas=4, rng=rng)
+        _history(db, m.id, 150, with_context=False, start_hours=20, rng=rng)
+        _history(db, m.id, 120, with_context=True, start_hours=4, rng=rng)
         assert ml_service.train_model(m.id, db)
         bundle = ml_service._load_bundle(m.id)
         assert bundle["features"][:17] == BASE_17
@@ -197,73 +195,73 @@ class TestAtributosOpcionais:
         assert bundle["fill"]["top_proc_cpu"] == pytest.approx(20.0, abs=2.0)
         assert set(bundle["fill"]) == set(ml_service.OPTIONAL_FEATURES)
 
-    def test_modelo_antigo_de_17_continua_prevendo(self, db):
+    def test_old_17_feature_model_still_predicts(self, db):
         from app.services import ml_service
         from tests.test_trust import _machine
         m = _machine(db)
-        _historico(db, m.id, 150, com_contexto=False, inicio_horas=6, rng=np.random.default_rng(2))
+        _history(db, m.id, 150, with_context=False, start_hours=6, rng=np.random.default_rng(2))
         assert ml_service.train_model(m.id, db)
         assert ml_service._load_bundle(m.id)["features"] == BASE_17
-        leitura = make_mock_metric()
-        for k, v in CONTEXTO.items():
-            setattr(leitura, k, v)
-        _, score = ml_service.predict_anomaly(m.id, leitura)
+        reading = make_mock_metric()
+        for k, v in CONTEXT.items():
+            setattr(reading, k, v)
+        _, score = ml_service.predict_anomaly(m.id, reading)
         assert score is not None
 
-    def test_bundle_com_atributo_desconhecido_e_descartado(self, db):
+    def test_bundle_with_unknown_feature_is_discarded(self, db):
         import os
         import pickle
         from app.services import ml_service
         from tests.test_trust import _machine
         m = _machine(db)
-        _historico(db, m.id, 150, com_contexto=False, inicio_horas=6, rng=np.random.default_rng(3))
+        _history(db, m.id, 150, with_context=False, start_hours=6, rng=np.random.default_rng(3))
         assert ml_service.train_model(m.id, db)
-        caminho = ml_service._model_path(m.id)
-        with open(caminho, "rb") as f:
+        path = ml_service._model_path(m.id)
+        with open(path, "rb") as f:
             bundle = pickle.load(f)
         bundle["features"] = bundle["features"] + ["atributo_que_nao_existe"]
-        with open(caminho, "wb") as f:
+        with open(path, "wb") as f:
             pickle.dump(bundle, f)
         ml_service._cache.clear()
         assert ml_service.predict_anomaly(m.id, make_mock_metric()) == (False, None)
-        assert not os.path.exists(caminho)
+        assert not os.path.exists(path)
 
-    def test_explicacao_so_fala_dos_grupos_do_modelo(self, db):
+    def test_explanation_only_mentions_model_groups(self, db):
         from app.services import ml_service
         from tests.test_trust import _machine
         m = _machine(db)
-        _historico(db, m.id, 150, com_contexto=False, inicio_horas=6, rng=np.random.default_rng(4))
+        _history(db, m.id, 150, with_context=False, start_hours=6, rng=np.random.default_rng(4))
         assert ml_service.train_model(m.id, db)
-        leitura = make_mock_metric(cpu=99.0, mem=97.0)
-        for k, v in CONTEXTO.items():
-            setattr(leitura, k, v)
-        grupos = {c["group"] for c in ml_service.explain_contributions(m.id, leitura)}
-        assert grupos and not grupos & {"presence", "dominant_process", "stability"}
+        reading = make_mock_metric(cpu=99.0, mem=97.0)
+        for k, v in CONTEXT.items():
+            setattr(reading, k, v)
+        groups = {c["group"] for c in ml_service.explain_contributions(m.id, reading)}
+        assert groups and not groups & {"presence", "dominant_process", "stability"}
 
-    def test_explicacao_aponta_o_programa_dominante(self, db):
+    def test_explanation_points_to_dominant_program(self, db):
         from app.services import ml_service
         from tests.test_trust import _machine
         m = _machine(db)
-        _historico(db, m.id, 150, com_contexto=True, inicio_horas=6, rng=np.random.default_rng(5))
+        _history(db, m.id, 150, with_context=True, start_hours=6, rng=np.random.default_rng(5))
         assert ml_service.train_model(m.id, db)
         # Igual ao histórico em tudo, menos no programa dominante
-        leitura = make_mock_metric(cpu=30.0, mem=50.0, disk=60.0, net_s=5e4, net_r=9e4, conn=40,
+        reading = make_mock_metric(cpu=30.0, mem=50.0, disk=60.0, net_s=5e4, net_r=9e4, conn=40,
                                    disk_r=1e5, disk_w=1e5, load=1.0, procs=150)
         from datetime import timedelta
         from app.core.timeutil import utcnow
-        leitura.timestamp = utcnow() - timedelta(hours=3)  # dentro das horas do histórico
-        for k, v in {**CONTEXTO, "top_proc_cpu": 95.0, "top_proc_user_driven": 0, "top_proc_trust": 0,
+        reading.timestamp = utcnow() - timedelta(hours=3)  # dentro das horas do histórico
+        for k, v in {**CONTEXT, "top_proc_cpu": 95.0, "top_proc_user_driven": 0, "top_proc_trust": 0,
                      "top_proc_known": 0}.items():
-            setattr(leitura, k, v)
-        contribs = ml_service.explain_contributions(m.id, leitura)
+            setattr(reading, k, v)
+        contribs = ml_service.explain_contributions(m.id, reading)
         assert contribs and contribs[0]["group"] == "dominant_process"
         assert contribs[0]["label"] == "Programa dominante"
 
 
-def _classificar(cpu, conduzido, contributions=None, **over):
+def _classify(cpu, user_driven, contributions=None, **over):
     from app.services.ml_service import classify_anomaly
     m = make_mock_metric(cpu=cpu, mem=over.pop("mem", 40.0), disk=50.0)
-    m.top_proc_user_driven = conduzido
+    m.top_proc_user_driven = user_driven
     db = MagicMock()
     db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
         make_mock_metric(cpu=20.0) for _ in range(20)
@@ -271,49 +269,49 @@ def _classificar(cpu, conduzido, contributions=None, **over):
     return classify_anomaly(m, db, contributions)
 
 
-class TestSegundoPlano:
+class TestBackgroundLoad:
     """O mesmo processador cheio: jogo na janela da frente × programa sozinho em segundo plano."""
 
-    def test_processador_cheio_sem_ninguem_conduzindo_e_segundo_plano(self):
-        r = _classificar(97.0, 0)
+    def test_full_cpu_without_user_driving_is_background(self):
+        r = _classify(97.0, 0)
         assert (r["anomaly_type"], r["severity"]) == ("background_load", "high")
 
-    def test_gravidade_segue_a_do_processador(self):
-        r = _classificar(92.0, 0)
+    def test_severity_follows_cpu(self):
+        r = _classify(92.0, 0)
         assert (r["anomaly_type"], r["severity"]) == ("background_load", "medium")
 
-    def test_conduzido_pela_pessoa_continua_processador(self):
-        assert _classificar(97.0, 1)["anomaly_type"] == "high_cpu"
+    def test_user_driven_stays_cpu(self):
+        assert _classify(97.0, 1)["anomaly_type"] == "high_cpu"
 
-    def test_sem_janela_ativa_continua_processador(self):
-        assert _classificar(97.0, None)["anomaly_type"] == "high_cpu"
+    def test_without_foreground_window_stays_cpu(self):
+        assert _classify(97.0, None)["anomaly_type"] == "high_cpu"
 
-    def test_grupo_programa_dominante_sem_limite_fixo(self):
-        grupo = [{"group": "dominant_process", "label": "Programa dominante", "percent": 80.0}]
-        assert _classificar(40.0, 0, grupo)["anomaly_type"] == "background_load"
-        assert _classificar(40.0, 1, grupo)["anomaly_type"] == "high_cpu"
+    def test_dominant_program_group_without_fixed_threshold(self):
+        group = [{"group": "dominant_process", "label": "Programa dominante", "percent": 80.0}]
+        assert _classify(40.0, 0, group)["anomaly_type"] == "background_load"
+        assert _classify(40.0, 1, group)["anomaly_type"] == "high_cpu"
 
-    def test_grupo_estabilidade(self):
-        grupo = [{"group": "stability", "label": "Estabilidade da carga", "percent": 80.0}]
-        r = _classificar(40.0, None, grupo)
+    def test_stability_group(self):
+        group = [{"group": "stability", "label": "Estabilidade da carga", "percent": 80.0}]
+        r = _classify(40.0, None, group)
         assert (r["anomaly_type"], r["severity"]) == ("behavioral_anomaly", "medium")
 
-    def test_grupo_presenca(self):
-        grupo = [{"group": "presence", "label": "Presença de quem usa", "percent": 80.0}]
-        r = _classificar(40.0, None, grupo)
+    def test_presence_group(self):
+        group = [{"group": "presence", "label": "Presença de quem usa", "percent": 80.0}]
+        r = _classify(40.0, None, group)
         assert (r["anomaly_type"], r["severity"]) == ("unusual_time", "low")
 
-    def test_contexto_desligado_nunca_da_segundo_plano(self):
+    def test_context_off_never_gives_background(self):
         from app.services import context
-        grupo = [{"group": "dominant_process", "label": "Programa dominante", "percent": 80.0}]
-        anterior = context.set_context_mode(False)
+        group = [{"group": "dominant_process", "label": "Programa dominante", "percent": 80.0}]
+        previous = context.set_context_mode(False)
         try:
-            assert _classificar(97.0, 0)["anomaly_type"] == "high_cpu"
-            assert _classificar(40.0, 0, grupo)["anomaly_type"] == "high_cpu"
+            assert _classify(97.0, 0)["anomaly_type"] == "high_cpu"
+            assert _classify(40.0, 0, group)["anomaly_type"] == "high_cpu"
         finally:
-            context.set_context_mode(anterior)
+            context.set_context_mode(previous)
 
-    def test_tipo_registrado_onde_os_tipos_de_carga_estao(self):
+    def test_type_registered_with_load_types(self):
         from app.core import labels
         from app.services import anomaly_service, incidents
         assert labels.ANOMALY_TYPE_LABELS["background_load"] == "Programa pesado rodando em segundo plano"
@@ -325,7 +323,7 @@ class TestSegundoPlano:
         # Sem isto o aviso sai sem programa responsável
         assert anomaly_service.BLAME_FIELD["background_load"] == "cpu_percent"
 
-    def test_reconferencia_olha_o_processador(self, db):
+    def test_recheck_looks_at_cpu(self, db):
         """A reconferência de um aviso de segundo plano mede o processador, como a de CPU."""
         from datetime import timedelta
         from app.core.timeutil import utcnow
@@ -334,23 +332,23 @@ class TestSegundoPlano:
         from app.services import conditions
         from tests.test_trust import _machine
         m = _machine(db)
-        agora = utcnow()
+        now = utcnow()
         a = Anomaly(machine_id=m.id, anomaly_type="background_load", severity="high",
-                    detected_at=agora - timedelta(minutes=10), affected_metrics={})
+                    detected_at=now - timedelta(minutes=10), affected_metrics={})
         db.add(a)
         for i in range(4):
-            db.add(Metric(machine_id=m.id, cpu_percent=97.0, timestamp=agora - timedelta(minutes=8 - 2 * i)))
+            db.add(Metric(machine_id=m.id, cpu_percent=97.0, timestamp=now - timedelta(minutes=8 - 2 * i)))
         db.commit()
-        ainda, frase = conditions.condition_status(db, a, since=agora - timedelta(minutes=9))
-        assert ainda is True and frase.startswith("Processador em média 97%")
+        still, sentence = conditions.condition_status(db, a, since=now - timedelta(minutes=9))
+        assert still is True and sentence.startswith("Processador em média 97%")
 
 
-def test_explicacao_sem_ia_do_segundo_plano_fala_do_que_ninguem_abriu():
+def test_no_ai_background_explanation_mentions_unopened_program():
     """Sem IA disponível, o aviso novo não pode cair nas causas genéricas."""
     from types import SimpleNamespace
     from app.services.ai_service import _generate_fallback_explanation
     anomaly = SimpleNamespace(anomaly_type="background_load", severity="high", responsible_process="svc_update.exe")
     out = _generate_fallback_explanation(anomaly, None)
-    texto = " ".join(out["possible_causes"]).lower()
-    assert "segundo plano" in texto and "minerador" in texto
+    text = " ".join(out["possible_causes"]).lower()
+    assert "segundo plano" in text and "minerador" in text
     assert any("você abriu" in r.lower() or "voce abriu" in r.lower() for r in out["recommendations"])

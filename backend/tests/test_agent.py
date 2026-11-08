@@ -1,14 +1,6 @@
-"""
-Testes dos módulos do agente.
+"""Testes dos módulos do agente.
 
-O agente roda no computador da pessoa e é a parte que não dá para inspecionar
-depois: o que ele deixa passar, sai da máquina. Aqui ficam as garantias de
-segurança e privacidade que precisam valer sempre — remoção de segredos na
-origem, arquivos-isca que detectam alteração, e a autoatualização que só troca
-um arquivo se o conteúdo conferir.
-
-O diretório do agente entra no sys.path porque ele é distribuído como arquivos
-soltos (sem pacote), do mesmo jeito que roda na máquina monitorada.
+O agente é distribuído como arquivos soltos (sem pacote), por isso o diretório dele entra no sys.path.
 """
 import hashlib
 import os
@@ -16,7 +8,7 @@ import sys
 
 import pytest
 
-from tests._caminhos import AGENT_DIR, FRONTEND_DIR, SEM_FRONTEND
+from tests._paths import AGENT_DIR, FRONTEND_DIR, NO_FRONTEND
 
 if AGENT_DIR not in sys.path:
     sys.path.insert(0, AGENT_DIR)
@@ -61,13 +53,7 @@ class TestAgentRedaction:
 
 
 class TestNoConsoleWindows:
-    """Nenhum subprocesso pode abrir janela na tela da pessoa.
-
-    O agente roda sem console (`pythonw`), então todo `subprocess.run` de um
-    programa de console (powershell, powercfg, netsh) abre uma JANELA PRETA
-    piscando na frente do usuário. Aconteceu de verdade depois de instalar o
-    agente: "cmds aparecendo do nada". Cada chamada precisa de CREATE_NO_WINDOW.
-    """
+    """O agente roda sem console (`pythonw`): todo subprocesso precisa de CREATE_NO_WINDOW, senão pisca uma janela."""
 
     def _agent_sources(self):
         import glob
@@ -102,22 +88,14 @@ class TestNoConsoleWindows:
 
 
 class TestUninstaller:
-    """O desinstalador precisa mesmo desinstalar.
-
-    O filtro de processo trazia as palavras que ele procurava dentro da própria
-    linha de comando: o PowerShell da busca se encontrava e se matava antes de
-    encerrar o agente. Resultado: o desinstalador "não fazia nada", a pasta
-    ficava travada e a máquina continuava monitorada.
-    """
+    """O filtro de processo casava com a própria linha de comando do PowerShell, que se matava antes do agente."""
 
     INSTALLERS = os.path.join(FRONTEND_DIR, "src", "utils", "installers.ts")
 
     def _source(self):
-        # Pula só quando o frontend inteiro não está presente (o container do
-        # backend). Se o frontend existe e o arquivo sumiu ou mudou de nome, o
-        # teste tem que quebrar — pular aí esconderia a regressão no CI.
+        # Pula só sem o frontend inteiro (container do backend); arquivo sumido no CI tem que quebrar.
         if not os.path.isdir(FRONTEND_DIR):
-            pytest.skip(SEM_FRONTEND)
+            pytest.skip(NO_FRONTEND)
         return open(self.INSTALLERS, encoding="utf-8").read()
 
     def test_kill_filter_does_not_match_itself(self):
@@ -285,15 +263,15 @@ class _FakeUser32:
         return 1
 
 
-class TestJanelaAtiva:
+class TestForegroundWindow:
     """Qual programa está na frente do usuário — a pista de "jogo × minerador"."""
 
-    def test_fora_do_windows_e_none(self, monkeypatch):
+    def test_outside_windows_is_none(self, monkeypatch):
         import sensors
         monkeypatch.setattr(sensors, "IS_WINDOWS", False)
         assert sensors.foreground_process() is None
 
-    def test_api_que_falha_vira_none(self, monkeypatch):
+    def test_failing_api_becomes_none(self, monkeypatch):
         """No Linux não há ctypes.windll: a chamada levanta e o agente segue."""
         import ctypes
         import sensors
@@ -301,7 +279,7 @@ class TestJanelaAtiva:
         monkeypatch.delattr(ctypes, "windll", raising=False)
         assert sensors.foreground_process() is None
 
-    def test_sem_janela_na_frente_e_none(self, monkeypatch):
+    def test_no_foreground_window_is_none(self, monkeypatch):
         """Tela bloqueada ou área de trabalho: GetForegroundWindow devolve 0."""
         import ctypes
         import types
@@ -310,7 +288,7 @@ class TestJanelaAtiva:
         monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(user32=_FakeUser32(0)), raising=False)
         assert sensors.foreground_process() is None
 
-    def test_janela_ativa_traz_pid_e_nome(self, monkeypatch):
+    def test_foreground_window_returns_pid_and_name(self, monkeypatch):
         import ctypes
         import types
         import psutil
@@ -320,10 +298,10 @@ class TestJanelaAtiva:
         assert sensors.foreground_process() == (os.getpid(), psutil.Process().name())
 
 
-class TestAscendencia:
+class TestAncestry:
     """Quem abriu os programas mais pesados: compilação filha do editor, minerador filho do rundll32."""
 
-    def test_mais_pesados_trazem_os_pais(self):
+    def test_heaviest_carry_ancestors(self):
         import collector
         procs = collector.collect_top_processes(n=5, identify=False)
         top = sorted(procs, key=lambda p: p["cpu_percent"], reverse=True)[:3]
@@ -332,81 +310,81 @@ class TestAscendencia:
             assert len(p["ancestors"]) <= 8
             assert all(isinstance(pid, int) for pid in p["ancestors"])
 
-    def test_processo_que_some_fica_sem_pais(self, monkeypatch):
+    def test_vanished_process_has_no_ancestors(self, monkeypatch):
         import psutil
         import collector
 
-        def some(self):
+        def vanish(self):
             raise psutil.NoSuchProcess(self.pid)
 
-        monkeypatch.setattr(psutil.Process, "parents", some)
+        monkeypatch.setattr(psutil.Process, "parents", vanish)
         procs = collector.collect_top_processes(n=5, identify=False)
         top = sorted(procs, key=lambda p: p["cpu_percent"], reverse=True)[:3]
         assert top and all(p["ancestors"] == [] for p in top)
 
-    def test_payload_traz_a_janela_ativa(self):
+    def test_payload_includes_foreground_window(self):
         import collector
         payload = collector.collect_metrics()
         assert "foreground_pid" in payload and "foreground_name" in payload
 
 
 @pytest.fixture(scope="module")
-def agente(tmp_path_factory):
+def agent_module(tmp_path_factory):
     """agent.py grava log e configuração ao lado de si; no container essa pasta é só leitura."""
-    antes = os.environ.get("AGENT_CONFIG_DIR")
+    previous = os.environ.get("AGENT_CONFIG_DIR")
     os.environ["AGENT_CONFIG_DIR"] = str(tmp_path_factory.mktemp("agente"))
     try:
         import agent
         return agent
     finally:
-        if antes is None:
+        if previous is None:
             os.environ.pop("AGENT_CONFIG_DIR", None)
         else:
-            os.environ["AGENT_CONFIG_DIR"] = antes
+            os.environ["AGENT_CONFIG_DIR"] = previous
 
 
-class TestRotuloNaBandeja:
+class TestTrayLabel:
     """"O que estou fazendo": o gabarito marcado no próprio computador."""
 
-    def test_rotulos_da_bandeja_sao_ascii(self, agente):
+    def test_tray_labels_are_ascii(self, agent_module):
         # O backend X11 do pystray usa latin-1: acento vira lixo ou erro
-        for _, texto in agente.ACTIVITY_MENU:
-            assert texto.isascii(), texto
+        for _, text in agent_module.ACTIVITY_MENU:
+            assert text.isascii(), text
 
-    def test_menu_cobre_exatamente_o_catalogo_do_servidor(self, agente):
+    def test_menu_matches_server_catalog_exactly(self, agent_module):
         from app.services import activity_labels
-        ids = [i for i, _ in agente.ACTIVITY_MENU if i != "parar"]
+        ids = [i for i, _ in agent_module.ACTIVITY_MENU if i != "parar"]
         assert set(ids) == set(activity_labels.LABELS)
-        assert "parar" in {i for i, _ in agente.ACTIVITY_MENU}
+        assert "parar" in {i for i, _ in agent_module.ACTIVITY_MENU}
 
-    def test_envia_com_o_token(self, agente, monkeypatch):
-        chamadas = []
+    def test_sends_with_token(self, agent_module, monkeypatch):
+        calls = []
 
-        class Resposta:
+        class FakeResponse:
             status_code = 200
 
         def post(url, json=None, headers=None, timeout=None):
-            chamadas.append((url, json, headers))
-            return Resposta()
+            calls.append((url, json, headers))
+            return FakeResponse()
 
-        monkeypatch.setattr(agente, "API_TOKEN", "tok-123")
-        monkeypatch.setattr(agente.requests, "post", post)
-        assert agente.send_activity_label("jogando") is True
-        url, corpo, headers = chamadas[0]
+        monkeypatch.setattr(agent_module, "API_TOKEN", "tok-123")
+        monkeypatch.setattr(agent_module.requests, "post", post)
+        assert agent_module.send_activity_label("jogando") is True
+        url, body, headers = calls[0]
         assert url.endswith("/api/agent/activity-label")
-        assert corpo == {"label": "jogando"}
+        assert body == {"label": "jogando"}
         assert headers["X-Agent-Token"] == "tok-123"
 
-    def test_sem_rede_devolve_false(self, agente, monkeypatch):
-        def falha(*a, **k):
-            raise agente.requests.ConnectionError("sem rede")
+    def test_without_network_returns_false(self, agent_module, monkeypatch):
+        def fail(*a, **k):
+            raise agent_module.requests.ConnectionError("sem rede")
 
-        monkeypatch.setattr(agente.requests, "post", falha)
-        assert agente.send_activity_label("jogando") is False
+        monkeypatch.setattr(agent_module.requests, "post", fail)
+        assert agent_module.send_activity_label("jogando") is False
 
-    def test_servidor_recusando_devolve_false(self, agente, monkeypatch):
-        class Resposta:
+    def test_server_rejecting_returns_false(self, agent_module, monkeypatch):
+        class FakeResponse:
             status_code = 422
 
-        monkeypatch.setattr(agente.requests, "post", lambda *a, **k: Resposta())
-        assert agente.send_activity_label("xyz") is False
+        monkeypatch.setattr(agent_module.requests, "post", lambda *a, **k: FakeResponse())
+        assert agent_module.send_activity_label("xyz") is False

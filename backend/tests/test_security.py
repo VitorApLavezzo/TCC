@@ -1,9 +1,6 @@
-"""
-Regressões da auditoria de segurança (run-1, ~/security-audit-skill/TCC/run-1).
+"""Regressões da auditoria de segurança (run-1): cada classe fixa uma falha confirmada.
 
-Cada classe fixa uma falha confirmada pela auditoria: o teste falhava antes da
-correção e descreve a fronteira que precisa continuar valendo. Os nomes entre
-crases são os fingerprints do relatório, para achar o registro completo.
+Os nomes entre crases são os fingerprints do relatório.
 """
 import base64
 import hashlib
@@ -24,14 +21,14 @@ from app.services import identity_service, integrity, jobs, playbooks, push, rep
 from tests.conftest import TestingSessionLocal
 
 
-def _conta(client, nome: str) -> dict:
-    client.post("/api/auth/register", json={"email": f"{nome}@x.com", "username": nome, "password": "senha-boa-123"})
-    res = client.post("/api/auth/login", data={"username": nome, "password": "senha-boa-123"})
+def _account(client, name: str) -> dict:
+    client.post("/api/auth/register", json={"email": f"{name}@x.com", "username": name, "password": "senha-boa-123"})
+    res = client.post("/api/auth/login", data={"username": name, "password": "senha-boa-123"})
     return {"Authorization": f"Bearer {res.json()['access_token']}"}
 
 
-def _maquina(client, headers, nome="PC") -> dict:
-    res = client.post("/api/machines", json={"name": nome, "hostname": nome, "os_type": "Windows"}, headers=headers)
+def _create_machine(client, headers, name="PC") -> dict:
+    res = client.post("/api/machines", json={"name": name, "hostname": name, "os_type": "Windows"}, headers=headers)
     return res.json()
 
 
@@ -40,20 +37,20 @@ def _proc(name, exe, sha256=None, signed="unsigned", publisher=None):
                           "publisher": publisher, "parent_name": None})()
 
 
-class TestChaveDeSessao:
+class TestSessionKey:
     """`backend/app/config.py:Settings.SECRET_KEY:public-default-accepted`"""
 
-    @pytest.mark.parametrize("chave", ["change-this-in-production", "dev-secret-key-change-in-production", "curta"])
-    def test_recusa_chave_publica_ou_curta(self, chave):
+    @pytest.mark.parametrize("key", ["change-this-in-production", "dev-secret-key-change-in-production", "curta"])
+    def test_rejects_public_or_short_key(self, key):
         with pytest.raises(ValidationError):
-            Settings(SECRET_KEY=chave, _env_file=None)
+            Settings(SECRET_KEY=key, _env_file=None)
 
-    def test_sem_chave_nao_sobe(self, monkeypatch):
+    def test_without_key_does_not_start(self, monkeypatch):
         monkeypatch.delenv("SECRET_KEY", raising=False)
         with pytest.raises(ValidationError):
             Settings(_env_file=None)
 
-    def test_aceita_chave_forte(self):
+    def test_accepts_strong_key(self):
         assert Settings(SECRET_KEY="x" * 40, _env_file=None).SECRET_KEY == "x" * 40
 
 
@@ -62,18 +59,18 @@ def _req(peer: str, **headers) -> Request:
                     "headers": [(k.replace("_", "-").encode(), v.encode()) for k, v in headers.items()]})
 
 
-class TestLimiteDeTentativasPorIp:
+class TestRateLimitPerIp:
     """`backend/app/core/ratelimit.py:_client_ip:client-supplied-x-forwarded-for` e vizinhos."""
 
-    def test_cliente_nao_escolhe_o_proprio_balde(self, monkeypatch):
+    def test_client_cannot_choose_own_bucket(self, monkeypatch):
         monkeypatch.setattr(settings, "TRUSTED_PROXY_CIDRS", "172.16.0.0/12")
         assert ratelimit._client_ip(_req("203.0.113.5", x_forwarded_for="1.2.3.4")) == "203.0.113.5"
 
-    def test_atras_do_nginx_usa_o_ip_que_ele_escreve(self, monkeypatch):
+    def test_behind_nginx_uses_ip_it_writes(self, monkeypatch):
         monkeypatch.setattr(settings, "TRUSTED_PROXY_CIDRS", "172.16.0.0/12")
         assert ratelimit._client_ip(_req("172.18.0.3", x_real_ip="198.51.100.7")) == "198.51.100.7"
 
-    def test_numero_de_chaves_tem_teto(self, monkeypatch):
+    def test_number_of_keys_is_capped(self, monkeypatch):
         ratelimit.reset()
         monkeypatch.setattr(ratelimit, "_MAX_KEYS", 100)
         for i in range(150):
@@ -81,7 +78,7 @@ class TestLimiteDeTentativasPorIp:
         assert len(ratelimit._hits) <= 100
 
 
-class TestInstaladorHeadless:
+class TestHeadlessInstaller:
     """`backend/app/routers/agent_files.py:install_script:query-values-interpolated-into-bash`"""
 
     @pytest.mark.parametrize("params", [
@@ -91,10 +88,10 @@ class TestInstaladorHeadless:
         {"code": 'X" ; echo X ; : "', "server": "http://srv:3000"},
         {"token": 'X" ; echo X ; : "', "server": "http://srv:3000"},
     ])
-    def test_recusa_metacaracteres(self, client, params):
+    def test_rejects_metacharacters(self, client, params):
         assert client.get("/api/agent/install.sh", params=params).status_code == 400
 
-    def test_valores_legitimos_continuam_funcionando(self, client):
+    def test_legitimate_values_still_work(self, client):
         res = client.get("/api/agent/install.sh", params={"code": "ABCD-EFGH", "server": "http://srv:3000"})
         assert res.status_code == 200
         assert "SERVER=http://srv:3000\n" in res.text
@@ -123,26 +120,25 @@ def google(monkeypatch):
     monkeypatch.setattr(auth_router.httpx, "get", lambda *a, **k: type("R", (), {"json": lambda self: {"keys": [jwk]}})())
 
     def token(email: str, sub: str) -> str:
-        agora = int(time.time())
+        now = int(time.time())
         return jose_jwt.encode({"iss": "https://accounts.google.com", "aud": "cliente.apps.googleusercontent.com",
-                                "sub": sub, "email": email, "email_verified": True, "iat": agora,
-                                "exp": agora + 3600}, pem, algorithm="RS256", headers={"kid": "k1"})
+                                "sub": sub, "email": email, "email_verified": True, "iat": now,
+                                "exp": now + 3600}, pem, algorithm="RS256", headers={"kid": "k1"})
     return token
 
 
-class TestLoginGoogle:
+class TestGoogleLogin:
     """`backend/app/routers/auth.py:google_login:links-unverified-register-email`"""
 
-    def test_nao_entra_em_conta_de_senha_com_o_mesmo_email(self, client, google):
+    def test_google_login_does_not_enter_password_account_with_same_email(self, client, google):
         client.post("/api/auth/register", json={"email": "vitima@x.com", "username": "invasor",
                                                 "password": "senha-do-invasor"})
         res = client.post("/api/auth/google", json={"credential": google("vitima@x.com", "sub-vitima")})
         assert res.status_code == 409
         assert "access_token" not in res.json()
 
-    def test_conta_antiga_liberada_pelo_administrador_entra_com_google(self, client, google, db):
-        # Conta criada pelo Google antes do vínculo por sub: tem senha
-        # aleatória que ninguém sabe, então "entre com senha" não serve.
+    def test_old_account_allowed_by_admin_logs_in_with_google(self, client, google, db):
+        # Conta antiga criada pelo Google tem senha aleatória: "entre com senha" não serve.
         from allow_google_link import allow_google_link
         client.post("/api/auth/register", json={"email": "Antiga@x.com", "username": "antiga",
                                                 "password": "senha-qualquer-1"})
@@ -152,7 +148,7 @@ class TestLoginGoogle:
         me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {res.json()['access_token']}"}).json()
         assert me["username"] == "antiga"
 
-    def test_liberacao_vale_so_para_a_primeira_identidade_google(self, client, google, db):
+    def test_allowance_applies_only_to_first_google_identity(self, client, google, db):
         from allow_google_link import allow_google_link
         client.post("/api/auth/register", json={"email": "uma@x.com", "username": "uma",
                                                 "password": "senha-qualquer-1"})
@@ -160,13 +156,13 @@ class TestLoginGoogle:
         assert client.post("/api/auth/google", json={"credential": google("uma@x.com", "sub-a")}).status_code == 200
         assert client.post("/api/auth/google", json={"credential": google("uma@x.com", "sub-b")}).status_code == 409
 
-    def test_liberar_conta_inexistente_ou_ja_vinculada_nao_faz_nada(self, client, google, db):
+    def test_allowing_missing_or_linked_account_does_nothing(self, client, google, db):
         from allow_google_link import allow_google_link
         assert allow_google_link(db, "ninguem@x.com") is False
         client.post("/api/auth/google", json={"credential": google("ja@x.com", "sub-ja")})
         assert allow_google_link(db, "ja@x.com") is False
 
-    def test_mesma_identidade_google_volta_para_a_mesma_conta(self, client, google):
+    def test_same_google_identity_returns_to_same_account(self, client, google):
         a = client.post("/api/auth/google", json={"credential": google("nova@x.com", "sub-1")}).json()
         b = client.post("/api/auth/google", json={"credential": google("nova@x.com", "sub-1")}).json()
         me = [client.get("/api/auth/me", headers={"Authorization": f"Bearer {t['access_token']}"}).json()["id"]
@@ -174,205 +170,205 @@ class TestLoginGoogle:
         assert me[0] == me[1]
 
 
-class TestPareamentoAtomico:
+class TestAtomicEnrollment:
     """`backend/app/routers/machines.py:enroll_agent:non-atomic-code-consumption`"""
 
-    def test_consumo_com_leitura_velha_nao_passa_do_limite(self, client, auth, db):
-        from app.routers import machines as rota
+    def test_consumption_with_stale_read_does_not_exceed_limit(self, client, auth, db):
+        from app.routers import machines as machines_router
         from app.models.user import User
-        dono = db.query(User).first()
-        db.add(EnrollmentCode(code="ABCD-EFGH", user_id=dono.id, reusable=True, max_uses=1,
+        owner = db.query(User).first()
+        db.add(EnrollmentCode(code="ABCD-EFGH", user_id=owner.id, reusable=True, max_uses=1,
                               expires_at=__import__("app.core.timeutil", fromlist=["utcnow"]).utcnow()
                               + __import__("datetime").timedelta(days=1)))
         db.commit()
-        velha = TestingSessionLocal()
-        lida_antes = velha.query(EnrollmentCode).filter(EnrollmentCode.code == "ABCD-EFGH").first()
+        stale_session = TestingSessionLocal()
+        read_before = stale_session.query(EnrollmentCode).filter(EnrollmentCode.code == "ABCD-EFGH").first()
         assert client.post("/api/machines/enroll", json={"code": "ABCD-EFGH", "hostname": "h1"}).status_code == 200
         # A leitura de antes ainda diz use_count=0; o consumo tem de decidir no banco
-        assert rota._consume_enrollment(velha, lida_antes) is False
-        velha.close()
+        assert machines_router._consume_enrollment(stale_session, read_before) is False
+        stale_session.close()
 
 
-class TestReputacaoPorConta:
+class TestReputationPerAccount:
     """Fingerprints de reputação: lookup, prevalência pelo agente, feedback e hub."""
 
-    def test_consulta_nao_revela_programa_de_outra_conta(self, client, db):
-        vitima, invasor = _conta(client, "vitima"), _conta(client, "invasor")
-        m = db.query(Machine).get(_maquina(client, vitima)["id"])
+    def test_lookup_does_not_reveal_other_account_program(self, client, db):
+        victim, attacker = _account(client, "vitima"), _account(client, "invasor")
+        m = db.query(Machine).get(_create_machine(client, victim)["id"])
         identity_service.observe(db, m, [_proc("ferramenta-privada.exe", r"C:\x\ferramenta-privada.exe")], [])
         db.commit()
-        res = client.get("/api/reputation/lookup", params={"name": "ferramenta-privada.exe"}, headers=invasor)
+        res = client.get("/api/reputation/lookup", params={"name": "ferramenta-privada.exe"}, headers=attacker)
         assert res.json()["found"] is False
 
-    def test_um_agente_nao_inventa_prevalencia(self, client, db):
-        a, v = _conta(client, "invasor"), _conta(client, "vitima")
-        ma = db.query(Machine).get(_maquina(client, a, "A")["id"])
-        mv = db.query(Machine).get(_maquina(client, v, "V")["id"])
+    def test_single_agent_cannot_fake_prevalence(self, client, db):
+        a, v = _account(client, "invasor"), _account(client, "vitima")
+        ma = db.query(Machine).get(_create_machine(client, a, "A")["id"])
+        mv = db.query(Machine).get(_create_machine(client, v, "V")["id"])
         sha = "b2" * 32
         identity_service.observe(db, ma, [_proc("miner.exe", rf"C:\fake{i}\miner.exe", sha) for i in range(3)], [])
         db.commit()
         rep = db.query(HashReputation).filter(HashReputation.identity_key == sha).first()
         assert rep.local_machines == 1
-        alvo = _proc("miner.exe", r"C:\Users\v\miner.exe", sha)
-        identity_service.observe(db, mv, [alvo], [])
+        target = _proc("miner.exe", r"C:\Users\v\miner.exe", sha)
+        identity_service.observe(db, mv, [target], [])
         db.commit()
-        assert trust.evaluate(db, mv.id, alvo).level == trust.UNKNOWN
+        assert trust.evaluate(db, mv.id, target).level == trust.UNKNOWN
 
-    def test_maquinas_de_outra_conta_nao_contam_como_prevalencia(self, client, db):
-        a, v = _conta(client, "invasor"), _conta(client, "vitima")
+    def test_other_account_machines_do_not_count_as_prevalence(self, client, db):
+        a, v = _account(client, "invasor"), _account(client, "vitima")
         sha = "c3" * 32
         for i in range(3):
-            m = db.query(Machine).get(_maquina(client, a, f"A{i}")["id"])
+            m = db.query(Machine).get(_create_machine(client, a, f"A{i}")["id"])
             identity_service.observe(db, m, [_proc("imp.exe", r"C:\Users\a\imp.exe", sha)], [])
-        mv = db.query(Machine).get(_maquina(client, v, "V")["id"])
-        alvo = _proc("imp.exe", r"C:\Users\v\imp.exe", sha)
-        identity_service.observe(db, mv, [alvo], [])
+        mv = db.query(Machine).get(_create_machine(client, v, "V")["id"])
+        target = _proc("imp.exe", r"C:\Users\v\imp.exe", sha)
+        identity_service.observe(db, mv, [target], [])
         db.commit()
-        avaliado = trust.evaluate(db, mv.id, alvo)
-        assert avaliado.level == trust.UNKNOWN
-        assert not any("visto em" in r for r in avaliado.reasons)
+        evaluated = trust.evaluate(db, mv.id, target)
+        assert evaluated.level == trust.UNKNOWN
+        assert not any("visto em" in r for r in evaluated.reasons)
 
-    def test_feedback_de_outra_conta_nao_reprova_o_programa(self, client, db):
-        a, v = _conta(client, "invasor"), _conta(client, "vitima")
-        ma = _maquina(client, a, "A")
-        mv = db.query(Machine).get(_maquina(client, v, "V")["id"])
+    def test_other_account_feedback_does_not_flag_program(self, client, db):
+        a, v = _account(client, "invasor"), _account(client, "vitima")
+        ma = _create_machine(client, a, "A")
+        mv = db.query(Machine).get(_create_machine(client, v, "V")["id"])
         defender = _proc("MsMpEng.exe", r"C:\Program Files\Windows Defender\MsMpEng.exe", None, "signed",
                          "Microsoft Corporation")
         identity_service.observe(db, mv, [defender], [])
-        anomalia = Anomaly(machine_id=ma["id"], anomaly_type="canary_tripped", severity="critical",
+        anomaly = Anomaly(machine_id=ma["id"], anomaly_type="canary_tripped", severity="critical",
                            responsible_process="MsMpEng.exe")
-        db.add(anomalia)
+        db.add(anomaly)
         db.commit()
         assert trust.evaluate(db, mv.id, defender).level == trust.SECURITY
         for _ in range(3):
-            assert client.post(f"/api/anomalies/{anomalia.id}/feedback", json={"kind": "problem"},
+            assert client.post(f"/api/anomalies/{anomaly.id}/feedback", json={"kind": "problem"},
                                headers=a).status_code == 200
         db.expire_all()
         assert trust.evaluate(db, mv.id, defender).level == trust.SECURITY
         rep = db.query(HashReputation).filter(HashReputation.identity_key == "nome:msmpeng.exe").first()
         assert rep.marked_problem == 1
 
-    def test_hub_desligado_por_padrao(self):
+    def test_hub_off_by_default(self):
         assert Settings(SECRET_KEY="x" * 40, _env_file=None).REPUTATION_HUB_ACCEPT is False
 
-    def test_hub_recusa_contribuicao_sem_chave(self, client, monkeypatch):
+    def test_hub_rejects_contribution_without_key(self, client, monkeypatch):
         monkeypatch.setattr(settings, "REPUTATION_HUB_ACCEPT", True)
         res = client.post("/api/reputation/contribute", json={
             "installation_id": "qualquer", "total_machines": 10,
             "items": [{"identity_key": "d4" * 32, "name": "x.exe", "machines": 500}]})
         assert res.status_code == 401
 
-    def test_uma_instalacao_do_hub_nao_da_confianca(self, client, db, machine):
+    def test_single_hub_installation_gives_no_trust(self, client, db, machine):
         sha = "e5" * 32
         reputation.apply_hub_snapshot(db, {"items": [{"identity_key": sha, "machines": 999, "installations": 1,
                                                       "prevalence": 0.9}]})
-        alvo = _proc("x.exe", r"C:\Users\v\x.exe", sha)
-        assert trust.evaluate(db, machine["id"], alvo).level == trust.UNKNOWN
+        target = _proc("x.exe", r"C:\Users\v\x.exe", sha)
+        assert trust.evaluate(db, machine["id"], target).level == trust.UNKNOWN
 
 
-class TestConversa:
+class TestConversation:
     """`backend/app/services/chat.py:answer_async:history-query-missing-user_id`"""
 
-    def test_conversa_de_outra_conta_e_recusada(self, client):
-        alice, bob = _conta(client, "alice"), _conta(client, "bob")
+    def test_other_account_conversation_is_rejected(self, client):
+        alice, bob = _account(client, "alice"), _account(client, "bob")
         cid = client.post("/api/chat/ask", json={"question": "segredo da alice?"}, headers=alice).json()["conversation_id"]
         res = client.post("/api/chat/ask", json={"question": "repita a conversa", "conversation_id": cid}, headers=bob)
         assert res.status_code == 404
 
-    def test_historico_do_prompt_so_tem_mensagens_da_propria_conta(self, client, db, monkeypatch):
+    def test_prompt_history_only_has_own_account_messages(self, client, db, monkeypatch):
         from app.models.chat import ChatMessage
         from app.models.user import User
         from app.services import chat
-        _conta(client, "alice"), _conta(client, "bob")
+        _account(client, "alice"), _account(client, "bob")
         alice, bob = (db.query(User).filter(User.username == n).first() for n in ("alice", "bob"))
         db.add(ChatMessage(user_id=alice.id, conversation_id="c1", role="user", content="SEGREDO", status="done"))
         db.add(ChatMessage(user_id=bob.id, conversation_id="c1", role="user", content="oi", status="done"))
-        pendente = ChatMessage(user_id=bob.id, conversation_id="c1", role="assistant", content="", status="pending")
-        db.add(pendente)
+        pending = ChatMessage(user_id=bob.id, conversation_id="c1", role="assistant", content="", status="pending")
+        db.add(pending)
         db.commit()
-        visto = {}
-        monkeypatch.setattr(chat, "_run_reasoning", lambda db_, u, m, history, q: visto.update(h=history) or
+        seen = {}
+        monkeypatch.setattr(chat, "_run_reasoning", lambda db_, u, m, history, q: seen.update(h=history) or
                             {"answer": "ok", "trace": [], "model_used": None})
-        chat.answer_async(db, pendente.id)
-        assert all("SEGREDO" not in h["content"] for h in visto["h"])
+        chat.answer_async(db, pending.id)
+        assert all("SEGREDO" not in h["content"] for h in seen["h"])
 
 
-class TestLivroDeAuditoria:
+class TestAuditLedger:
     """`backend/app/services/integrity.py:_entry_hash:unkeyed-unanchored-partial-seal`"""
 
-    def _tres(self, db, machine):
+    def _three_entries(self, db, machine):
         for ref in (200, 201, 202):
             integrity.append(db, kind="action", payload={"comando": "kill_process"}, ref_id=ref,
                              machine_id=machine["id"])
 
-    def test_esconder_registro_mudando_a_maquina_quebra_a_cadeia(self, db, machine):
-        self._tres(db, machine)
+    def test_hiding_entry_by_changing_machine_breaks_chain(self, db, machine):
+        self._three_entries(db, machine)
         db.execute(text("UPDATE ledger_entries SET machine_id = NULL WHERE ref_id = 201"))
         db.commit()
         assert integrity.verify(db)["ok"] is False
 
-    def test_recalcular_a_cadeia_sem_a_chave_nao_engana(self, db, machine):
+    def test_recomputing_chain_without_key_does_not_fool(self, db, machine):
         import json
-        self._tres(db, machine)
-        linhas = db.execute(text("SELECT id, kind, ref_id, payload FROM ledger_entries ORDER BY id")).fetchall()
-        anterior = "0" * 64
-        for i, (lid, kind, ref, payload) in enumerate(linhas):
-            corpo = json.loads(payload) if isinstance(payload, str) else dict(payload)
+        self._three_entries(db, machine)
+        rows = db.execute(text("SELECT id, kind, ref_id, payload FROM ledger_entries ORDER BY id")).fetchall()
+        previous = "0" * 64
+        for i, (lid, kind, ref, payload) in enumerate(rows):
+            body = json.loads(payload) if isinstance(payload, str) else dict(payload)
             if i == 0:
-                corpo["comando"] = "nada aconteceu"
-            canon = integrity.canonical(corpo)
+                body["comando"] = "nada aconteceu"
+            canon = integrity.canonical(body)
             pd = hashlib.sha256(canon.encode()).hexdigest()
-            eh = hashlib.sha256("|".join([anterior, pd, kind, str(ref)]).encode()).hexdigest()
+            eh = hashlib.sha256("|".join([previous, pd, kind, str(ref)]).encode()).hexdigest()
             db.execute(text("UPDATE ledger_entries SET payload=:p, payload_digest=:d, prev_hash=:ph, entry_hash=:h "
-                            "WHERE id=:i"), {"p": canon, "d": pd, "ph": anterior, "h": eh, "i": lid})
-            anterior = eh
+                            "WHERE id=:i"), {"p": canon, "d": pd, "ph": previous, "h": eh, "i": lid})
+            previous = eh
         db.commit()
         assert integrity.verify(db)["ok"] is False
 
-    def test_remocao_de_maquina_continua_integra(self, client, auth, machine, db):
-        self._tres(db, machine)
+    def test_machine_removal_keeps_integrity(self, client, auth, machine, db):
+        self._three_entries(db, machine)
         assert client.delete(f"/api/machines/{machine['id']}", headers=auth).status_code in (200, 204)
         db.expire_all()
         assert integrity.verify(db)["ok"] is True
 
 
-class _ExecutorParado:
+class _StalledExecutor:
     """Guarda o trabalho sem executar: a fila fica cheia como num servidor ocupado."""
     def __init__(self):
-        self.fila = []
+        self.queue = []
 
     def submit(self, fn):
-        self.fila.append(fn)
+        self.queue.append(fn)
 
 
-class TestCotaDeTrabalhosDeIa:
+class TestAiJobQuota:
     """`backend/app/services/jobs.py:submit:no-per-account-quota-on-ai-jobs`"""
 
-    def test_uma_conta_nao_enche_a_fila_de_todos(self, client, monkeypatch):
+    def test_one_account_cannot_fill_everyones_queue(self, client, monkeypatch):
         monkeypatch.setattr(jobs, "RUN_INLINE", False)
-        monkeypatch.setattr(jobs, "_executor", _ExecutorParado())
+        monkeypatch.setattr(jobs, "_executor", _StalledExecutor())
         jobs._inflight.clear()
-        a, v = _conta(client, "mallory"), _conta(client, "vitima")
-        codigos = [client.post("/api/chat/ask", json={"question": f"pergunta {i}?"}, headers=a).status_code
+        a, v = _account(client, "mallory"), _account(client, "vitima")
+        status_codes = [client.post("/api/chat/ask", json={"question": f"pergunta {i}?"}, headers=a).status_code
                    for i in range(jobs.MAX_PER_USER + 2)]
-        assert codigos[:jobs.MAX_PER_USER] == [200] * jobs.MAX_PER_USER
-        assert codigos[-1] == 429
+        assert status_codes[:jobs.MAX_PER_USER] == [200] * jobs.MAX_PER_USER
+        assert status_codes[-1] == 429
         assert client.post("/api/chat/ask", json={"question": "meu pc esta bem?"}, headers=v).status_code == 200
         jobs._inflight.clear()
 
 
-class TestNotificacaoNoCelular:
+class TestPushNotification:
     """`backend/app/services/push.py:subscribe:unvalidated-endpoint-ssrf`"""
 
     @pytest.mark.parametrize("endpoint", ["http://127.0.0.1:8000/interno", "https://169.254.169.254/x",
                                           "https://fcm.googleapis.com.evil.com/x", "ftp://fcm.googleapis.com/x"])
-    def test_recusa_endereco_que_nao_e_servico_de_push(self, client, auth, monkeypatch, endpoint):
+    def test_rejects_non_push_service_endpoint(self, client, auth, monkeypatch, endpoint):
         monkeypatch.setattr(push, "available", lambda: True)
         res = client.post("/api/account/push/subscribe",
                           json={"endpoint": endpoint, "keys": {"p256dh": "a", "auth": "b"}}, headers=auth)
         assert res.status_code == 400
 
-    def test_aceita_servico_de_push_conhecido(self, client, auth, monkeypatch):
+    def test_accepts_known_push_service(self, client, auth, monkeypatch):
         monkeypatch.setattr(push, "available", lambda: True)
         res = client.post("/api/account/push/subscribe",
                           json={"endpoint": "https://fcm.googleapis.com/fcm/send/abc", "keys": {"p256dh": "a", "auth": "b"}},
@@ -380,42 +376,42 @@ class TestNotificacaoNoCelular:
         assert res.status_code == 201
 
 
-class TestLinkCompartilhado:
+class TestSharedLink:
     """`backend/app/services/share.py:build_package/live-machine-history-beyond-shared-alert`"""
 
-    def test_pacote_publico_nao_traz_outros_avisos(self, client, auth, machine, db):
+    def test_public_package_has_no_other_alerts(self, client, auth, machine, db):
         a1 = Anomaly(machine_id=machine["id"], anomaly_type="high_cpu", severity="high")
         a2 = Anomaly(machine_id=machine["id"], anomaly_type="high_cpu", severity="high",
                      resolution_cause="NOTA PRIVADA")
         db.add_all([a1, a2])
         db.commit()
         token = client.post(f"/api/share/anomaly/{a1.id}", headers=auth).json()["token"]
-        pacote = client.get(f"/api/share/view/{token}")
-        assert pacote.status_code == 200
-        assert "history" not in pacote.json()
-        assert "NOTA PRIVADA" not in pacote.text
+        package = client.get(f"/api/share/view/{token}")
+        assert package.status_code == 200
+        assert "history" not in package.json()
+        assert "NOTA PRIVADA" not in package.text
 
 
 class TestTelegram:
     """`backend/app/services/telegram.py:_handle_start:chat-multi-account-binding`"""
 
-    def test_chat_ja_vinculado_nao_aceita_outra_conta(self, client, db):
+    def test_already_linked_chat_rejects_other_account(self, client, db):
         from app.models.user import User
-        _conta(client, "vitima"), _conta(client, "invasor")
-        vitima, invasor = (db.query(User).filter(User.username == n).first() for n in ("vitima", "invasor"))
-        vitima.telegram_link_code, invasor.telegram_link_code = "cv", "ci"
+        _account(client, "vitima"), _account(client, "invasor")
+        victim, attacker = (db.query(User).filter(User.username == n).first() for n in ("vitima", "invasor"))
+        victim.telegram_link_code, attacker.telegram_link_code = "cv", "ci"
         db.commit()
         telegram._handle_start(db, "5551", "cv")
-        resposta = telegram._handle_start(db, "5551", "ci")
-        db.refresh(invasor)
-        assert invasor.telegram_chat_id is None
-        assert "outra conta" in resposta
+        reply = telegram._handle_start(db, "5551", "ci")
+        db.refresh(attacker)
+        assert attacker.telegram_chat_id is None
+        assert "outra conta" in reply
 
 
-class TestOrdemDeEncerrarProcesso:
+class TestKillProcessCommand:
     """`agent/actions.py:_kill-name-match-unbound-process-identity` (lado do servidor)."""
 
-    def _aviso(self, db, machine):
+    def _alert(self, db, machine):
         a = Anomaly(machine_id=machine["id"], anomaly_type="process_masquerading", severity="critical",
                     responsible_process="svchost.exe",
                     affected_metrics={"_behavior": {"pid": 4242, "exe": r"C:\Users\bob\svchost.exe",
@@ -424,12 +420,12 @@ class TestOrdemDeEncerrarProcesso:
         db.commit()
         return a
 
-    def test_telegram_manda_a_identidade_do_processo(self, client, auth, machine, db):
+    def test_telegram_sends_process_identity(self, client, auth, machine, db):
         from app.models.command import AgentCommand
         from app.models.user import User
-        a = self._aviso(db, machine)
-        dono = db.query(User).first()
-        dono.telegram_chat_id = "777"
+        a = self._alert(db, machine)
+        owner = db.query(User).first()
+        owner.telegram_chat_id = "777"
         db.commit()
         telegram._handle_callback(db, "777", f"kill:{a.id}")
         cmd = db.query(AgentCommand).filter(AgentCommand.command == "kill_process").first()
@@ -437,7 +433,7 @@ class TestOrdemDeEncerrarProcesso:
         assert cmd.params["exe"] == r"C:\Users\bob\svchost.exe"
         assert cmd.params["create_time"] == 1700000000.0
 
-    def test_playbook_de_sincronizacao_nao_usa_o_nome_do_aviso(self, db, machine):
-        a = self._aviso(db, machine)
+    def test_sync_playbook_does_not_use_alert_name(self, db, machine):
+        a = self._alert(db, machine)
         pb = type("PB", (), {"action": "stop_sync_client", "params": {}})()
         assert "name" not in playbooks._params_for(pb, a)

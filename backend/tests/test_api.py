@@ -43,11 +43,7 @@ class TestMachines:
 
 
 class TestEnrollment:
-    """O pareamento é o primeiro contato do agente — e não tinha teste nenhum.
-
-    A comparação de datas do código de pareamento quebrava com SQLite (data sem
-    fuso do banco contra data com fuso), derrubando TODO pareamento com 500.
-    """
+    """A comparação de datas do código quebrava com SQLite (sem fuso contra com fuso) e derrubava o pareamento."""
 
     def test_agent_enrolls_with_code(self, client, auth):
         code = client.post("/api/machines/enroll-code", headers=auth).json()["code"]

@@ -1,8 +1,4 @@
-"""
-Base de testes: SQLite em memória, IA desligada (privacy no_ai) e jobs de
-segundo plano executados na hora, para os testes serem determinísticos e
-não dependerem de Ollama, Groq nem de threads.
-"""
+"""Base de testes: SQLite em memória, IA desligada e jobs executados na hora, sem Ollama, Groq nem threads."""
 import os
 import secrets
 
@@ -24,19 +20,16 @@ from app.services import jobs
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 
 
-# O SQLite ignora chave estrangeira por padrão; o PostgreSQL de produção não.
-# Sem este PRAGMA, um delete na ordem errada passa nos testes e só falha na
-# máquina de quem usa — foi assim que a remoção das máquinas efêmeras do
-# benchmark quebrou sem nenhum teste acusar.
+# O SQLite ignora chave estrangeira por padrão e o PostgreSQL de produção não:
+# sem o PRAGMA, um delete na ordem errada passaria nos testes.
 @event.listens_for(engine, "connect")
-def _ativa_chaves_estrangeiras(dbapi_connection, _record):
+def _enable_foreign_keys(dbapi_connection, _record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 upgrade_schema(engine)
 
-# Jobs rodam na hora, na sessão de teste
 jobs.RUN_INLINE = True
 jobs.session_factory = TestingSessionLocal
 
@@ -67,28 +60,18 @@ def reset_db():
     from app.core import ratelimit
     Base.metadata.drop_all(bind=engine)
     upgrade_schema(engine)
-    # O limite de tentativas conta por IP, e a suíte inteira vem do mesmo
-    # cliente de teste: sem zerar, o terceiro teste que cria conta já bateria
-    # no teto. O teste do próprio limite liga e controla isso por conta.
+    # O limite de tentativas conta por IP e a suíte inteira vem do mesmo cliente.
     ratelimit.reset()
     yield
 
 
 @pytest.fixture(autouse=True)
-def modelos_isolados(tmp_path, monkeypatch):
-    """Cada teste grava e lê modelos num diretório próprio e vazio.
-
-    O diretório padrão de modelos, no container, é o volume de produção — e
-    `docker compose exec backend python -m pytest` é o comando documentado. Os
-    testes treinam para as máquinas 1 e 2 e apagam o modelo ao apagar a
-    máquina efêmera: numa instalação nova, eram os modelos de verdade. E sem
-    um diretório por teste, a máquina 1 de um teste carregava o modelo da
-    máquina 1 do anterior.
-    """
+def isolated_models(tmp_path, monkeypatch):
+    """Cada teste usa um diretório de modelos próprio e vazio; o padrão no container é o volume de produção."""
     from app.services import ml_service
-    diretorio = tmp_path / "ml_models"
-    diretorio.mkdir()
-    monkeypatch.setattr(ml_service, "MODEL_DIR", str(diretorio))
+    models_dir = tmp_path / "ml_models"
+    models_dir.mkdir()
+    monkeypatch.setattr(ml_service, "MODEL_DIR", str(models_dir))
     ml_service._cache.clear()
     yield
     ml_service._cache.clear()

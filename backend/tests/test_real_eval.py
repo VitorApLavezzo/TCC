@@ -1,10 +1,6 @@
-"""
-Avaliação em dado real: o resultado do TCC.
+"""Avaliação em dado real: cruza os rótulos de sessão com os avisos do sistema.
 
-Cruza o que a pessoa marcou que estava fazendo (os rótulos de sessão) com o
-que o sistema avisou. Sessão de jogo com aviso que interrompeu é alarme falso;
-teste de minerador só conta como acerto com a evidência certa — um aviso sobre
-outro programa, no mesmo horário, não é ter visto o minerador.
+Aviso que interrompeu jogo é alarme falso; teste de minerador só é acerto com a evidência certa.
 """
 from datetime import timedelta
 
@@ -14,145 +10,145 @@ from app.core.timeutil import aware, utcnow
 from tests.test_trust import _machine
 
 
-def _marcar(db, machine, label, quando):
+def _mark(db, machine, label, when):
     from app.services import activity_labels
-    activity_labels.mark(db, machine, label, "tray", now=quando)
+    activity_labels.mark(db, machine, label, "tray", now=when)
 
 
-def _aviso(db, machine, quando, tipo="high_cpu", responsavel=None, status=None, programas=None, severidade="high"):
+def _alert(db, machine, when, kind="high_cpu", responsible=None, status=None, programs=None, severity="high"):
     from app.models.anomaly import Anomaly
     from app.models.notification import Notification
-    a = Anomaly(machine_id=machine.id, anomaly_type=tipo, severity=severidade, detected_at=quando,
-                last_seen_at=quando, responsible_process=responsavel,
-                affected_metrics={"programas": programas} if programas else {})
+    a = Anomaly(machine_id=machine.id, anomaly_type=kind, severity=severity, detected_at=when,
+                last_seen_at=when, responsible_process=responsible,
+                affected_metrics={"programas": programs} if programs else {})
     db.add(a)
     db.flush()
     if status:
         db.add(Notification(user_id=machine.owner_id, machine_id=machine.id, anomaly_id=a.id, kind="anomaly",
-                            severity=severidade, title="t", status=status, created_at=quando))
+                            severity=severity, title="t", status=status, created_at=when))
     db.commit()
     return a
 
 
-def _sessao(resultado, label):
-    return next(s for s in resultado["sessions"] if s["label"] == label)
+def _session(result, label):
+    return next(s for s in result["sessions"] if s["label"] == label)
 
 
-class TestAoVivo:
-    def test_sessao_benigna_sem_aviso_e_acerto_negativo(self, db):
+class TestLive:
+    def test_benign_session_without_alert_is_true_negative(self, db):
         from app.services import real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=3)
-        _marcar(db, m, "jogando", t0)
-        _marcar(db, m, "parar", t0 + timedelta(hours=1))
+        _mark(db, m, "jogando", t0)
+        _mark(db, m, "parar", t0 + timedelta(hours=1))
         r = real_eval.live(db, m.id, t0 - timedelta(hours=1), utcnow())
         assert r["confusion"]["true_negatives"] == 1 and r["confusion"]["false_positives"] == 0
         assert r["benign"]["interruptions"] == 0
         assert r["benign"]["hours"] == pytest.approx(1.0)
 
-    def test_aviso_que_interrompeu_no_jogo_e_falso_positivo(self, db):
+    def test_interrupting_alert_during_game_is_false_positive(self, db):
         from app.services import real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=3)
-        _marcar(db, m, "jogando", t0)
-        _marcar(db, m, "parar", t0 + timedelta(hours=2))
-        _aviso(db, m, t0 + timedelta(minutes=30), status="sent")
+        _mark(db, m, "jogando", t0)
+        _mark(db, m, "parar", t0 + timedelta(hours=2))
+        _alert(db, m, t0 + timedelta(minutes=30), status="sent")
         r = real_eval.live(db, m.id, t0 - timedelta(hours=1), utcnow())
         assert r["confusion"]["false_positives"] == 1
         assert r["benign"]["interruptions"] == 1
         assert r["benign"]["interruptions_per_hour"] == pytest.approx(0.5)
         assert r["benign"]["sessions_with_interruption"] == 1
 
-    def test_aviso_registrado_sem_interromper_nao_e_alarme_que_incomoda(self, db):
+    def test_alert_recorded_without_interrupting_is_not_annoying(self, db):
         from app.services import real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=3)
-        _marcar(db, m, "jogando", t0)
-        _marcar(db, m, "parar", t0 + timedelta(hours=1))
-        _aviso(db, m, t0 + timedelta(minutes=10), status="suppressed", severidade="low")
+        _mark(db, m, "jogando", t0)
+        _mark(db, m, "parar", t0 + timedelta(hours=1))
+        _alert(db, m, t0 + timedelta(minutes=10), status="suppressed", severity="low")
         r = real_eval.live(db, m.id, t0 - timedelta(hours=1), utcnow())
         assert r["confusion"]["false_positives"] == 0
         assert r["confusion"]["false_positives_generated"] == 1
 
-    def test_minerador_so_conta_com_a_evidencia_certa(self, db):
+    def test_miner_counts_only_with_right_evidence(self, db):
         from app.services import real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=3)
-        _marcar(db, m, "teste_minerador", t0)
-        _marcar(db, m, "parar", t0 + timedelta(minutes=30))
-        _aviso(db, m, t0 + timedelta(minutes=1), tipo="unknown_process", responsavel="outro.exe", status="sent")
+        _mark(db, m, "teste_minerador", t0)
+        _mark(db, m, "parar", t0 + timedelta(minutes=30))
+        _alert(db, m, t0 + timedelta(minutes=1), kind="unknown_process", responsible="outro.exe", status="sent")
         r = real_eval.live(db, m.id, t0 - timedelta(hours=1), utcnow())
-        assert _sessao(r, "teste_minerador")["detected"] is False
+        assert _session(r, "teste_minerador")["detected"] is False
         assert r["confusion"]["false_negatives"] == 1
 
-    def test_minerador_detectado_registra_o_tempo(self, db):
+    def test_detected_miner_records_time(self, db):
         from app.services import real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=3)
-        _marcar(db, m, "teste_minerador_em_uso", t0)
-        _marcar(db, m, "parar", t0 + timedelta(minutes=30))
-        _aviso(db, m, t0 + timedelta(minutes=4), tipo="background_load", responsavel="SVC_UPDATE.EXE", status="sent")
+        _mark(db, m, "teste_minerador_em_uso", t0)
+        _mark(db, m, "parar", t0 + timedelta(minutes=30))
+        _alert(db, m, t0 + timedelta(minutes=4), kind="background_load", responsible="SVC_UPDATE.EXE", status="sent")
         r = real_eval.live(db, m.id, t0 - timedelta(hours=1), utcnow())
-        s = _sessao(r, "teste_minerador_em_uso")
+        s = _session(r, "teste_minerador_em_uso")
         assert s["detected"] is True and s["interrupted"] is True
         assert s["seconds_to_detection"] == pytest.approx(240)
         assert r["confusion"]["true_positives"] == 1
 
-    def test_programa_agregado_tambem_e_evidencia(self, db):
+    def test_aggregated_program_is_also_evidence(self, db):
         from app.services import real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=3)
-        _marcar(db, m, "teste_minerador", t0)
-        _marcar(db, m, "parar", t0 + timedelta(minutes=30))
-        _aviso(db, m, t0 + timedelta(minutes=2), tipo="unknown_process", responsavel="x.exe",
-               programas=["x.exe", "svc_update.exe"], status="sent")
+        _mark(db, m, "teste_minerador", t0)
+        _mark(db, m, "parar", t0 + timedelta(minutes=30))
+        _alert(db, m, t0 + timedelta(minutes=2), kind="unknown_process", responsible="x.exe",
+               programs=["x.exe", "svc_update.exe"], status="sent")
         r = real_eval.live(db, m.id, t0 - timedelta(hours=1), utcnow())
-        assert _sessao(r, "teste_minerador")["detected"] is True
+        assert _session(r, "teste_minerador")["detected"] is True
 
-    @pytest.mark.parametrize("status,interrompeu", [("sent", True), ("grouped", True), ("pending", True),
+    @pytest.mark.parametrize("status,interrupted", [("sent", True), ("grouped", True), ("pending", True),
                                                     ("held", False), ("suppressed", False)])
-    def test_interrompeu_vem_do_status_da_notificacao(self, db, status, interrompeu):
+    def test_interrupted_comes_from_notification_status(self, db, status, interrupted):
         from app.services import real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=3)
-        _marcar(db, m, "teste_disfarce", t0)
-        _marcar(db, m, "parar", t0 + timedelta(minutes=20))
-        _aviso(db, m, t0 + timedelta(minutes=1), tipo="process_masquerading", status=status)
-        s = _sessao(real_eval.live(db, m.id, t0 - timedelta(hours=1), utcnow()), "teste_disfarce")
-        assert s["detected"] is True and s["interrupted"] is interrompeu
+        _mark(db, m, "teste_disfarce", t0)
+        _mark(db, m, "parar", t0 + timedelta(minutes=20))
+        _alert(db, m, t0 + timedelta(minutes=1), kind="process_masquerading", status=status)
+        s = _session(real_eval.live(db, m.id, t0 - timedelta(hours=1), utcnow()), "teste_disfarce")
+        assert s["detected"] is True and s["interrupted"] is interrupted
 
-    def test_sessao_esquecida_aberta_termina_em_6_horas(self, db):
+    def test_session_left_open_ends_after_6_hours(self, db):
         from app.services import real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=10)
-        _marcar(db, m, "jogando", t0)
-        _aviso(db, m, t0 + timedelta(hours=7), status="sent")
+        _mark(db, m, "jogando", t0)
+        _alert(db, m, t0 + timedelta(hours=7), status="sent")
         r = real_eval.live(db, m.id, t0 - timedelta(hours=1), utcnow())
-        s = _sessao(r, "jogando")
+        s = _session(r, "jogando")
         assert s["hours"] == pytest.approx(real_eval.MAX_SESSION_HOURS)
         assert r["confusion"]["false_positives"] == 0
 
-    def test_sessao_termina_no_proximo_rotulo(self, db):
+    def test_session_ends_at_next_label(self, db):
         from app.services import real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=5)
-        _marcar(db, m, "jogando", t0)
-        _marcar(db, m, "teste_isca", t0 + timedelta(hours=1))
-        _marcar(db, m, "parar", t0 + timedelta(hours=2))
-        _aviso(db, m, t0 + timedelta(hours=1, minutes=5), tipo="ransomware_canary", status="sent",
-               severidade="critical")
+        _mark(db, m, "jogando", t0)
+        _mark(db, m, "teste_isca", t0 + timedelta(hours=1))
+        _mark(db, m, "parar", t0 + timedelta(hours=2))
+        _alert(db, m, t0 + timedelta(hours=1, minutes=5), kind="ransomware_canary", status="sent",
+               severity="critical")
         r = real_eval.live(db, m.id, t0 - timedelta(hours=1), utcnow())
         assert r["confusion"]["false_positives"] == 0
-        assert _sessao(r, "teste_isca")["detected"] is True
+        assert _session(r, "teste_isca")["detected"] is True
 
-    def test_matriz_bate_com_as_sessoes(self, db):
+    def test_matrix_matches_sessions(self, db):
         from app.services import real_eval
         m = _machine(db)
         t = utcnow() - timedelta(hours=10)
         for i, label in enumerate(["jogando", "teste_minerador", "trabalho_pesado", "teste_periodico", "uso_normal"]):
-            _marcar(db, m, label, t + timedelta(hours=i))
-        _marcar(db, m, "parar", t + timedelta(hours=5))
-        _aviso(db, m, t + timedelta(hours=3, minutes=5), tipo="beaconing", status="sent")
+            _mark(db, m, label, t + timedelta(hours=i))
+        _mark(db, m, "parar", t + timedelta(hours=5))
+        _alert(db, m, t + timedelta(hours=3, minutes=5), kind="beaconing", status="sent")
         r = real_eval.live(db, m.id, t - timedelta(hours=1), utcnow())
         c = r["confusion"]
         assert c["true_positives"] + c["false_negatives"] == 2
@@ -161,8 +157,8 @@ class TestAoVivo:
         assert c["recall"] == pytest.approx(0.5)
 
 
-class TestEvidencia:
-    def test_tabela_de_evidencias(self):
+class TestEvidence:
+    def test_evidence_table(self):
         from app.services import real_eval
         assert real_eval.EVIDENCE["teste_minerador"] == {"process": "svc_update.exe"}
         assert real_eval.EVIDENCE["teste_minerador_em_uso"] == {"process": "svc_update.exe"}
@@ -172,45 +168,45 @@ class TestEvidencia:
         assert real_eval.INTERRUPTING == {"sent", "grouped", "pending"}
 
 
-class TestReproducao:
-    def test_cada_configuracao_roda_com_a_chave_certa_e_tudo_e_restaurado(self, db, monkeypatch):
+class TestReplay:
+    def test_each_config_runs_with_right_switch_and_restores(self, db, monkeypatch):
         from app.services import anomaly_service, benchmark, context, real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=3)
-        _marcar(db, m, "jogando", t0)
-        _marcar(db, m, "parar", t0 + timedelta(hours=1))
-        vistos = []
+        _mark(db, m, "jogando", t0)
+        _mark(db, m, "parar", t0 + timedelta(hours=1))
+        seen = []
 
-        def falso(db_, origem, dono, inicio, fim, warmup_hours=6, limit=None, meta=None):
-            vistos.append((context.context_on(), anomaly_service.detection_layer()))
+        def fake(db_, origin, owner, start, end, warmup_hours=6, limit=None, meta=None):
+            seen.append((context.context_on(), anomaly_service.detection_layer()))
             if not context.context_on():
                 return [{"type": "high_cpu", "severity": "high", "responsible": "jogo.exe", "programas": [],
                          "detected_at": t0 + timedelta(minutes=5)}]
             return []
 
-        monkeypatch.setattr(benchmark, "replay_window", falso)
+        monkeypatch.setattr(benchmark, "replay_window", fake)
         r = real_eval.replay(db, m.id, m.owner_id, t0 - timedelta(hours=1), utcnow())
-        assert sorted(vistos) == sorted([(True, "ambas"), (False, "ambas"), (True, "regras"), (True, "ml")])
+        assert sorted(seen) == sorted([(True, "ambas"), (False, "ambas"), (True, "regras"), (True, "ml")])
         assert context.context_on() is True and anomaly_service.detection_layer() == "ambas"
         assert r["configs"]["contexto_desligado"]["confusion"]["false_positives"] == 1
         assert r["configs"]["contexto_ligado"]["confusion"]["false_positives"] == 0
 
-    def test_reproduz_leituras_reais_numa_maquina_efemera(self, db):
+    def test_replays_real_readings_on_ephemeral_machine(self, db):
         """Pelo caminho real: aquecimento antes da sessão, só avisos dentro dela."""
         from app.models.machine import Machine
         from app.models.metric import Metric
         from app.models.process import ProcessSnapshot
         from app.services import benchmark
-        origem = _machine(db)
-        fim = utcnow() - timedelta(minutes=5)
-        inicio = fim - timedelta(minutes=20)
+        origin = _machine(db)
+        end = utcnow() - timedelta(minutes=5)
+        start = end - timedelta(minutes=20)
         n = 180
-        primeira = inicio - timedelta(hours=1)
-        passo = (fim - primeira) / n
+        first = start - timedelta(hours=1)
+        step = (end - first) / n
         for i in range(n):
-            ts = primeira + passo * i
-            pesado = ts >= inicio
-            met = Metric(machine_id=origem.id, timestamp=ts, cpu_percent=97.0 if pesado else 15.0 + (i % 5),
+            ts = first + step * i
+            heavy = ts >= start
+            met = Metric(machine_id=origin.id, timestamp=ts, cpu_percent=97.0 if heavy else 15.0 + (i % 5),
                          mem_percent=45.0, net_connections=50, process_count=190, cpu_count_logical=8,
                          user_idle_seconds=5.0, foreground_pid=2500, foreground_name="chrome.exe")
             db.add(met)
@@ -218,21 +214,21 @@ class TestReproducao:
             db.add(ProcessSnapshot(metric_id=met.id, pid=2500, name="chrome.exe", cpu_percent=8.0, mem_percent=10.0,
                                    exe="C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", signed="signed",
                                    ancestors=[1500]))
-            if pesado:
+            if heavy:
                 db.add(ProcessSnapshot(metric_id=met.id, pid=6600, name="svc_update.exe", cpu_percent=760.0,
                                        mem_percent=4.0, exe="C:\\Users\\v\\AppData\\Local\\svc_update.exe",
                                        signed="unsigned", ancestors=[1500]))
         db.commit()
-        antes = db.query(Machine).count()
-        avisos = benchmark.replay_window(db, origem.id, origem.owner_id, inicio, fim, warmup_hours=1)
-        assert db.query(Machine).count() == antes
-        assert avisos, "o minerador deveria gerar algum aviso"
-        for a in avisos:
-            assert inicio <= a["detected_at"] <= fim
+        before = db.query(Machine).count()
+        alerts = benchmark.replay_window(db, origin.id, origin.owner_id, start, end, warmup_hours=1)
+        assert db.query(Machine).count() == before
+        assert alerts, "o minerador deveria gerar algum aviso"
+        for a in alerts:
+            assert start <= a["detected_at"] <= end
             assert {"type", "severity", "responsible", "programas", "user_driven"} <= set(a)
-        assert any(a["responsible"] == "svc_update.exe" or "svc_update.exe" in a["programas"] for a in avisos)
+        assert any(a["responsible"] == "svc_update.exe" or "svc_update.exe" in a["programas"] for a in alerts)
 
-    def test_reproducao_carrega_pid_e_pais(self):
+    def test_replay_carries_pid_and_ancestors(self):
         from types import SimpleNamespace
         from app.services import benchmark
         snap = SimpleNamespace(name="a.exe", pid=7, ancestors=[3, 1], cpu_percent=1.0, mem_percent=1.0, exe=None,
@@ -242,7 +238,7 @@ class TestReproducao:
         assert proc["pid"] == 7 and proc["ancestors"] == [3, 1] and proc["sha256"] is None
 
 
-def test_maquina_de_benchmark_nunca_notifica_de_verdade(db):
+def test_benchmark_machine_never_really_notifies(db):
     """A reprodução dura minutos: sem isto, cada aviso reproduzido virava mensagem no celular."""
     from app.models.anomaly import Anomaly
     from app.models.machine import Machine
@@ -258,85 +254,84 @@ def test_maquina_de_benchmark_nunca_notifica_de_verdade(db):
 
 
 class TestEndpoint:
-    def test_dono_ve_a_avaliacao(self, client, machine, auth):
+    def test_owner_sees_evaluation(self, client, machine, auth):
         res = client.get(f"/api/evaluation/real/{machine['id']}?days=7", headers=auth)
         assert res.status_code == 200
-        corpo = res.json()
-        assert "live" in corpo and "replay" in corpo
-        assert corpo["live"]["confusion"]["true_positives"] == 0
+        body = res.json()
+        assert "live" in body and "replay" in body
+        assert body["live"]["confusion"]["true_positives"] == 0
 
-    def test_outro_usuario_nao_ve(self, client, machine):
+    def test_other_user_cannot_see(self, client, machine):
         client.post("/api/auth/register", json={"email": "z@z.com", "username": "zz", "password": "zzsenha12345"})
         tok = client.post("/api/auth/login", data={"username": "zz", "password": "zzsenha12345"}).json()["access_token"]
         res = client.get(f"/api/evaluation/real/{machine['id']}", headers={"Authorization": f"Bearer {tok}"})
         assert res.status_code == 404
 
-    def test_reproducao_roda_em_segundo_plano(self, client, machine, auth, monkeypatch):
+    def test_replay_runs_in_background(self, client, machine, auth, monkeypatch):
         from app.services import real_eval
         monkeypatch.setattr(real_eval, "replay", lambda *a, **k: {"configs": {}, "sentence": "ok"})
         res = client.post(f"/api/evaluation/real/{machine['id']}/replay?days=7", headers=auth)
         assert res.status_code == 200 and res.json()["started"] is True
-        corpo = client.get(f"/api/evaluation/real/{machine['id']}?days=7", headers=auth).json()
-        assert corpo["replay"]["status"] == "done"
+        body = client.get(f"/api/evaluation/real/{machine['id']}?days=7", headers=auth).json()
+        assert body["replay"]["status"] == "done"
 
 
-class TestChavesPorThread:
-    """A reprodução roda minutos em segundo plano com o contexto desligado ou só
-    com o modelo; a coleta ao vivo, nas outras threads, não pode sentir isso."""
+class TestPerThreadSwitches:
+    """A reprodução troca contexto e camada só na própria thread; a coleta ao vivo não pode sentir isso."""
 
-    def _em_outra_thread(self, fn):
+    def _in_other_thread(self, fn):
         import threading
-        visto = {}
-        t = threading.Thread(target=lambda: visto.setdefault("v", fn()))
+        seen_value = {}
+        t = threading.Thread(target=lambda: seen_value.setdefault("v", fn()))
         t.start()
         t.join()
-        return visto["v"]
+        return seen_value["v"]
 
-    def test_contexto_desligado_numa_thread_nao_vaza(self):
+    def test_context_off_in_thread_does_not_leak(self):
         from app.services import context
-        anterior = context.set_context_mode(False)
+        previous = context.set_context_mode(False)
         try:
-            assert self._em_outra_thread(context.context_on) is True
+            assert self._in_other_thread(context.context_on) is True
         finally:
-            context.set_context_mode(anterior)
+            context.set_context_mode(previous)
 
-    def test_camada_trocada_numa_thread_nao_vaza(self):
+    def test_layer_switch_in_thread_does_not_leak(self):
         from app.services import anomaly_service
-        anterior = anomaly_service.set_detection_layer("ml")
+        previous = anomaly_service.set_detection_layer("ml")
         try:
-            assert self._em_outra_thread(anomaly_service.detection_layer) == "ambas"
+            assert self._in_other_thread(anomaly_service.detection_layer) == "ambas"
         finally:
-            anomaly_service.set_detection_layer(anterior)
+            anomaly_service.set_detection_layer(previous)
 
 
-def test_tarefa_longa_nao_ocupa_a_fila_das_conversas(monkeypatch):
+def test_long_task_does_not_use_chat_queue(monkeypatch):
     """A reprodução leva dezenas de minutos; os 2 workers da fila são das conversas e diagnósticos."""
     import threading
     from app.services import jobs
 
-    def proibido(*a, **k):
+    def forbidden(*a, **k):
         raise AssertionError("tarefa longa não pode entrar no executor compartilhado")
 
     monkeypatch.setattr(jobs, "RUN_INLINE", False)
-    monkeypatch.setattr(jobs._executor, "submit", proibido)
-    feito = threading.Event()
-    jobs.submit_long(lambda db: feito.set())
-    assert feito.wait(5)
+    monkeypatch.setattr(jobs._executor, "submit", forbidden)
+    done = threading.Event()
+    jobs.submit_long(lambda db: done.set())
+    assert done.wait(5)
 
 
-class TestReproducaoCorte:
+class TestReplayTruncation:
     """Janela longa não pode descartar as sessões mais novas em silêncio."""
 
-    def test_replay_window_cobre_o_fim_e_sinaliza_o_corte(self, db):
+    def test_replay_window_covers_end_and_flags_truncation(self, db):
         from app.models.metric import Metric
         from app.models.process import ProcessSnapshot
         from app.services import benchmark
-        origem = _machine(db)
+        origin = _machine(db)
         base = utcnow() - timedelta(hours=3)
-        passo = timedelta(minutes=1)
+        step = timedelta(minutes=1)
         for i in range(30):
-            ts = base + passo * i
-            met = Metric(machine_id=origem.id, timestamp=ts, cpu_percent=15.0 + (i % 5), mem_percent=40.0,
+            ts = base + step * i
+            met = Metric(machine_id=origin.id, timestamp=ts, cpu_percent=15.0 + (i % 5), mem_percent=40.0,
                          net_connections=50, process_count=190, cpu_count_logical=8,
                          user_idle_seconds=5.0, foreground_pid=2500, foreground_name="chrome.exe")
             db.add(met)
@@ -345,44 +340,44 @@ class TestReproducaoCorte:
                                    exe="C:\\x\\chrome.exe", signed="signed", ancestors=[1500]))
         db.commit()
         meta = {}
-        benchmark.replay_window(db, origem.id, origem.owner_id, base, base + passo * 29, warmup_hours=1,
+        benchmark.replay_window(db, origin.id, origin.owner_id, base, base + step * 29, warmup_hours=1,
                                 limit=10, meta=meta)
         assert meta["truncated"] is True
         # Mantém as 10 MAIS NOVAS (i=20..29): a cobertura começa na 20ª leitura
-        assert meta["covered_from"] == aware(base + passo * 20)
+        assert meta["covered_from"] == aware(base + step * 20)
 
-    def test_sem_corte_nao_sinaliza(self, db):
+    def test_no_truncation_no_flag(self, db):
         from app.models.metric import Metric
         from app.services import benchmark
-        origem = _machine(db)
+        origin = _machine(db)
         base = utcnow() - timedelta(hours=2)
         for i in range(5):
-            db.add(Metric(machine_id=origem.id, timestamp=base + timedelta(minutes=i), cpu_percent=15.0,
+            db.add(Metric(machine_id=origin.id, timestamp=base + timedelta(minutes=i), cpu_percent=15.0,
                           mem_percent=40.0, cpu_count_logical=8))
         db.commit()
         meta = {}
-        benchmark.replay_window(db, origem.id, origem.owner_id, base, base + timedelta(minutes=4),
+        benchmark.replay_window(db, origin.id, origin.owner_id, base, base + timedelta(minutes=4),
                                 warmup_hours=1, limit=10, meta=meta)
         assert meta["truncated"] is False and meta["covered_from"] is None
 
-    def test_replay_exclui_sessoes_fora_da_cobertura(self, db, monkeypatch):
+    def test_replay_excludes_sessions_outside_coverage(self, db, monkeypatch):
         from app.services import benchmark, real_eval
         m = _machine(db)
         t0 = utcnow() - timedelta(hours=6)
-        _marcar(db, m, "jogando", t0)                                   # sessão perdida (antes do corte)
-        _marcar(db, m, "teste_minerador", t0 + timedelta(hours=3))      # sessão coberta
-        _marcar(db, m, "parar", t0 + timedelta(hours=4))
-        corte = t0 + timedelta(hours=2)
+        _mark(db, m, "jogando", t0)                                   # sessão perdida (antes do corte)
+        _mark(db, m, "teste_minerador", t0 + timedelta(hours=3))      # sessão coberta
+        _mark(db, m, "parar", t0 + timedelta(hours=4))
+        cutoff = t0 + timedelta(hours=2)
 
-        def falso(db_, origem, dono, inicio, fim, warmup_hours=6, limit=None, meta=None):
+        def fake(db_, origin, owner, start, end, warmup_hours=6, limit=None, meta=None):
             if meta is not None:
                 meta["truncated"] = True
-                meta["covered_from"] = corte
+                meta["covered_from"] = cutoff
             return []
 
-        monkeypatch.setattr(benchmark, "replay_window", falso)
+        monkeypatch.setattr(benchmark, "replay_window", fake)
         r = real_eval.replay(db, m.id, m.owner_id, t0 - timedelta(hours=1), utcnow())
-        assert r["truncated"] is True and r["covered_from"] == corte
+        assert r["truncated"] is True and r["covered_from"] == cutoff
         # A sessão de jogo (antes do corte) não entra na conta de nenhuma config
         for cfg in r["configs"].values():
             assert cfg["benign"]["sessions"] == 0
