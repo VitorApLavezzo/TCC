@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
-"""
-AnomalyDetect Agent - Coleta métricas e envia para o backend.
-Compatível com Windows e Linux.
-
-Além das métricas de recurso, este agente (quando os módulos extras estão
-presentes) também:
-- identifica processos por caminho, hash e assinatura;
-- detecta programas novos, beaconing e arquivos-isca alterados (ransomware);
-- mantém uma caixa-preta em memória enviada em avisos graves;
-- executa comandos do painel (encerrar programa, limpar temporários, isolar rede);
-- ajusta o intervalo de coleta ao que está acontecendo;
-- respeita o "modo atividade pesada" e se despede ao encerrar.
-
-Todos os módulos extras são opcionais: sem eles, o agente funciona no modo
-básico (métricas + processos), como a primeira versão.
-"""
+"""AnomalyDetect Agent: coleta métricas e envia para o backend (Windows e Linux).
+Os módulos extras são opcionais; sem eles o agente roda no modo básico (métricas + processos)."""
 import os
 import sys
 import json
@@ -42,8 +28,7 @@ logger = logging.getLogger("anomaly-agent")
 
 AGENT_VERSION = "2.1.0"
 
-# Módulos extras (agente atualizado). A ausência de qualquer um só desliga a
-# funcionalidade correspondente.
+# A ausência de qualquer módulo extra só desliga a funcionalidade correspondente.
 try:
     import sensors
 except Exception as e:
@@ -88,13 +73,8 @@ _saved = _load_saved_config()
 API_URL = os.getenv("AGENT_API_URL") or _saved.get("api_url") or "http://localhost:8000"
 DEFAULT_INTERVAL = int(os.getenv("COLLECTION_INTERVAL", "30"))
 
-# Quem define o intervalo?
-#
-# Por padrão o servidor sugere (coleta adaptativa: acelera quando algo desvia,
-# desacelera com a máquina parada na bateria). Mas se a pessoa escolheu um
-# intervalo explicitamente na instalação, essa escolha vale — sobrescrevê-la em
-# silêncio quebra quem depende de uma cadência fixa, como o harness de testes.
-# AGENT_ADAPTIVE=1 devolve o controle ao servidor mesmo com valor explícito.
+# Intervalo escolhido na instalação vale (cadência fixa, ex.: harness de testes); sem ele, o servidor
+# sugere (coleta adaptativa). AGENT_ADAPTIVE=1 devolve o controle ao servidor mesmo com valor explícito.
 _INTERVAL_LOCKED = bool(os.getenv("COLLECTION_INTERVAL")) and \
     os.getenv("AGENT_ADAPTIVE", "").lower() not in ("1", "true", "yes")
 INGEST_ENDPOINT = f"{API_URL}/api/metrics/ingest"
@@ -106,7 +86,6 @@ _paused = False
 _current_interval = DEFAULT_INTERVAL
 stop_event = threading.Event()
 
-# Estado dos sensores de segurança e da caixa-preta (criados no run())
 _blackbox = None
 _canary = None
 _beacons = None
@@ -117,12 +96,10 @@ _force_inventory = False
 _focus_until = None
 _network_isolated = False
 
-# Blocos pesados preparados em segundo plano, aguardando a próxima coleta
 _pending_extras: dict = {}
 _extras_lock = threading.Lock()
 _extras_thread = None
 
-# A cada 6h o agente confere se o servidor tem uma versão nova dos seus arquivos
 UPDATE_CHECK_SECONDS = 6 * 3600
 
 
@@ -227,10 +204,6 @@ def say_goodbye(reason: str):
         pass
 
 
-# ---------------------------------------------------------------------------
-# Enriquecimento da coleta
-# ---------------------------------------------------------------------------
-
 def _pid_maps(processes):
     names = {p["pid"]: p["name"] for p in processes if p.get("pid")}
     exes = {p["pid"]: p.get("exe") for p in processes if p.get("pid")}
@@ -238,14 +211,8 @@ def _pid_maps(processes):
 
 
 def _collect_slow_blocks():
-    """Inventário, saúde de disco e informações do sistema — numa thread.
-
-    `Get-HotFix` e a consulta de drivers do Windows levam dezenas de segundos.
-    Rodando dentro do laço, a primeira coleta demorava mais de um minuto: a
-    máquina recém-instalada parecia morta no painel, e a cada 6 horas o agente
-    congelava. Aqui o resultado é preparado em paralelo e entra na PRÓXIMA
-    coleta, quando estiver pronto.
-    """
+    """Inventário, saúde de disco e informações do sistema numa thread: no Windows (Get-HotFix,
+    drivers) levam dezenas de segundos e travariam o laço. O resultado entra na PRÓXIMA coleta."""
     blocks: Dict[str, Any] = {}
     events = []
     now = time.time()
@@ -345,11 +312,7 @@ def build_payload() -> dict:
 
 
 def _enrich_starts(starts: list) -> list:
-    """Identidade dos programas que acabaram de nascer, em UMA consulta.
-
-    Antes era uma chamada de assinatura por processo novo — ou seja, um
-    PowerShell para cada programa que a pessoa abrisse no computador.
-    """
+    """Identidade dos programas que acabaram de nascer, em UMA consulta (não um PowerShell por processo)."""
     if not _HAS(sensors) or not starts:
         return starts
     try:
@@ -366,7 +329,7 @@ def _enrich_starts(starts: list) -> list:
 
 
 def _canary_suspects(processes):
-    """Palpite de culpado do ransomware: quem mais grava em disco agora."""
+    """Palpite de culpado do ransomware: quem mais usa CPU agora."""
     ranked = sorted(processes, key=lambda p: p.get("cpu_percent", 0), reverse=True)
     return [{"name": p["name"], "pid": p["pid"]} for p in ranked[:3]]
 
@@ -375,8 +338,7 @@ def _HAS(mod) -> bool:
     return mod is not None
 
 
-# Guarda local e fila de leituras não enviadas. Ficam ao lado da configuração
-# do agente, na mesma pasta que já é dele.
+# Guarda local e fila de leituras não enviadas ficam na pasta de configuração, que já é do agente.
 _guard = LocalGuard() if LocalGuard else None
 _buffer = OfflineBuffer(os.path.join(_config_dir, "pending_metrics.jsonl")) if OfflineBuffer else None
 _offline_since = None
@@ -391,8 +353,8 @@ def _handle_offline(metrics: dict) -> None:
         _offline_since = time.time()
         logger.warning("Sem contato com o servidor — guardando as leituras e vigiando localmente.")
     _buffer.add(metrics)
-    for achado in _guard.check(metrics):
-        logger.warning(f"[local] {achado['message']} (sem servidor; será reavaliado na reconexão)")
+    for finding in _guard.check(metrics):
+        logger.warning(f"[local] {finding['message']} (sem servidor; será reavaliado na reconexão)")
 
 
 def _drain_buffer() -> None:
@@ -401,28 +363,20 @@ def _drain_buffer() -> None:
     if _buffer is None:
         return
     if _offline_since is not None:
-        minutos = (time.time() - _offline_since) / 60
-        logger.info(f"Servidor de volta depois de {minutos:.0f} min. Enviando o que ficou guardado.")
+        minutes = (time.time() - _offline_since) / 60
+        logger.info(f"Servidor de volta depois de {minutes:.0f} min. Enviando o que ficou guardado.")
         _offline_since = None
-    pendentes = _buffer.pending()
-    if not pendentes:
+    pending = _buffer.pending()
+    if not pending:
         return
-    enviadas = _buffer.flush(lambda registro: _post_metrics(registro) is not None)
-    if enviadas:
-        logger.info(f"{enviadas} de {pendentes} leituras guardadas foram enviadas.")
+    sent = _buffer.flush(lambda record: _post_metrics(record) is not None)
+    if sent:
+        logger.info(f"{sent} de {pending} leituras guardadas foram enviadas.")
 
-
-# ---------------------------------------------------------------------------
-# Envio e resposta do servidor
-# ---------------------------------------------------------------------------
 
 def _post_metrics(metrics: dict):
-    """Envia uma leitura e devolve a resposta do servidor, ou None se não deu.
-
-    Separado de `send_metrics` porque a fila de leituras atrasadas precisa
-    exatamente disto e de mais nada: nada de trocar o intervalo de coleta ou
-    executar comandos com base numa resposta de uma leitura de duas horas atrás.
-    """
+    """Envia uma leitura e devolve a resposta do servidor, ou None se não deu. Separado de `send_metrics`:
+    a fila de leituras atrasadas não pode trocar o intervalo nem executar comandos de uma resposta antiga."""
     try:
         response = requests.post(INGEST_ENDPOINT, json=metrics,
                                  headers={"X-Agent-Token": API_TOKEN}, timeout=20)
@@ -523,11 +477,7 @@ def _run_commands(commands):
 
 
 def _check_for_updates():
-    """Busca versões novas dos arquivos do agente e reinicia se trocar algo.
-
-    É o que faz uma funcionalidade nova chegar às máquinas já instaladas sem
-    passar o instalador de novo em cada uma.
-    """
+    """Busca versões novas dos arquivos do agente e reinicia se trocar algo."""
     global _last_update_check
     if updater is None or not API_TOKEN:
         return
@@ -587,7 +537,6 @@ def run():
     while running:
         try:
             _check_for_updates()
-            # A caixa-preta amostra mais rápido que o intervalo de envio
             metrics = build_payload()
             if send_metrics(metrics):
                 consecutive_failures = 0
@@ -600,9 +549,8 @@ def run():
         except Exception as e:
             logger.error(f"Error in collection loop: {e}", exc_info=True)
 
-        # Espera o intervalo, alimentando a caixa-preta a cada 2s. O último
-        # trecho é encurtado para o intervalo ser respeitado de verdade (com
-        # passos fixos de 2s, um intervalo de 5s virava 6s).
+        # Espera o intervalo alimentando a caixa-preta a cada 2s; o último trecho é encurtado
+        # para o intervalo ser exato (com passos fixos de 2s, 5s virava 6s).
         deadline = time.monotonic() + _current_interval
         while running:
             if _blackbox is not None:
@@ -614,10 +562,8 @@ def run():
     logger.info("Agent stopped.")
 
 
-# "O que estou fazendo": o gabarito da avaliação em dado real. Os ids são os
-# do servidor (activity_labels.LABELS); o texto é só ASCII porque o backend
-# X11 do pystray usa latin-1. Diferente do modo atividade pesada, o rótulo não
-# muda a detecção — só registra o que a pessoa estava fazendo.
+# "O que estou fazendo": gabarito da avaliação em dado real; não muda a detecção. Ids = activity_labels.LABELS
+# do servidor; texto só ASCII porque o backend X11 do pystray usa latin-1.
 ACTIVITY_MENU = [
     ("jogando", "Jogando"),
     ("trabalho_pesado", "Trabalho pesado (compilar, renderizar)"),
@@ -692,7 +638,7 @@ def start_with_tray() -> bool:
             pystray.MenuItem("Desligar o modo", on_focus(0)),
         )
         activity_menu = pystray.Menu(*[
-            pystray.MenuItem(texto, on_label(label)) for label, texto in ACTIVITY_MENU
+            pystray.MenuItem(text, on_label(label)) for label, text in ACTIVITY_MENU
         ])
         icon = pystray.Icon(
             "anomalydetect-agent", _icon_image(), f"AnomalyDetect - {machine_name}",

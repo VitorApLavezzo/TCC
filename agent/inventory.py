@@ -1,9 +1,5 @@
-"""
-Inventário do computador: programas instalados, atualizações do Windows,
-drivers. Custa caro, então roda no máximo a cada poucas horas e só envia
-quando muda. O backend guarda o último de cada tipo e transforma as
-diferenças na linha do tempo de mudanças.
-"""
+"""Inventário do computador (programas instalados, atualizações do Windows, drivers). Custa caro: roda
+no máximo a cada poucas horas, e o backend transforma as diferenças na linha do tempo de mudanças."""
 import os
 import platform
 import subprocess
@@ -12,9 +8,8 @@ from typing import Any, Dict, List, Optional
 IS_WINDOWS = platform.system() == "Windows"
 IS_LINUX = platform.system() == "Linux"
 
-# No Windows, um subprocesso de console abre uma JANELA PRETA na tela — e o
-# agente roda sem console (pythonw), então cada consulta ao sistema piscava um
-# "cmd" na frente do usuário. CREATE_NO_WINDOW executa sem janela nenhuma.
+# O agente roda sem console (pythonw): sem CREATE_NO_WINDOW, todo subprocesso de console
+# piscaria uma janela preta na tela do usuário.
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows" else {}
 
 

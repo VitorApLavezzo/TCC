@@ -1,11 +1,5 @@
-"""
-Remoção de segredos ANTES de os dados saírem do computador.
-
-O agente é distribuído como arquivos soltos e não importa nada do backend, por
-isso esta lógica é uma cópia enxuta de `backend/app/core/redaction.py`. O
-servidor filtra de novo (agentes antigos não tinham este passo), mas remover na
-origem é o certo: a senha na linha de comando nem chega a trafegar.
-"""
+"""Remoção de segredos ANTES de os dados saírem do computador. Cópia enxuta de
+`backend/app/core/redaction.py` (o agente não importa nada do backend); o servidor filtra de novo."""
 import re
 
 REDACTED = "[REMOVIDO]"

@@ -1,12 +1,5 @@
-"""
-Sensores extras do agente: identidade de executáveis (caminho, hash,
-assinatura), informações do sistema, inventário, energia, tempo ocioso e
-reinício. Tudo com degradação graciosa: sem permissão ou sem a ferramenta,
-o campo volta como None e o resto segue.
-
-Cálculos caros (hash de arquivo, assinatura, inventário) são espaçados no
-tempo e mantidos em cache, para o agente continuar leve.
-"""
+"""Sensores extras: identidade de executáveis (hash, assinatura), sistema, tempo ocioso e janela ativa.
+Best-effort: sem permissão ou ferramenta o campo volta None; cálculos caros ficam em cache."""
 import hashlib
 import os
 import platform
@@ -19,9 +12,8 @@ import psutil
 IS_WINDOWS = platform.system() == "Windows"
 IS_LINUX = platform.system() == "Linux"
 
-# No Windows, um subprocesso de console abre uma JANELA PRETA na tela — e o
-# agente roda sem console (pythonw), então cada consulta ao sistema piscava um
-# "cmd" na frente do usuário. CREATE_NO_WINDOW executa sem janela nenhuma.
+# O agente roda sem console (pythonw): sem CREATE_NO_WINDOW, todo subprocesso de console
+# piscaria uma janela preta na tela do usuário.
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows" else {}
 
 _hash_cache: Dict[str, Optional[str]] = {}
@@ -50,19 +42,13 @@ def file_sha256(path: Optional[str]) -> Optional[str]:
 
 
 UNKNOWN_SIGNATURE = {"signed": "unknown", "publisher": None}
-# Quantos executáveis novos verificar por coleta. Cada chamada ao PowerShell
-# custa ~0,3 s, então um lote grande na primeira coleta travaria o agente.
+# Executáveis novos verificados por coleta: um lote grande na primeira coleta travaria o agente.
 SIGNATURE_BUDGET = 25
 
 
 def signatures(paths: List[str], budget: int = SIGNATURE_BUDGET) -> Dict[str, Dict[str, Any]]:
-    """Assinatura de vários executáveis de uma vez.
-
-    Uma chamada de PowerShell por arquivo era o gargalo da primeira coleta
-    (~0,3 s cada, dezenas de arquivos). Aqui todos os que faltam vão num
-    processo só; o que passar do orçamento fica para a próxima coleta e volta
-    como "unknown" — o que já é tratado como "não sei", não como "não assinado".
-    """
+    """Assinatura de vários executáveis num processo só. O que passar do orçamento fica para a próxima
+    coleta e volta como "unknown" — tratado como "não sei", não como "não assinado"."""
     wanted = [p for p in dict.fromkeys(paths) if p]
     result = {p: _sig_cache[p] for p in wanted if p in _sig_cache}
     missing = [p for p in wanted if p not in _sig_cache][:budget]
@@ -78,9 +64,8 @@ def signatures(paths: List[str], budget: int = SIGNATURE_BUDGET) -> Dict[str, Di
                     _sig_cache[path] = value
                 _sig_attempts.pop(path, None)
             else:
-                # "unknown" é falta de resposta, não resposta: vale tentar de
-                # novo. Mas só algumas vezes — um caminho que nunca responde
-                # (processo protegido) custaria PowerShell em toda coleta.
+                # "unknown" é falta de resposta: tenta de novo, mas só algumas vezes — um caminho que
+                # nunca responde (processo protegido) custaria PowerShell em toda coleta.
                 attempts = _sig_attempts.get(path, 0) + 1
                 _sig_attempts[path] = attempts
                 if attempts >= 3 and len(_sig_cache) < 4000:
@@ -107,18 +92,16 @@ def _publisher_from_subject(subject: str) -> Optional[str]:
     return publisher
 
 
-# O PowerShell fecha uma string de aspas simples com a aspa ASCII e também
-# com as aspas tipográficas ‘ ’ ‚ ‛. Dobrar só a ASCII deixava um usuário
-# comum nomear um programa C:\Users\Public\t’;comando;’.exe e ter o comando
-# executado pelo agente — como SYSTEM na instalação silenciosa.
-_ASPAS_PS = ("'", "\u2018", "\u2019", "\u201a", "\u201b")
+# O PowerShell também fecha aspas simples com as tipográficas ‘ ’ ‚ ‛: dobrar só a ASCII deixava um
+# usuário comum injetar comando no nome de um executável, rodado pelo agente como SYSTEM.
+_PS_QUOTES = ("'", "\u2018", "\u2019", "\u201a", "\u201b")
 
 
-def _ps_literal(texto: str) -> str:
+def _ps_literal(text: str) -> str:
     """Conteúdo seguro para uma string de aspas simples do PowerShell: dobra cada aspa."""
-    for aspa in _ASPAS_PS:
-        texto = texto.replace(aspa, aspa * 2)
-    return texto
+    for quote in _PS_QUOTES:
+        text = text.replace(quote, quote * 2)
+    return text
 
 
 def _signatures_windows(paths: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -163,10 +146,6 @@ def _signature_linux(path: str) -> Dict[str, Any]:
     return {"signed": "unsigned", "publisher": None}
 
 
-# ---------------------------------------------------------------------------
-# Tempo ocioso
-# ---------------------------------------------------------------------------
-
 def idle_seconds() -> Optional[float]:
     try:
         if IS_WINDOWS:
@@ -185,17 +164,9 @@ def idle_seconds() -> Optional[float]:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Janela ativa
-# ---------------------------------------------------------------------------
-
 def foreground_process() -> Optional[Tuple[int, str]]:
-    """(pid, nome) do programa na janela da frente, ou None.
-
-    É o que separa um jogo de um minerador: os dois pesam igual, mas o jogo é
-    o programa que a pessoa está olhando. None quando não há janela na frente
-    (tela bloqueada, área de trabalho) ou fora do Windows.
-    """
+    """(pid, nome) do programa na janela da frente — separa um jogo de um minerador.
+    None sem janela na frente (tela bloqueada, área de trabalho) ou fora do Windows."""
     try:
         if IS_WINDOWS:
             import ctypes
@@ -212,10 +183,6 @@ def foreground_process() -> Optional[Tuple[int, str]]:
         pass
     return None
 
-
-# ---------------------------------------------------------------------------
-# Sistema
-# ---------------------------------------------------------------------------
 
 def _tz_offset_minutes() -> int:
     off = -time.timezone if (time.localtime().tm_isdst == 0) else -time.altzone

@@ -1,17 +1,5 @@
-"""
-Sensores de segurança do agente, todos leves e best-effort:
-
-- Arquivos-isca (canary) contra ransomware: cria arquivos ocultos em pastas
-  do usuário e vigia alteração/remoção/renomeação. Nenhum programa legítimo
-  mexe neles; se mexeram, é sinal forte de criptografia em massa.
-- Beaconing: agrupa conexões de saída por (processo, destino) ao longo do
-  tempo e mede a regularidade dos intervalos.
-- Processos que nasceram desde a última coleta, com pai e caminho — a base
-  para "documento abriu PowerShell".
-- Desligamento anterior: lê o registro de eventos do sistema para saber se o
-  último desligamento foi limpo ou abrupto.
-- Erros de hardware / saúde de disco (SMART), espaçados no tempo.
-"""
+"""Sensores de segurança leves e best-effort: arquivos-isca (ransomware), beaconing, processos novos,
+desligamento anterior e erros de hardware / saúde de disco (SMART)."""
 import os
 import platform
 import subprocess
@@ -24,28 +12,14 @@ import psutil
 IS_WINDOWS = platform.system() == "Windows"
 IS_LINUX = platform.system() == "Linux"
 
-# No Windows, um subprocesso de console abre uma JANELA PRETA na tela — e o
-# agente roda sem console (pythonw), então cada consulta ao sistema piscava um
-# "cmd" na frente do usuário. CREATE_NO_WINDOW executa sem janela nenhuma.
+# O agente roda sem console (pythonw): sem CREATE_NO_WINDOW, todo subprocesso de console
+# piscaria uma janela preta na tela do usuário.
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows" else {}
 
 
-# ---------------------------------------------------------------------------
-# Arquivos-isca
-# ---------------------------------------------------------------------------
-
 class CanaryGuard:
-    """
-    Os arquivos ficam VISÍVEIS, de propósito.
-
-    A tentação é escondê-los para não sujar as pastas da pessoa — mas boa parte
-    dos programas de sequestro de dados pula arquivos ocultos justamente por
-    serem, em geral, arquivos de sistema. Uma isca oculta pode nunca ser tocada,
-    e uma armadilha que não dispara não serve para nada.
-
-    Então: uma pasta só, com nome que se explica, e um LEIA-ME dentro dizendo o
-    que é aquilo — quem encontrar entende, em vez de achar que é vírus.
-    """
+    """Iscas VISÍVEIS de propósito: muitos ransomwares pulam arquivos ocultos. Uma pasta só, com um
+    LEIA-ME explicando o que é, para quem encontrar não achar que é vírus."""
 
     FOLDER = "_AnomalyDetect_protecao"
     NAMES = ["contrato_importante.docx", "backup_fotos_familia.xlsx"]
@@ -119,14 +93,9 @@ class CanaryGuard:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Beaconing
-# ---------------------------------------------------------------------------
-
 class BeaconTracker:
-    """Guarda o histórico de conexões de saída por (processo, ip:porta) e mede
-    a regularidade dos intervalos. Só devolve candidatos com muitos contatos e
-    baixa variação (relógio)."""
+    """Histórico de conexões de saída por (processo, ip:porta); só devolve candidatos com muitos
+    contatos e intervalos regulares (relógio)."""
 
     def __init__(self, keep_seconds: int = 3600):
         self.keep = keep_seconds
@@ -211,10 +180,6 @@ class BeaconTracker:
         return out
 
 
-# ---------------------------------------------------------------------------
-# Novos processos
-# ---------------------------------------------------------------------------
-
 class ProcessWatcher:
     def __init__(self):
         self.seen: set = set()
@@ -228,25 +193,20 @@ class ProcessWatcher:
                 pass
 
     def new_processes(self) -> List[Dict[str, Any]]:
-        """Só os que nasceram desde a última passada.
-
-        A primeira varredura lê apenas pid e hora de criação — o que é barato.
-        Os atributos caros (linha de comando, caminho, pai) são buscados apenas
-        para os processos novos, que em geral são zero ou um por coleta.
-        """
+        """Só os que nasceram desde a última passada; os atributos caros são lidos apenas para eles."""
         started = []
         current = set()
-        novos = []
+        new_procs = []
         for p in psutil.process_iter(["pid", "create_time"]):
             try:
                 key = (p.info["pid"], p.info["create_time"])
                 current.add(key)
                 if key not in self.seen:
-                    novos.append(p)
+                    new_procs.append(p)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
 
-        for p in novos[:100]:
+        for p in new_procs[:100]:
             try:
                 with p.oneshot():
                     try:
@@ -275,10 +235,6 @@ class ProcessWatcher:
         self.seen = current
         return started
 
-
-# ---------------------------------------------------------------------------
-# Desligamento anterior
-# ---------------------------------------------------------------------------
 
 def previous_shutdown_event(since_epoch: float) -> Optional[Dict[str, Any]]:
     """Lê o registro do sistema para classificar o último desligamento."""
@@ -329,10 +285,6 @@ def _shutdown_linux(since_epoch: float) -> Optional[Dict[str, Any]]:
     except (FileNotFoundError, subprocess.SubprocessError):
         return None
 
-
-# ---------------------------------------------------------------------------
-# SMART / erros de hardware (espaçado)
-# ---------------------------------------------------------------------------
 
 def disk_health() -> List[Dict[str, Any]]:
     disks = []

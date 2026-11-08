@@ -1,12 +1,5 @@
-"""
-Caixa-preta local.
-
-O agente guarda em memória os últimos minutos em alta resolução (uma amostra
-leve a cada 2 s). Quando o servidor sinaliza um aviso grave, esse buffer é
-enviado junto com uma fotografia forense do momento: árvore de processos,
-conexões de rede e arquivos abertos pelo processo suspeito. Nada é gravado em
-disco: se nada acontece, o buffer só se sobrescreve.
-"""
+"""Caixa-preta: os últimos minutos em memória (amostra a cada 2 s), enviados com uma foto forense
+(processos, conexões, arquivos abertos) quando o servidor sinaliza um aviso grave. Nada vai para o disco."""
 import platform
 import time
 from collections import deque
@@ -20,17 +13,8 @@ IS_WINDOWS = platform.system() == "Windows"
 
 
 class Blackbox:
-    """
-    A amostragem de 2 em 2 segundos precisa ser barata.
-
-    A primeira versão varria a lista inteira de processos a cada amostra: quase
-    um segundo e meio de trabalho a cada dois segundos, para sempre. Um
-    monitorador que deixa a máquina lenta é o oposto do objetivo.
-
-    Agora a amostra lê só o que é quase de graça (uso de processador e de
-    memória do sistema) e reaproveita a lista de programas que a coleta normal
-    já montou — atualizada a cada coleta, não a cada amostra.
-    """
+    """A amostra a cada 2 s precisa ser barata: lê só CPU e memória do sistema e reaproveita a lista de
+    programas da coleta normal, em vez de varrer todos os processos a cada amostra."""
 
     def __init__(self, seconds: int = 300, sample_every: float = 2.0):
         self.sample_every = sample_every

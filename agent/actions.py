@@ -1,13 +1,5 @@
-"""
-Execução dos comandos vindos do painel.
-
-Cada comando é uma ação pontual, deliberadamente conservadora: encerra um
-processo pelo nome/pid, limpa temporários, pausa sincronização de nuvem,
-isola a rede (só com privilégio), coleta um diagnóstico rápido ou uma
-caixa-preta. Toda ação devolve um resultado descritivo que fica registrado no
-servidor. Nada aqui apaga dados do usuário — "limpar temporários" toca só em
-pastas de temporários conhecidas.
-"""
+"""Execução dos comandos do painel: ações pontuais e conservadoras, cada uma com um resultado descritivo.
+Nada aqui apaga dados do usuário — "limpar temporários" toca só em pastas de temporários conhecidas."""
 import os
 import platform
 import shutil
@@ -20,9 +12,8 @@ import psutil
 
 IS_WINDOWS = platform.system() == "Windows"
 
-# No Windows, um subprocesso de console abre uma JANELA PRETA na tela — e o
-# agente roda sem console (pythonw), então cada consulta ao sistema piscava um
-# "cmd" na frente do usuário. CREATE_NO_WINDOW executa sem janela nenhuma.
+# O agente roda sem console (pythonw): sem CREATE_NO_WINDOW, todo subprocesso de console
+# piscaria uma janela preta na tela do usuário.
 NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows" else {}
 
 SYNC_CLIENTS = {"onedrive.exe", "googledrivesync.exe", "googledrive.exe", "dropbox.exe", "megasync.exe",
@@ -32,14 +23,8 @@ FIREWALL_RULE = "AnomalyDetect-Isolation"
 
 def _kill(pid: Optional[int], name: Optional[str], create_time: Optional[float] = None,
           exe: Optional[str] = None) -> Dict[str, Any]:
-    """Encerra só o processo que o aviso apontou.
-
-    Antes, além do pid, encerrava todo processo com o mesmo nome: um programa
-    de usuário comum chamado svchost.exe gerava o aviso, e o agente (como
-    SYSTEM) derrubava os svchost.exe verdadeiros. Agora vale o pid, conferido
-    com nome, hora de início e caminho quando o servidor os manda — um pid
-    reaproveitado por outro processo não é encerrado.
-    """
+    """Encerra o programa do aviso pelo pid, conferido com nome, hora de início e caminho quando o
+    servidor os manda: um pid reaproveitado ou um homônimo (svchost.exe falso) não derruba outro processo."""
     try:
         pid = int(pid)
     except (TypeError, ValueError):
@@ -53,33 +38,33 @@ def _kill(pid: Optional[int], name: Optional[str], create_time: Optional[float] 
                 return {"ok": False, "killed_pids": [], "message": "O número do processo foi reaproveitado"}
             if exe and os.path.normcase(p.exe() or "") != os.path.normcase(str(exe)):
                 return {"ok": False, "killed_pids": [], "message": "O programa não é o do aviso"}
-        alvos = _instancia_do_programa(p)
+        targets = _program_instance(p)
     except psutil.NoSuchProcess:
         return {"ok": False, "killed_pids": [], "message": "O processo já tinha terminado"}
     except (psutil.AccessDenied, ValueError) as e:
         return {"ok": False, "killed_pids": [], "message": f"Não foi possível encerrar: {e}"}
 
-    encerrados = []
-    for alvo in alvos:
+    killed = []
+    for target in targets:
         try:
-            alvo.terminate()
-            encerrados.append(alvo.pid)
+            target.terminate()
+            killed.append(target.pid)
         except psutil.NoSuchProcess:
             continue
         except psutil.AccessDenied:
             pass
-    _, vivos = psutil.wait_procs(alvos, timeout=5)
-    for alvo in vivos:
+    _, alive = psutil.wait_procs(targets, timeout=5)
+    for target in alive:
         try:
-            alvo.kill()
+            target.kill()
         except psutil.Error:
             pass
-    if pid not in encerrados:
-        return {"ok": False, "killed_pids": encerrados, "message": "Não foi possível encerrar o processo"}
-    return {"killed_pids": encerrados, "message": f"{len(encerrados)} processo(s) do programa encerrado(s)"}
+    if pid not in killed:
+        return {"ok": False, "killed_pids": killed, "message": "Não foi possível encerrar o processo"}
+    return {"killed_pids": killed, "message": f"{len(killed)} processo(s) do programa encerrado(s)"}
 
 
-def _mesmo_programa(a: "psutil.Process", b: "psutil.Process") -> bool:
+def _same_program(a: "psutil.Process", b: "psutil.Process") -> bool:
     try:
         if (a.name() or "").lower() != (b.name() or "").lower():
             return False
@@ -88,34 +73,27 @@ def _mesmo_programa(a: "psutil.Process", b: "psutil.Process") -> bool:
         return False
 
 
-def _instancia_do_programa(p: "psutil.Process") -> List["psutil.Process"]:
-    """O processo do aviso e o resto do mesmo programa aberto.
-
-    Navegador e afins rodam em vários processos do mesmo executável, e o aviso
-    costuma apontar uma aba: encerrar só ela não fecha o programa, que abre
-    outra no lugar. Sobe enquanto o pai é o mesmo executável e leva junto os
-    descendentes do mesmo executável. Outro programa com o mesmo nome em
-    outro caminho (o svchost.exe falso e os verdadeiros) fica de fora, e o
-    próprio agente nunca entra na conta.
-    """
-    proprio = os.getpid()
-    raiz = p
+def _program_instance(p: "psutil.Process") -> List["psutil.Process"]:
+    """O processo do aviso e o resto do mesmo executável aberto: o aviso costuma apontar uma aba do
+    navegador, e encerrar só ela não fecha o programa. Homônimos em outro caminho e o agente ficam de fora."""
+    own_pid = os.getpid()
+    root = p
     while True:
         try:
-            pai = raiz.parent()
+            parent = root.parent()
         except psutil.Error:
             break
-        if pai is None or pai.pid in (0, proprio) or not _mesmo_programa(pai, p):
+        if parent is None or parent.pid in (0, own_pid) or not _same_program(parent, p):
             break
-        raiz = pai
-    alvos = [raiz]
+        root = parent
+    targets = [root]
     try:
-        alvos += [f for f in raiz.children(recursive=True) if f.pid != proprio and _mesmo_programa(f, p)]
+        targets += [c for c in root.children(recursive=True) if c.pid != own_pid and _same_program(c, p)]
     except psutil.Error:
         pass
-    if p.pid not in {a.pid for a in alvos}:
-        alvos.append(p)
-    return alvos
+    if p.pid not in {t.pid for t in targets}:
+        targets.append(p)
+    return targets
 
 
 def _clean_temp(_params) -> Dict[str, Any]:
@@ -141,10 +119,8 @@ def _clean_temp(_params) -> Dict[str, Any]:
                     size = _dir_size(entry.path)
                     shutil.rmtree(entry.path, ignore_errors=True)
                 else:
-                    # No Windows o rmtree segue o caminho: quem criou a pasta
-                    # na Temp troca uma subpasta por junção no meio da descida
-                    # e o agente (SYSTEM) apaga fora da Temp. Lá só sai pasta
-                    # vazia — rmdir numa junção remove a junção, não o alvo.
+                    # No Windows o rmtree segue junções trocadas no meio da descida e o agente (SYSTEM)
+                    # apagaria fora da Temp. Só sai pasta vazia: rmdir numa junção remove a junção, não o alvo.
                     os.rmdir(entry.path)
                 freed += size
                 removed += 1

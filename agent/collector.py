@@ -7,9 +7,8 @@ from typing import Dict, Any, List, Optional
 try:
     from privacy import redact_secrets
 except ImportError:
-    # Instalação parcial (instalador antigo): sem o filtro local, o agente
-    # ainda roda e o servidor aplica a mesma remoção de segredos na chegada.
-    # Melhor degradar do que deixar a máquina sem monitoramento nenhum.
+    # Instalação parcial (instalador antigo): o servidor aplica a mesma remoção na chegada,
+    # e degradar é melhor do que deixar a máquina sem monitoramento.
     import logging as _logging
 
     _logging.getLogger("anomaly-agent").warning(
@@ -20,9 +19,7 @@ except ImportError:
     def redact_secrets(text):
         return text
 
-# Sensores extras são opcionais: um agente atualizado tem sensors.py, um
-# recém-baixado por um instalador antigo pode não ter. Sem eles, a coleta
-# segue com o conjunto básico.
+# sensors.py pode faltar (instalador antigo); sem ele, a coleta segue com o conjunto básico.
 try:
     import sensors
     _HAS_SENSORS = True
@@ -88,7 +85,6 @@ def collect_metrics() -> Dict[str, Any]:
     processes = collect_top_processes()
 
     return {
-        # CPU
         "cpu_percent": cpu_percent,
         "cpu_per_core": cpu_per_core,
         "cpu_freq_current": cpu_freq.current if cpu_freq else None,
@@ -96,18 +92,15 @@ def collect_metrics() -> Dict[str, Any]:
         "cpu_count_logical": cpu_count_logical,
         "cpu_count_physical": cpu_count_physical,
 
-        # Memória
         "mem_used": mem.used,
         "mem_available": mem.available,
         "mem_percent": mem.percent,
         "mem_total": mem.total,
 
-        # Swap
         "swap_used": swap.used,
         "swap_percent": swap.percent,
         "swap_total": swap.total,
 
-        # Disco
         "disk_used": disk.used,
         "disk_free": disk.free,
         "disk_percent": disk.percent,
@@ -115,12 +108,10 @@ def collect_metrics() -> Dict[str, Any]:
         "disk_write_bytes": max(disk_write_rate, 0),
         "disk_partitions": partitions,
 
-        # Rede
         "net_bytes_sent": max(net_sent_rate, 0),
         "net_bytes_recv": max(net_recv_rate, 0),
         "net_connections": net_connections,
 
-        # Sistema
         "uptime_seconds": uptime,
         "load_avg_1": load_avg[0],
         "load_avg_5": load_avg[1],
@@ -130,37 +121,31 @@ def collect_metrics() -> Dict[str, Any]:
         "foreground_pid": foreground[0] if foreground else None,
         "foreground_name": foreground[1] if foreground else None,
 
-        # GPU
         "gpu_metrics": gpu_metrics,
 
-        # Temperatura
         "temperatures": temperatures,
 
-        # Bateria
         "battery_percent": battery.get("percent"),
         "battery_plugged": battery.get("plugged"),
         "battery_secs_left": battery.get("secs_left"),
         "battery_health_percent": battery.get("health_percent"),
         "battery_cycle_count": battery.get("cycle_count"),
 
-        # Processos
         "process_count": len(psutil.pids()),
         "processes": processes,
     }
 
 
 def collect_gpu() -> List[Dict[str, Any]]:
-    # 1. Tenta pynvml (NVIDIA — mais confiável)
     gpus = _collect_gpu_nvml()
     if gpus:
         return gpus
 
-    # 2. Tenta GPUtil (NVIDIA — fallback)
     gpus = _collect_gpu_gputil()
     if gpus:
         return gpus
 
-    # 3. Tenta WMI (Windows — AMD/Intel/NVIDIA sem driver CUDA)
+    # WMI cobre AMD/Intel e NVIDIA sem driver CUDA
     if platform.system() == "Windows":
         gpus = _collect_gpu_wmi()
 
@@ -237,7 +222,6 @@ def _collect_gpu_wmi() -> List[Dict[str, Any]]:
         c = wmi.WMI()
         gpus = []
         for i, gpu in enumerate(c.Win32_VideoController()):
-            # Tenta pegar uso via WMI Performance
             load = None
             try:
                 perf = wmi.WMI(namespace="root/cimv2").Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine()
@@ -314,9 +298,8 @@ def collect_battery() -> Dict[str, Any]:
     return {}
 
 
-# Saúde da bateria (capacidade máxima atual vs. capacidade de fábrica) muda muito
-# lentamente — recalcula no máximo a cada 30 min para não gerar custo (o Windows
-# especialmente é "caro": gera um relatório em arquivo a cada chamada do powercfg).
+# Saúde da bateria muda devagar e é cara no Windows (powercfg gera um relatório em arquivo):
+# recalcula no máximo a cada 30 min.
 _BATTERY_HEALTH_INTERVAL = 1800
 _battery_health_cache: Dict[str, Any] = {}
 _battery_health_last_check = 0.0
@@ -415,7 +398,6 @@ def collect_disk_partitions() -> List[Dict[str, Any]]:
     return partitions
 
 
-# Quantos executáveis novos ter o hash calculado por coleta
 _HASH_BUDGET = 12
 
 
@@ -436,14 +418,8 @@ def _hashes(exes: List[str]) -> Dict[str, Optional[str]]:
 
 
 def collect_top_processes(n: int = 15, identify: bool = True) -> List[Dict[str, Any]]:
-    """
-    Duas passadas, de propósito.
-
-    A primeira só lê o que é barato (pid, nome, CPU, memória) para ranquear;
-    a segunda busca o que é caro (linha de comando, caminho, dono) apenas nos
-    ~30 escolhidos. Pedir `cmdline` de trezentos processos no Windows custava
-    vários segundos por coleta — tempo em que o agente ficava parado.
-    """
+    """Duas passadas: a primeira lê só o barato (pid, nome, CPU, memória) para ranquear; a segunda busca
+    o caro (linha de comando, caminho, dono) só nos escolhidos — no Windows, de todos custava segundos."""
     ranking = []
     for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
         try:
@@ -468,7 +444,6 @@ def collect_top_processes(n: int = 15, identify: bool = True) -> List[Dict[str, 
     result = []
     for proc, pid, cpu, mem in selected:
         try:
-            # oneshot(): o psutil busca vários atributos numa só ida ao sistema
             with proc.oneshot():
                 try:
                     parts = proc.cmdline()
