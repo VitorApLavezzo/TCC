@@ -53,16 +53,69 @@ def _kill(pid: Optional[int], name: Optional[str], create_time: Optional[float] 
                 return {"ok": False, "killed_pids": [], "message": "O número do processo foi reaproveitado"}
             if exe and os.path.normcase(p.exe() or "") != os.path.normcase(str(exe)):
                 return {"ok": False, "killed_pids": [], "message": "O programa não é o do aviso"}
-        p.terminate()
-        try:
-            p.wait(5)
-        except psutil.TimeoutExpired:
-            p.kill()
+        alvos = _instancia_do_programa(p)
     except psutil.NoSuchProcess:
         return {"ok": False, "killed_pids": [], "message": "O processo já tinha terminado"}
     except (psutil.AccessDenied, ValueError) as e:
         return {"ok": False, "killed_pids": [], "message": f"Não foi possível encerrar: {e}"}
-    return {"killed_pids": [pid], "message": "1 processo encerrado"}
+
+    encerrados = []
+    for alvo in alvos:
+        try:
+            alvo.terminate()
+            encerrados.append(alvo.pid)
+        except psutil.NoSuchProcess:
+            continue
+        except psutil.AccessDenied:
+            pass
+    _, vivos = psutil.wait_procs(alvos, timeout=5)
+    for alvo in vivos:
+        try:
+            alvo.kill()
+        except psutil.Error:
+            pass
+    if pid not in encerrados:
+        return {"ok": False, "killed_pids": encerrados, "message": "Não foi possível encerrar o processo"}
+    return {"killed_pids": encerrados, "message": f"{len(encerrados)} processo(s) do programa encerrado(s)"}
+
+
+def _mesmo_programa(a: "psutil.Process", b: "psutil.Process") -> bool:
+    try:
+        if (a.name() or "").lower() != (b.name() or "").lower():
+            return False
+        return os.path.normcase(a.exe() or "") == os.path.normcase(b.exe() or "")
+    except psutil.Error:
+        return False
+
+
+def _instancia_do_programa(p: "psutil.Process") -> List["psutil.Process"]:
+    """O processo do aviso e o resto do mesmo programa aberto.
+
+    Navegador e afins rodam em vários processos do mesmo executável, e o aviso
+    costuma apontar uma aba: encerrar só ela não fecha o programa, que abre
+    outra no lugar. Sobe enquanto o pai é o mesmo executável e leva junto os
+    descendentes do mesmo executável. Outro programa com o mesmo nome em
+    outro caminho (o svchost.exe falso e os verdadeiros) fica de fora, e o
+    próprio agente nunca entra na conta.
+    """
+    proprio = os.getpid()
+    raiz = p
+    while True:
+        try:
+            pai = raiz.parent()
+        except psutil.Error:
+            break
+        if pai is None or pai.pid in (0, proprio) or not _mesmo_programa(pai, p):
+            break
+        raiz = pai
+    alvos = [raiz]
+    try:
+        alvos += [f for f in raiz.children(recursive=True) if f.pid != proprio and _mesmo_programa(f, p)]
+    except psutil.Error:
+        pass
+    if p.pid not in {a.pid for a in alvos}:
+        alvos.append(p)
+    return alvos
 
 
 def _clean_temp(_params) -> Dict[str, Any]:

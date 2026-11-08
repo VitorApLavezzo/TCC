@@ -15,6 +15,11 @@ class User(Base):
     # com o e-mail: o cadastro por senha não prova posse do e-mail, e casar
     # pelo e-mail entregava a conta a quem a criou primeiro.
     google_sub = Column(String, unique=True, index=True, nullable=True)
+    # Liberado pelo administrador (liberar_google.py): o próximo login Google
+    # com este e-mail vincula a conta. Serve às contas criadas pelo Google
+    # antes do vínculo por sub, que têm senha aleatória e não teriam como
+    # entrar para vincular por dentro.
+    google_link_allowed = Column(Boolean, default=False, nullable=True)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

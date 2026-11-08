@@ -78,9 +78,10 @@ isolar da rede), e guarda a ação anterior para desfazer.
   por máquina e assinatura de cada comando — anotado como trabalho futuro.
 - **Sem TLS embutido.** O Compose serve HTTP; a implantação real fica atrás de
   um proxy com certificado. Em HTTP puro, token e métricas trafegam em claro —
-  e por isso o agente só se autoatualiza por HTTPS (ou com
-  `AGENT_ALLOW_INSECURE_UPDATE=1`): por HTTP, quem respondesse no lugar do
-  servidor entregaria código para o agente executar como SYSTEM.
+  e por isso o agente só se autoatualiza por HTTPS, com o servidor na própria
+  máquina (localhost) ou com `AGENT_ALLOW_INSECURE_UPDATE=1`: por HTTP na
+  rede, quem respondesse no lugar do servidor entregaria código para o agente
+  executar como SYSTEM.
 - **Token JWT sem revogação.** Um token roubado vale até expirar (24 h). Não há
   lista de revogados nem refresh token.
 - ~~**`SECRET_KEY` padrão.**~~ Corrigido: não há mais valor padrão. O backend

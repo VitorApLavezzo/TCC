@@ -64,14 +64,24 @@ def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
 
     user = db.query(User).filter(User.google_sub == sub).first()
     if not user:
-        if db.query(User).filter(func.lower(User.email) == email.lower()).first():
+        existente = db.query(User).filter(func.lower(User.email) == email.lower()).first()
+        if existente and existente.google_link_allowed and not existente.google_sub:
+            # O administrador conferiu que a conta é desta pessoa
+            existente.google_sub = sub
+            existente.google_link_allowed = False
+            db.commit()
+            user = existente
+        elif existente:
             # Conta de senha com este e-mail: quem a criou não provou que o
             # e-mail é seu. Vincular aqui daria a esta pessoa uma conta cuja
-            # senha outro escolheu. O vínculo é feito de dentro da conta.
+            # senha outro escolheu. O vínculo é feito de dentro da conta, ou
+            # pelo administrador quando a conta foi criada pelo Google.
             raise HTTPException(
                 status_code=409,
-                detail="Já existe uma conta com este e-mail. Entre com usuário e senha e vincule o Google na sua conta.",
+                detail="Já existe uma conta com este e-mail. Se ela foi criada pelo botão do Google, "
+                       "peça ao administrador do servidor para liberar o vínculo.",
             )
+    if not user:
         # Primeiro acesso: cria a conta automaticamente
         base_username = email.split("@")[0]
         username = base_username

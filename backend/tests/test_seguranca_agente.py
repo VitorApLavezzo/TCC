@@ -42,6 +42,25 @@ class TestAutoatualizacao:
         assert updater.check("http://192.168.0.10:3000", "tok") == []
         assert chamadas == []
 
+    @pytest.mark.parametrize("url", ["http://localhost:8000", "http://127.0.0.1:8000", "http://[::1]:8000"])
+    def test_servidor_na_propria_maquina_atualiza_por_http(self, monkeypatch, url):
+        # Na própria máquina não há rede no meio para trocar a resposta
+        import updater
+        monkeypatch.delenv("AGENT_ALLOW_INSECURE_UPDATE", raising=False)
+        chamadas = []
+        monkeypatch.setattr(updater.requests, "get", lambda *a, **k: chamadas.append(a) or _Resp({"files": []}))
+        updater.check(url, "tok")
+        assert chamadas
+
+    @pytest.mark.parametrize("url", ["http://localhost.evil.com:8000", "http://127.0.0.1.nip.io"])
+    def test_nome_parecido_com_localhost_nao_conta(self, monkeypatch, url):
+        import updater
+        monkeypatch.delenv("AGENT_ALLOW_INSECURE_UPDATE", raising=False)
+        chamadas = []
+        monkeypatch.setattr(updater.requests, "get", lambda *a, **k: chamadas.append(a) or _Resp({"files": []}))
+        updater.check(url, "tok")
+        assert chamadas == []
+
     def test_so_aceita_arquivos_do_proprio_agente(self, monkeypatch):
         import updater
         manifesto = {"files": [{"name": "json.py", "sha256": "a" * 64},
@@ -66,6 +85,19 @@ def _vivos(procs):
     return [p.poll() is None for p in procs]
 
 
+def _terminou(pid, espera=5.0):
+    # Neto órfão vira zumbi até alguém recolhê-lo: zumbi já terminou
+    fim = time.time() + espera
+    while time.time() < fim:
+        try:
+            if psutil.Process(pid).status() == psutil.STATUS_ZOMBIE:
+                return True
+        except psutil.NoSuchProcess:
+            return True
+        time.sleep(0.1)
+    return False
+
+
 class TestEncerrarProcesso:
     """`agent/actions.py:_kill-name-match-unbound-process-identity`"""
 
@@ -85,6 +117,31 @@ class TestEncerrarProcesso:
         time.sleep(0.3)
         assert _vivos(tres_sleeps) == [True, True, True]
         assert res.get("ok") is False
+
+    def test_aviso_num_processo_filho_encerra_o_programa_inteiro(self):
+        # Navegadores rodam em vários processos do mesmo executável; o aviso
+        # costuma apontar uma aba. Encerrar só ela não fecha o programa.
+        import actions
+        roteiro = ("import subprocess, sys, time\n"
+                   "f = [subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']) for _ in range(2)]\n"
+                   "print(' '.join(str(p.pid) for p in f), flush=True)\n"
+                   "time.sleep(60)\n")
+        principal = subprocess.Popen([sys.executable, "-c", roteiro], stdout=subprocess.PIPE, text=True)
+        filhos = [int(x) for x in principal.stdout.readline().split()]
+        try:
+            aba = psutil.Process(filhos[0])
+            res = actions.execute({"command": "kill_process",
+                                   "params": {"pid": aba.pid, "name": aba.name(), "exe": aba.exe(),
+                                              "create_time": aba.create_time()}}, {})
+            principal.wait(timeout=10)
+            assert all(_terminou(pid) for pid in filhos)
+            assert res.get("ok", True) is True
+        finally:
+            for pid in [principal.pid, *filhos]:
+                try:
+                    psutil.Process(pid).kill()
+                except psutil.Error:
+                    pass
 
     def test_pausar_sincronizacao_nao_encerra_outros_programas(self, tres_sleeps):
         import actions

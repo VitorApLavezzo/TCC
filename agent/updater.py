@@ -19,11 +19,13 @@ Cuidados deliberados:
   publica: um "json.py" no manifesto seria importado antes da biblioteca.
 """
 import hashlib
+import ipaddress
 import logging
 import os
 import sys
 import tempfile
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 import requests
 
@@ -50,8 +52,23 @@ ALLOWED_FILES = frozenset({
 })
 
 
+def _na_propria_maquina(api_url: str) -> bool:
+    # Servidor na própria máquina: não há rede no meio para trocar a resposta
+    try:
+        host = urlsplit(api_url).hostname or ""
+    except ValueError:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def _transporte_confiavel(api_url: str) -> bool:
-    return api_url.lower().startswith("https://") or os.environ.get("AGENT_ALLOW_INSECURE_UPDATE") == "1"
+    return (api_url.lower().startswith("https://") or _na_propria_maquina(api_url)
+            or os.environ.get("AGENT_ALLOW_INSECURE_UPDATE") == "1")
 
 
 def check(api_url: str, token: str) -> List[Tuple[str, str]]:
