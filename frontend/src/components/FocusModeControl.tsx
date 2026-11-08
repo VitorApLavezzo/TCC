@@ -5,11 +5,8 @@ import { useToast } from "./ui/Toast";
 import { Gamepad2 } from "lucide-react";
 
 /**
- * "Estou fazendo algo pesado."
- *
- * Enquanto ativo, os avisos de desempenho ficam suspensos e as leituras não
- * entram no aprendizado — jogar ou renderizar não vira anomalia nem contamina
- * o normal aprendido. Avisos de segurança continuam valendo.
+ * Enquanto ativo, avisos de desempenho ficam suspensos e as leituras não entram no
+ * aprendizado. Avisos de segurança continuam valendo.
  */
 export function FocusModeControl({ machine, onChange }: { machine: Machine; onChange?: () => void }) {
   const toast = useToast();
@@ -18,7 +15,6 @@ export function FocusModeControl({ machine, onChange }: { machine: Machine; onCh
   const active = machine.focus_mode_until && new Date(machine.focus_mode_until) > new Date();
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  // Fecha com Esc ou clicando fora, como qualquer menu.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {

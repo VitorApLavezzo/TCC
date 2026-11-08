@@ -23,11 +23,6 @@ import { HardwareRisk } from "../components/reliability/HardwareRisk";
 import { Timeline } from "../components/reliability/Timeline";
 import { ActivityLabelControl } from "../components/machines/ActivityLabelControl";
 
-/**
- * Cinco abas, uma por pergunta que a pessoa faz sobre o computador. Eram nove
- * (três linhas no celular), e Saúde, Previsões, Diário e Mudanças se
- * sobrepunham: para saber "vai dar problema?" era preciso abrir três.
- */
 const TABS = [
   { id: "resumo", label: "Resumo" },
   { id: "saude", label: "Saúde e previsões" },
@@ -37,7 +32,7 @@ const TABS = [
 ];
 
 /** Endereços das abas antigas continuam abrindo o conteúdo certo. */
-const ABA_ANTIGA: Record<string, string> = {
+const LEGACY_TABS: Record<string, string> = {
   linha: "resumo",
   previsoes: "saude",
   upgrade: "saude",
@@ -45,12 +40,10 @@ const ABA_ANTIGA: Record<string, string> = {
   energia: "programas",
 };
 
-/** O estado agora e o que aconteceu, num lugar só. */
 function SummaryTab({ machineId, machine }: { machineId: number; machine: Machine | null }) {
   const navigate = useNavigate();
   // O id vem do endereço, não do computador carregado: sem isso a primeira
-  // busca saía sem filtro (todos os computadores) e, se o computador não
-  // carregasse, a aba inteira ficava em branco.
+  // busca saía sem filtro e, se o computador não carregasse, a aba ficava em branco.
   const { data, loading, error, reload } = useAsync<Anomaly[]>(
     () => anomaliesApi.list({ machine_id: machineId, hours: 720, unresolved_only: true, limit: 500 }),
     [machineId]
@@ -105,10 +98,6 @@ function SummaryTab({ machineId, machine }: { machineId: number; machine: Machin
   );
 }
 
-/**
- * Saúde e previsões: o que vai acontecer com este computador. Junta o que
- * antes eram três abas — previsões, saúde das peças e se vale trocar alguma.
- */
 function HealthTab({ machineId }: { machineId: number }) {
   return (
     <div className="space-y-8">
@@ -129,8 +118,8 @@ export function MachineDetail() {
   const machineId = Number(id);
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const pedida = params.get("aba") || "resumo";
-  const tab = ABA_ANTIGA[pedida] ?? (TABS.some((t) => t.id === pedida) ? pedida : "resumo");
+  const requested = params.get("aba") || "resumo";
+  const tab = LEGACY_TABS[requested] ?? (TABS.some((t) => t.id === requested) ? requested : "resumo");
   const [machine, setMachine] = useState<Machine | null>(null);
   useDocumentTitle(machine?.name);
 
@@ -145,9 +134,9 @@ export function MachineDetail() {
   const onTabKey = (e: React.KeyboardEvent) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const i = TABS.findIndex((t) => t.id === tab);
-    const prox = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
-    setTab(prox.id);
-    requestAnimationFrame(() => document.getElementById(`aba-${prox.id}`)?.focus());
+    const next = TABS[(i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length];
+    setTab(next.id);
+    requestAnimationFrame(() => document.getElementById(`aba-${next.id}`)?.focus());
   };
 
   return (
@@ -217,11 +206,7 @@ export function MachineDetail() {
   );
 }
 
-/**
- * Busca de uma aba. `error` separa "não carregou" de "não tem nada": antes as
- * duas coisas viravam o estado vazio, e uma rede caída aparecia como "sem
- * previsões ainda".
- */
+/** Busca de uma aba. `error` separa "não carregou" de "não tem nada". */
 function useAsync<T>(fn: () => Promise<{ data: T }>, deps: any[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);

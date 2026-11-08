@@ -1,12 +1,6 @@
 import { ReactNode } from "react";
 
-/**
- * Tela vazia como convite à ação.
- *
- * Alinhada à esquerda e sem ilustração: o ícone dentro de um círculo cinza
- * centralizado é o clichê de empty state e não acrescenta informação. O que a
- * pessoa precisa é do próximo passo.
- */
+/** Tela vazia como convite à ação: sem ilustração, com o próximo passo. */
 export function EmptyState({
   title,
   body,

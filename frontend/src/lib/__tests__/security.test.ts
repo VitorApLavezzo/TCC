@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { killParamsFor } from "../actions";
-import { pararAvisosNesteAparelho } from "../push";
+import { stopPushOnThisDevice } from "../push";
 
 /**
  * Regressões da auditoria de segurança (run-1) no painel.
@@ -22,22 +22,22 @@ describe("killParamsFor", () => {
   });
 });
 
-describe("pararAvisosNesteAparelho", () => {
+describe("stopPushOnThisDevice", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("sair da conta tira a assinatura deste aparelho no servidor e no navegador", async () => {
-    const assinatura = { endpoint: "https://fcm.googleapis.com/fcm/send/x", unsubscribe: vi.fn(async () => true) };
+    const subscription = { endpoint: "https://fcm.googleapis.com/fcm/send/x", unsubscribe: vi.fn(async () => true) };
     vi.stubGlobal("navigator", {
-      serviceWorker: { getRegistration: async () => ({ pushManager: { getSubscription: async () => assinatura } }) },
+      serviceWorker: { getRegistration: async () => ({ pushManager: { getSubscription: async () => subscription } }) },
     });
-    const servidor = vi.fn(async () => undefined);
-    await pararAvisosNesteAparelho(servidor);
-    expect(servidor).toHaveBeenCalledWith("https://fcm.googleapis.com/fcm/send/x");
-    expect(assinatura.unsubscribe).toHaveBeenCalled();
+    const server = vi.fn(async () => undefined);
+    await stopPushOnThisDevice(server);
+    expect(server).toHaveBeenCalledWith("https://fcm.googleapis.com/fcm/send/x");
+    expect(subscription.unsubscribe).toHaveBeenCalled();
   });
 
   it("sem service worker não quebra a saída", async () => {
     vi.stubGlobal("navigator", {});
-    await expect(pararAvisosNesteAparelho(vi.fn())).resolves.toBeUndefined();
+    await expect(stopPushOnThisDevice(vi.fn())).resolves.toBeUndefined();
   });
 });

@@ -3,13 +3,7 @@ import { timeAgo } from "../lib/format";
 import { Button } from "./ui/Button";
 import { StatusDot } from "./ui/Layout";
 
-/**
- * Aviso de que o que está na tela pode não ser o atual.
- *
- * Aparece só quando há razão para duvidar dos dados, e diz três coisas: o que
- * aconteceu, de quando são os números, e o que fazer. Sem esse aviso, o
- * backend cair deixava o painel exibindo leituras velhas como se fossem atuais.
- */
+/** Aviso de que o que está na tela pode não ser o atual: o que houve, de quando são os números, o que fazer. */
 export function StaleBanner({ onRetry }: { onRetry?: () => void }) {
   const { reachable, online, lastSuccessAt, consecutiveFailures, now } = useStatus();
 

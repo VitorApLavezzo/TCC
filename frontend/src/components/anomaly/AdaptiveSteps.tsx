@@ -2,13 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Anomaly } from "../../types";
 import { anomaliesApi } from "../../services/api";
 
-/**
- * Passos como procedimento, agora interativos.
- *
- * Cada passo pode ser marcado como "fiz, resolveu" ou "fiz, não resolveu".
- * Quando não resolve, a IA gera o próximo passo — mais avançado e diferente
- * dos que já falharam. A calha liga os números como num manual.
- */
+/** Passos marcáveis; quando um não resolve, a IA gera o próximo, diferente dos que já falharam. */
 export function AdaptiveSteps({ anomaly, onChange }: { anomaly: Anomaly; onChange: (a: Anomaly) => void }) {
   const steps = anomaly.explanation?.recommendations ?? [];
   const extra = anomaly.extra_steps ?? [];

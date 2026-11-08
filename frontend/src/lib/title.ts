@@ -1,10 +1,10 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 
-const MARCA = "AnomalyDetect";
+const BRAND = "AnomalyDetect";
 
 /** Prefixo de rota → nome da tela. O mais específico vem primeiro. */
-const TELAS: [RegExp, string][] = [
+const SCREENS: [RegExp, string][] = [
   [/^\/$/, "Painel"],
   [/^\/welcome/, "Conectar computador"],
   [/^\/machines\/\d+/, "Computador"],
@@ -21,10 +21,10 @@ const TELAS: [RegExp, string][] = [
   [/^\/compartilhado/, "Diagnóstico compartilhado"],
 ];
 
-/** "Painel · AnomalyDetect"; `nome` (de um computador, de um aviso) tem precedência. */
-export function pageTitle(pathname: string, nome?: string | null) {
-  const tela = nome || TELAS.find(([padrao]) => padrao.test(pathname))?.[1];
-  return tela ? `${tela} · ${MARCA}` : MARCA;
+/** "Painel · AnomalyDetect"; `name` (de um computador, de um aviso) tem precedência. */
+export function pageTitle(pathname: string, name?: string | null) {
+  const screen = name || SCREENS.find(([pattern]) => pattern.test(pathname))?.[1];
+  return screen ? `${screen} · ${BRAND}` : BRAND;
 }
 
 /**
@@ -32,9 +32,9 @@ export function pageTitle(pathname: string, nome?: string | null) {
  * Depende também do endereço: de um aviso para outro do mesmo tipo o nome
  * não muda, mas o AppShell acabou de trocar o título pelo genérico.
  */
-export function useDocumentTitle(nome?: string | null) {
+export function useDocumentTitle(name?: string | null) {
   const { pathname } = useLocation();
   useEffect(() => {
-    if (nome) document.title = pageTitle(pathname, nome);
-  }, [nome, pathname]);
+    if (name) document.title = pageTitle(pathname, name);
+  }, [name, pathname]);
 }

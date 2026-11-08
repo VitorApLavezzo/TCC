@@ -10,11 +10,8 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Send } from "lucide-react";
 
 /**
- * "Pergunte ao seu computador."
- *
- * Conversa em português sobre o histórico. A IA não recebe tudo de uma vez —
- * ela consulta os dados por ferramentas, e o rastro dessas consultas fica
- * disponível para quem quiser ver de onde veio a resposta.
+ * Conversa sobre o histórico. A IA consulta os dados por ferramentas, e o
+ * rastro dessas consultas mostra de onde veio a resposta.
  */
 export function Chat() {
   const toast = useToast();
@@ -44,8 +41,8 @@ export function Chat() {
   }, [machineId]);
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
   useEffect(() => {
-    const calmo = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    bottomRef.current?.scrollIntoView({ behavior: calmo ? "auto" : "smooth" });
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    bottomRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
   }, [messages]);
 
   const send = async (question: string) => {
@@ -101,9 +98,8 @@ export function Chat() {
     );
   }
 
-  // A altura desconta o que está em volta: no celular, o cabeçalho, a barra
-  // inferior e o respiro da página. Com 100vh-8rem fixo, o campo ficava
-  // embaixo da barra inferior e a página rolava duas vezes.
+  // A altura desconta cabeçalho, barra inferior e respiro da página: com um
+  // 100vh fixo, o campo ficava embaixo da barra inferior no celular.
   return (
     <div className="mx-auto flex h-[calc(100dvh-12rem)] min-h-[22rem] max-w-3xl flex-col lg:h-[calc(100dvh-3.5rem)] min-[1500px]:h-[calc(100dvh-4rem)]">
       <PageHeader
@@ -185,11 +181,6 @@ export function Chat() {
         }}
         className="mt-3 border-t border-hairline pt-3"
       >
-        {/*
-          As sugestões ficavam só na tela vazia e sumiam depois da primeira
-          resposta — justo quando a pessoa ainda não sabe o que mais dá para
-          perguntar. Aqui elas continuam disponíveis, discretas.
-        */}
         {messages.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {suggestions.slice(0, 3).map((s) => (
@@ -206,12 +197,6 @@ export function Chat() {
           </div>
         )}
         <div className="flex items-end gap-2">
-          {/*
-            Campo que cresce até cinco linhas: perguntar "por que o computador
-            fica lento toda segunda de manhã depois que instalei o X?" numa
-            caixa de uma linha é escrever às cegas. Enter envia, Shift+Enter
-            quebra a linha — a convenção que todo aplicativo de conversa usa.
-          */}
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -232,8 +217,7 @@ export function Chat() {
             Enviar
           </Button>
         </div>
-        {/* Fora do placeholder: no celular a dica era cortada no meio, e o
-            teclado do celular nem tem Shift+Enter. */}
+        {/* Fora do placeholder: no celular a dica era cortada, e o teclado nem tem Shift+Enter. */}
         <p id="chat-dica" className="mt-1.5 hidden text-micro text-fg-3 sm:block">
           Enter envia · Shift+Enter quebra a linha
         </p>

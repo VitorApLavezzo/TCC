@@ -20,11 +20,8 @@ interface LabelState {
 }
 
 /**
- * "O que estou fazendo agora."
- *
- * Só registra: é o gabarito com que a avaliação em dado real mede acertos e
- * falsos alarmes. Não muda os avisos — para isso existe o modo atividade
- * pesada. Também pode ser marcado na bandeja do próprio computador.
+ * Só registra o gabarito com que a avaliação em dado real mede acertos e alarmes falsos.
+ * Não muda os avisos: para isso existe o modo atividade pesada.
  */
 export function ActivityLabelControl({ machineId }: { machineId: number }) {
   const toast = useToast();

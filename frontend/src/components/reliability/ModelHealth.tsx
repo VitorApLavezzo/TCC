@@ -19,37 +19,31 @@ type Drift = {
 
 const TONE: Record<string, "ok" | "warn" | "crit"> = { ok: "ok", warn: "warn", critical: "crit" };
 
-/**
- * Saúde do modelo desta máquina.
- *
- * Um monitor comum nunca conta ao usuário que a régua envelheceu — ele
- * simplesmente passa a errar. Aqui a deriva é dita em voz alta: o que mudou,
- * quanto mudou e o que o sistema fez a respeito.
- */
+/** Deriva do modelo desta máquina: o que mudou, quanto mudou e o que o sistema fez a respeito. */
 export function ModelHealth({ machineId }: { machineId: number }) {
   const [drift, setDrift] = useState<Drift | null>(null);
   const [loading, setLoading] = useState(true);
-  const [erro, setErro] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    let vivo = true;
+    let alive = true;
     reliabilityApi
       .drift(machineId)
-      .then((r) => vivo && setDrift(r.data?.current ?? null))
-      .catch(() => vivo && setErro(true))
-      .finally(() => vivo && setLoading(false));
+      .then((r) => alive && setDrift(r.data?.current ?? null))
+      .catch(() => alive && setError(true))
+      .finally(() => alive && setLoading(false));
     return () => {
-      vivo = false;
+      alive = false;
     };
   }, [machineId]);
 
-  if (erro) return <LoadError what="a saúde do modelo deste computador" onRetry={() => window.location.reload()} />;
+  if (error) return <LoadError what="a saúde do modelo deste computador" onRetry={() => window.location.reload()} />;
   if (loading) return <Skeleton className="h-24" />;
   // Sem medição ainda (histórico curto): a tela não precisa de uma caixa
   // dizendo que não sabe.
   if (!drift) return null;
 
-  const mudaram = drift.per_feature.filter((f) => f.distance >= 0.1).slice(0, 3);
+  const changed = drift.per_feature.filter((f) => f.distance >= 0.1).slice(0, 3);
 
   return (
     <Section className="animate-fade" title="O normal aprendido" description="Se o que o modelo aprendeu ainda descreve este computador">
@@ -63,9 +57,9 @@ export function ModelHealth({ machineId }: { machineId: number }) {
         </div>
         <p className="mt-2 max-w-prose text-sm leading-relaxed text-fg-2">{drift.message}</p>
 
-        {mudaram.length > 0 && (
+        {changed.length > 0 && (
           <ul className="mt-3 space-y-1 border-t border-hairline pt-3">
-            {mudaram.map((f) => (
+            {changed.map((f) => (
               <li key={f.key} className="flex items-baseline justify-between gap-3 text-xs">
                 <span className="text-fg-2">{f.label}</span>
                 <span className="tnum font-mono text-fg-3">

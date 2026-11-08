@@ -20,13 +20,10 @@ export function Login() {
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState("");
-  // Primeira tela de todas: é por aqui que a tradução começa a valer.
   const tr = useT();
   const [loading, setLoading] = useState(false);
   const googleBtnRef = useRef<HTMLDivElement>(null);
 
-  // Explica por que a pessoa está nesta tela. Antes ela chegava aqui sem
-  // contexto — depois de criar conta, ou por sessão expirada.
   const justRegistered = params.get("conta") === "criada";
   const sessionExpired = params.get("sessao") === "expirada";
 
@@ -54,11 +51,11 @@ export function Login() {
             },
           });
           // Mesma largura do botão "Entrar" (o Google aceita de 200 a 400 px).
-          const largura = Math.round(Math.min(400, Math.max(200, googleBtnRef.current.offsetWidth || 320)));
+          const buttonWidth = Math.round(Math.min(400, Math.max(200, googleBtnRef.current.offsetWidth || 320)));
           g.accounts.id.renderButton(googleBtnRef.current, {
             theme: "outline",
             size: "large",
-            width: largura,
+            width: buttonWidth,
             text: "signin_with",
             locale: "pt-BR",
           });

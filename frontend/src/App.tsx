@@ -24,7 +24,6 @@ const SharedView = lazy(() => import("./pages/SharedView").then((m) => ({ defaul
 const Account = lazy(() => import("./pages/Account").then((m) => ({ default: m.Account })));
 import { NotFound } from "./pages/NotFound";
 
-/** Enquanto o pedaço da página chega da rede. */
 function PageFallback() {
   return (
     <div className="flex min-h-[40vh] items-center justify-center">

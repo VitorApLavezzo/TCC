@@ -8,11 +8,8 @@ import { LoadError } from "../components/ui/LoadError";
 import { ANOMALY_TYPE_LABELS } from "../types";
 
 /**
- * Modo demonstração — para apresentar à banca sem travar um computador real.
- *
- * Injeta leituras sintéticas que passam pelo MESMO pipeline das reais:
- * detectores, modelo, IA, incidentes. O que aparece no painel é o que o
- * sistema de fato detectou.
+ * Modo demonstração: injeta leituras sintéticas que passam pelo MESMO pipeline
+ * das reais (detectores, modelo, IA, incidentes).
  */
 export function Demo() {
   const toast = useToast();

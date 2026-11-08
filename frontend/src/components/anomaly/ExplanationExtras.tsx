@@ -5,10 +5,7 @@ import { explanationsApi, errorMessage } from "../../services/api";
 import { useToast } from "../ui/Toast";
 import { ThumbsUp, ThumbsDown, ShieldCheck, ShieldAlert } from "lucide-react";
 
-/**
- * "Se você fechar X…" — a conta contrafactual que o sistema fez a partir dos
- * processos reais da leitura, não um palpite da IA.
- */
+/** Conta contrafactual feita a partir dos processos reais da leitura, não um palpite da IA. */
 export function CounterfactualCard({ cf, onAct }: { cf: Counterfactual; onAct?: () => void }) {
   return (
     <div className="rounded-panel border border-hairline bg-surface px-4 py-3.5">
@@ -30,10 +27,7 @@ export function CounterfactualCard({ cf, onAct }: { cf: Counterfactual; onAct?: 
   );
 }
 
-/**
- * Selo de confiança nos números: cada valor citado pela IA foi conferido com
- * os dados. Quando algum não bate, a tela avisa em vez de esconder.
- */
+/** Cada número citado pela IA é conferido com os dados; quando algum não bate, a tela avisa. */
 export function VerificationBadge({ verification }: { verification?: Verification | null }) {
   if (!verification || verification.claims === 0) return null;
   const ok = verification.passed && verification.unverified.length === 0;
@@ -52,7 +46,7 @@ export function VerificationBadge({ verification }: { verification?: Verificatio
   );
 }
 
-/** Onde os dados deste aviso foram analisados. Importante para a transparência. */
+/** Onde os dados deste aviso foram analisados (transparência). */
 export function DestinationTag({ destination, provider }: { destination?: string; provider?: string }) {
   if (!destination) return provider ? <span className="text-micro text-fg-3">{provider}</span> : null;
   const label =
@@ -68,7 +62,6 @@ export function DestinationTag({ destination, provider }: { destination?: string
   );
 }
 
-/** Troca o nível de linguagem da explicação — mesmo aviso, reescrito para o leitor. */
 export function LanguageLevelSwitch({
   anomaly,
   current,
@@ -120,31 +113,30 @@ export function LanguageLevelSwitch({
   );
 }
 
-/** 👍/👎 na explicação. Alimenta a avaliação para o TCC. */
+/** Alimenta a avaliação do TCC. */
 export function RatingButtons({ anomaly }: { anomaly: Anomaly }) {
   const toast = useToast();
   const [rating, setRating] = useState<number | undefined>(anomaly.explanation?.user_rating);
 
   const rate = async (value: 1 | -1) => {
-    const anterior = rating;
+    const previous = rating;
     const next = rating === value ? undefined : value;
     setRating(next);
-    // Desmarcar só limpa a tela: não há como apagar a nota no servidor, e
-    // agradecer por um clique que desfez a escolha não fazia sentido.
+    // Desmarcar só limpa a tela: não há como apagar a nota no servidor.
     if (!next) return;
     try {
       await explanationsApi.rate(anomaly.id, value);
       toast.success(value === 1 ? "Obrigado! Que bom que ajudou." : "Obrigado pelo retorno.");
     } catch (err) {
-      setRating(anterior);
+      setRating(previous);
       toast.error(errorMessage(err, "Não foi possível registrar a avaliação."));
     }
   };
 
   // Escolhido = fundo tingido, e não só a cor do ícone; alvo de 32 px.
-  const estilo = (ativo: boolean, tom: string) =>
+  const buttonClass = (active: boolean, tone: string) =>
     `flex h-8 w-8 items-center justify-center rounded-control transition-colors hover:bg-raised ${
-      ativo ? tom : "text-fg-3"
+      active ? tone : "text-fg-3"
     }`;
 
   return (
@@ -155,7 +147,7 @@ export function RatingButtons({ anomaly }: { anomaly: Anomaly }) {
         onClick={() => rate(1)}
         aria-label="Ajudou"
         aria-pressed={rating === 1}
-        className={estilo(rating === 1, "bg-ok/[.14] text-ok")}
+        className={buttonClass(rating === 1, "bg-ok/[.14] text-ok")}
       >
         <ThumbsUp size={12} aria-hidden="true" />
       </button>
@@ -164,7 +156,7 @@ export function RatingButtons({ anomaly }: { anomaly: Anomaly }) {
         onClick={() => rate(-1)}
         aria-label="Não ajudou"
         aria-pressed={rating === -1}
-        className={estilo(rating === -1, "bg-crit/[.14] text-crit")}
+        className={buttonClass(rating === -1, "bg-crit/[.14] text-crit")}
       >
         <ThumbsDown size={12} aria-hidden="true" />
       </button>

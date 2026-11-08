@@ -5,13 +5,7 @@ import { Button } from "./ui/Button";
 import { useToast } from "./ui/Toast";
 import { Gauge, X } from "lucide-react";
 
-/**
- * "Está lento agora, por quê?"
- *
- * Pede ao agente 20 segundos de medição em alta resolução (uma por segundo) e
- * a IA responde na hora, apontando o gargalo e o programa culpado. Fecha o
- * ciclo do leigo que "sente" a lentidão mas não sabe olhar um gráfico.
- */
+/** Pede ao agente 20 s de medição (uma por segundo) e a IA aponta o gargalo e o programa culpado. */
 export function DiagnoseButton({
   machineId,
   online,

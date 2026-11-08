@@ -14,30 +14,22 @@ type Outcome = {
   model_used?: string | null;
 };
 
-/**
- * Conferência da previsão.
- *
- * O cartão "e se eu fechar?" promete um número. Depois da ação, este bloco
- * diz se o número se confirmou. É o fechamento do laço: a IA não só explica,
- * ela fica registrada errando ou acertando — e a taxa aparece na página de
- * pesquisa, por provedor.
- */
+/** Depois da ação, diz se o número prometido pelo cartão "e se eu fechar?" se confirmou. */
 export function PredictionCheck({ anomalyId }: { anomalyId: number }) {
   const [outcome, setOutcome] = useState<Outcome | null>(null);
 
   useEffect(() => {
-    let vivo = true;
+    let alive = true;
     evaluationApi
       .fidelityForAnomaly(anomalyId)
-      .then((r) => vivo && setOutcome(r.data))
-      .catch(() => vivo && setOutcome(null));
+      .then((r) => alive && setOutcome(r.data))
+      .catch(() => alive && setOutcome(null));
     return () => {
-      vivo = false;
+      alive = false;
     };
   }, [anomalyId]);
 
-  // Sem ação executada ainda não há previsão para conferir — e um bloco
-  // dizendo isso só ocuparia a tela.
+  // Sem ação executada não há previsão para conferir.
   if (!outcome || outcome.status === "none") return null;
 
   const tone = outcome.status === "pending" ? "idle" : outcome.hit ? "ok" : "warn";

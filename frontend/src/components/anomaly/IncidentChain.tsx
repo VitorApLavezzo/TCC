@@ -1,13 +1,6 @@
 import { Incident } from "../../types";
 
-/**
- * A cadeia de causa e efeito de um incidente.
- *
- * Vários sintomas que aconteceram juntos, ligados por setas de "porque". Em
- * vez de três avisos soltos — disco cheio, memória virtual, lentidão — uma
- * história só, lida de cima para baixo: a causa provável no topo, o efeito
- * sentido embaixo.
- */
+/** Cadeia de causa e efeito de um incidente: a causa provável no topo, o efeito sentido embaixo. */
 export function IncidentChain({ incident }: { incident: Incident }) {
   const nodes = incident.chain?.nodes ?? [];
   if (nodes.length < 2) return null;
@@ -21,13 +14,8 @@ export function IncidentChain({ incident }: { incident: Incident }) {
   return (
     <div>
       <ol className="relative space-y-0">
-        {/*
-          Os elos aparecem em sequência, e não de uma vez: a ordem da animação
-          é a ordem causal — disco cheio, depois memória virtual, depois
-          lentidão. É a única animação do produto que carrega o argumento, não
-          só a estética. Quem pediu menos movimento no sistema recebe tudo de
-          uma vez, pela regra global de prefers-reduced-motion.
-        */}
+        {/* Os elos aparecem em sequência: a ordem da animação é a ordem causal.
+            prefers-reduced-motion mostra tudo de uma vez pela regra global. */}
         {nodes.map((node, i) => (
           <li
             key={node.signal}

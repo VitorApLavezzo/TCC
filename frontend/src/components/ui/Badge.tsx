@@ -3,9 +3,8 @@ import { SEVERITY_LABELS } from "../../types";
 import { StatusDot } from "./Layout";
 
 /**
- * Cor de cada gravidade. Alta e média dividiam o mesmo amarelo, e a lista de
- * avisos não deixava ver qual dos dois era mais urgente sem ler a palavra.
- * Agora são quatro degraus: cinza, amarelo, vermelho tênue, vermelho cheio.
+ * Cor de cada gravidade em quatro degraus (cinza, amarelo, vermelho tênue,
+ * vermelho cheio), para a urgência se ver sem ler a palavra.
  */
 const TONE: Record<string, "ok" | "warn" | "crit" | "idle"> = {
   low: "idle",

@@ -45,16 +45,15 @@ const DOT: Record<Kind, "ok" | "crit" | "idle"> = {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<Toast[]>([]);
   const seq = useRef(0);
-  // Prazo de cada aviso, para pausar enquanto o mouse ou o foco estão nele:
-  // um erro com instrução sumia no meio da leitura.
-  // `seguros` conta o que segura o aviso aberto (mouse em cima, foco dentro):
+  // Prazo de cada aviso, pausado enquanto o mouse ou o foco estão nele.
+  // `holds` conta o que segura o aviso aberto (mouse em cima, foco dentro):
   // só volta a contar quando os dois soltam.
-  const prazos = useRef(
-    new Map<number, { timer: ReturnType<typeof setTimeout> | null; ms: number; seguros: number }>()
+  const timers = useRef(
+    new Map<number, { timer: ReturnType<typeof setTimeout> | null; ms: number; holds: number }>()
   );
 
   const dismiss = useCallback((id: number) => {
-    prazos.current.delete(id);
+    timers.current.delete(id);
     setItems((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
@@ -66,23 +65,23 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       // Com "desfazer", a janela é maior ainda: é o único momento em que a
       // volta existe.
       const ms = undo ? 10000 : kind === "error" ? 9000 : 5000;
-      prazos.current.set(id, { timer: setTimeout(() => dismiss(id), ms), ms, seguros: 0 });
+      timers.current.set(id, { timer: setTimeout(() => dismiss(id), ms), ms, holds: 0 });
     },
     [dismiss]
   );
 
-  const pausar = (id: number) => {
-    const p = prazos.current.get(id);
+  const pause = (id: number) => {
+    const p = timers.current.get(id);
     if (!p) return;
     if (p.timer) clearTimeout(p.timer);
     p.timer = null;
-    p.seguros += 1;
+    p.holds += 1;
   };
-  const retomar = (id: number) => {
-    const p = prazos.current.get(id);
+  const resume = (id: number) => {
+    const p = timers.current.get(id);
     if (!p) return;
-    p.seguros = Math.max(0, p.seguros - 1);
-    if (p.seguros === 0 && !p.timer) p.timer = setTimeout(() => dismiss(id), p.ms);
+    p.holds = Math.max(0, p.holds - 1);
+    if (p.holds === 0 && !p.timer) p.timer = setTimeout(() => dismiss(id), p.ms);
   };
 
   const toast = useCallback(
@@ -113,10 +112,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             role={t.kind === "error" ? "alert" : undefined}
-            onMouseEnter={() => pausar(t.id)}
-            onMouseLeave={() => retomar(t.id)}
-            onFocus={() => pausar(t.id)}
-            onBlur={() => retomar(t.id)}
+            onMouseEnter={() => pause(t.id)}
+            onMouseLeave={() => resume(t.id)}
+            onFocus={() => pause(t.id)}
+            onBlur={() => resume(t.id)}
             className={clsx(
               "pointer-events-auto flex animate-rise items-start gap-2.5 rounded-panel border border-edge bg-surface px-3.5 py-3 shadow-float"
             )}

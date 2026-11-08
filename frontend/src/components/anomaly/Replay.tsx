@@ -8,23 +8,14 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 /**
- * Replay do incidente.
- *
- * Um gráfico é bom para ver que houve um pico; ele não mostra *quem* estava
- * consumindo a cada instante. Aqui a linha do tempo é percorrível: a cada
- * quadro, as barras mostram os programas daquele segundo, então dá para ver o
- * programa subir, dominar e (quando é o caso) sumir.
- *
- * A fonte preferida é a caixa-preta que o agente enviou (uma amostra a cada
- * 2 s, minutos antes do aviso). Sem ela, o replay usa as leituras normais de
- * 30 s em 30 s — mais grosso, mas a mesma leitura.
+ * Replay do incidente: a cada quadro, quem estava consumindo. Fonte preferida é a
+ * caixa-preta do agente (amostra a cada 2 s); sem ela, as leituras normais de 30 s.
  */
 interface Frame {
   t: number;
   label: string;
   cpu: number;
   mem: number;
-  /** Rede e disco: o backend sempre mandou, a tela é que descartava. */
   connections?: number | null;
   netRecv?: number | null;
   netSent?: number | null;
@@ -43,30 +34,27 @@ const CPU_MEM: GaugeSpec[] = [
   { key: "cpu", label: "Processador", kind: "percent" },
   { key: "mem", label: "Memória", kind: "percent" },
 ];
-const REDE: GaugeSpec[] = [
+const NETWORK: GaugeSpec[] = [
   { key: "connections", label: "Conexões de rede", kind: "count" },
   { key: "netRecv", label: "Recebido", kind: "bytes" },
 ];
-const DISCO: GaugeSpec[] = [
+const DISK: GaugeSpec[] = [
   { key: "diskRead", label: "Leitura de disco", kind: "bytes" },
   { key: "diskWrite", label: "Escrita de disco", kind: "bytes" },
 ];
 
 /**
- * Quais medidores respondem à pergunta de cada aviso.
- *
- * Mostrar processador e memória num aviso de rede é a tela afirmando algo
- * sobre o que não foi medido — a mesma falha do cartão "e se eu fechar".
- * Os tipos ausentes daqui caem em processador e memória, que é o caso comum.
+ * Medidores que respondem à pergunta de cada aviso: processador e memória num aviso de
+ * rede afirmariam algo não medido. Tipos ausentes caem em processador e memória.
  */
 const GAUGES_FOR: Record<string, GaugeSpec[]> = {
-  network_spike: REDE,
-  ddos_indicator: REDE,
-  beaconing: REDE,
-  disk_activity: DISCO,
-  disk_full: DISCO,
-  disk_forecast: DISCO,
-  disk_space_change: DISCO,
+  network_spike: NETWORK,
+  ddos_indicator: NETWORK,
+  beaconing: NETWORK,
+  disk_activity: DISK,
+  disk_full: DISK,
+  disk_forecast: DISK,
+  disk_space_change: DISK,
 };
 
 export function Replay({ anomaly, blackboxId }: { anomaly: Anomaly; blackboxId?: number | null }) {
@@ -78,10 +66,8 @@ export function Replay({ anomaly, blackboxId }: { anomaly: Anomaly; blackboxId?:
 
   useEffect(() => {
     let cancelled = false;
-    // A caixa-preta do agente só amostra processador e memória. Num aviso de
-    // rede ou de disco ela é de alta resolução e não tem o dado que importa,
-    // então as leituras normais valem mais: 30 s em vez de 2 s, mas medindo a
-    // coisa certa. O rótulo da fonte continua dizendo qual está em uso.
+    // A caixa-preta só amostra processador e memória: em aviso de rede ou disco,
+    // as leituras normais (30 s) medem a coisa certa.
     const needsWideMetrics = (GAUGES_FOR[anomaly.anomaly_type] ?? CPU_MEM) !== CPU_MEM;
 
     const load = async () => {
@@ -218,7 +204,6 @@ export function Replay({ anomaly, blackboxId }: { anomaly: Anomaly; blackboxId?:
         </span>
       </div>
 
-      {/* Linha do tempo com o marcador da detecção */}
       <div className="relative mt-3">
         <input
           type="range"
@@ -271,24 +256,22 @@ export function Replay({ anomaly, blackboxId }: { anomaly: Anomaly; blackboxId?:
 }
 
 function Gauge({ spec, value, max }: { spec: GaugeSpec; value: number; max: number }) {
-  // Rede e disco chegam do agente como TAXA (bytes por segundo, calculada
-  // sobre o intervalo), não como total acumulado — o "/s" faz parte do
-  // número e tirá-lo transformaria uma taxa em algo que ela não é.
-  const texto = spec.kind === "bytes" ? bytesPerSec(value) : value.toFixed(0);
-  const unidade = spec.kind === "percent" ? "%" : "";
+  // Rede e disco chegam do agente como TAXA (bytes/s), não total acumulado: o "/s" faz parte do número.
+  const text = spec.kind === "bytes" ? bytesPerSec(value) : value.toFixed(0);
+  const unit = spec.kind === "percent" ? "%" : "";
   // Porcentagem tem teto de 100; contagem e bytes se medem contra a janela
-  const preenchimento = spec.kind === "percent" ? Math.min(value, 100) : Math.min((value / max) * 100, 100);
+  const fillPercent = spec.kind === "percent" ? Math.min(value, 100) : Math.min((value / max) * 100, 100);
   return (
     <div className="min-w-0 flex-1">
       <p className="channel-label">{spec.label}</p>
       <p className="tnum mt-0.5 font-mono text-readout-sm font-medium text-fg">
-        {texto}
-        {unidade && <span className="ml-0.5 text-md font-normal text-fg-3">{unidade}</span>}
+        {text}
+        {unit && <span className="ml-0.5 text-md font-normal text-fg-3">{unit}</span>}
       </p>
       <div className="mt-1 h-1 overflow-hidden rounded-full bg-sunken">
         <div
           className="h-full bg-fg-2 transition-[width] duration-300 ease-signal"
-          style={{ width: `${preenchimento}%` }}
+          style={{ width: `${fillPercent}%` }}
         />
       </div>
     </div>

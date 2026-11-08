@@ -208,9 +208,8 @@ export function AnomalyDetail() {
 
   return (
     <div className="max-w-3xl">
-      {/* Vindo da lista, voltar pelo histórico preserva os filtros e a
-          página. De qualquer outro lugar (painel, sino, link) o botão faz o
-          que diz: abre a lista de avisos. */}
+      {/* Vindo da lista, voltar pelo histórico preserva filtros e página;
+          de qualquer outro lugar, abre a lista de avisos. */}
       <TextButton
         onClick={() => ((location.state as any)?.daLista ? navigate(-1) : navigate("/anomalies"))}
         className="inline-flex items-center gap-1.5 text-fg-2"
@@ -255,10 +254,7 @@ export function AnomalyDetail() {
         )}
       </header>
 
-      {/*
-        Ressalva, não alerta: explica por que este aviso existe no painel sem
-        ter chegado como notificação. Sem cor de estado — a cor é do problema.
-      */}
+      {/* Ressalva, não alerta: sem cor de estado — a cor é do problema. */}
       {anomaly.during_learning && (
         <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">
           Detectado enquanto o sistema ainda aprendia o que é normal neste computador, então
@@ -268,11 +264,7 @@ export function AnomalyDetail() {
         </p>
       )}
 
-      {/*
-        Mesma natureza da ressalva acima: diz por que o aviso está no painel
-        sem ter interrompido ninguém. Nunca mostra o número cru — "0,25" não
-        significa nada para quem lê.
-      */}
+      {/* Nunca mostra o número cru: "0,25" não significa nada para quem lê. */}
       {anomaly.weak_signal && (
         <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">
           Sinal fraco: os indícios existem, mas são poucos para ter certeza.
@@ -343,8 +335,6 @@ export function AnomalyDetail() {
         </Section>
       )}
 
-      {/* Depois da ação, a promessa do cartão "e se eu fechar?" é conferida
-          contra a leitura seguinte. */}
       <PredictionCheck anomalyId={anomaly.id} />
 
       {(shown?.recommendations?.length ?? 0) > 0 && (
@@ -364,8 +354,6 @@ export function AnomalyDetail() {
         </Section>
       )}
 
-      {/* Logo depois do que fazer: é a pergunta seguinte de quem leu os
-          passos. Antes ficava no fim, depois do gráfico e do replay. */}
       {(shown?.possible_causes?.length ?? 0) > 0 && (
         <Section className="mt-9" title="Por que isso pode ter acontecido" description="O sistema ordena por probabilidade">
           <RankedCauses causes={shown!.possible_causes!} />
@@ -442,12 +430,7 @@ export function AnomalyDetail() {
             </p>
             <div className="flex flex-wrap gap-2">
               <ShareButton anomalyId={anomaly.id} />
-              {/*
-                Imprimir resolve o caso em que o link não serve: anexar a um
-                chamado, entregar impresso, guardar um PDF que não depende do
-                servidor estar no ar. O CSS de impressão já abre os blocos
-                recolhidos e tira menu e botões da folha.
-              */}
+              {/* O CSS de impressão abre os blocos recolhidos e tira menu e botões da folha. */}
               <Button variant="quiet" onClick={() => window.print()}>
                 Imprimir ou salvar em PDF
               </Button>
@@ -456,10 +439,7 @@ export function AnomalyDetail() {
         </Disclosure>
       </div>
 
-      {/* Fechar o aviso vem por último, depois de agir. No alto da página,
-          o botão azul "resolvi" aparecia antes dos passos — convidava a
-          resolver sem ter feito nada. O "Era um problema — resolvi" já cobre
-          o "só marcar como resolvido", que repetia a mesma coisa. */}
+      {/* Fechar o aviso vem por último: no alto, convidava a resolver sem ter feito nada. */}
       <div className="mt-8">
         <Feedback anomaly={anomaly} onChange={setAnomaly} />
         <div className="mt-4 flex flex-wrap gap-2">
@@ -503,23 +483,18 @@ const METRIC_LABELS: Record<string, string> = {
 };
 
 /**
- * O que se sabe do programa acusado, na hora em que a pessoa está decidindo
- * se aquilo é um vírus.
- *
- * O painel tinha todos esses dados (assinatura, fabricante, em quantos
- * computadores o executável aparece) e não mostrava nenhum justamente aqui.
- * Sem isso, "processo consumindo recursos" soa igual para o antivírus da
- * pessoa e para um minerador.
+ * O que se sabe do programa acusado (assinatura, fabricante, reputação), na
+ * hora em que a pessoa decide se aquilo é um vírus.
  */
 function TrustNote({ anomaly }: { anomaly: Anomaly }) {
   const behavior = (anomaly.affected_metrics as any)?._behavior;
   const reasons: string[] = behavior?.confianca_motivos || [];
   if (!reasons.length) return null;
-  const seguranca = behavior?.confianca >= 3;
+  const isSecurityTool = behavior?.confianca >= 3;
   return (
     <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">
       <span className="text-fg">Sobre este programa:</span> {reasons.join(", ")}.
-      {seguranca && " Programas de segurança varrem arquivos e baixam atualizações o tempo todo — é o trabalho deles, e se parece com o de um vírus."}
+      {isSecurityTool && " Programas de segurança varrem arquivos e baixam atualizações o tempo todo — é o trabalho deles, e se parece com o de um vírus."}
     </p>
   );
 }

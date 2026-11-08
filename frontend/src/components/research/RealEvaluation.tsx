@@ -38,16 +38,12 @@ type TestRow = {
 type Score = { confusion: Confusion; benign: Benign; tests: Record<string, TestRow> };
 
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${decimal(v * 100, 1)}%`);
-const num = (v: number, casas = 1) => v.toLocaleString("pt-BR", { maximumFractionDigits: casas });
-const tempo = (s: number | null) => (s == null ? "—" : s < 120 ? `${Math.round(s)} s` : `${num(s / 60)} min`);
+const num = (v: number, decimals = 1) => v.toLocaleString("pt-BR", { maximumFractionDigits: decimals });
+const duration = (s: number | null) => (s == null ? "—" : s < 120 ? `${Math.round(s)} s` : `${num(s / 60)} min`);
 
 /**
- * O resultado do TCC: o que o sistema fez nas sessões que a pessoa marcou.
- *
- * Sessão de uso legítimo (jogo, trabalho pesado, uso normal) com aviso que
- * interrompeu é alarme falso; teste atômico (minerador, disfarce, isca,
- * contato periódico) só conta com a evidência certa. A reprodução passa as
- * mesmas leituras de novo com e sem contexto de uso e camada por camada.
+ * O que o sistema fez nas sessões marcadas: aviso que interrompeu uso legítimo é alarme
+ * falso; teste atômico só conta com a evidência certa.
  */
 export function RealEvaluation() {
   const toast = useToast();
@@ -86,7 +82,7 @@ export function RealEvaluation() {
     load().finally(() => setLoading(false));
   }, [machineId, days, load]);
 
-  async function reproduzir() {
+  async function runReplay() {
     try {
       await evaluationApi.runRealReplay(Number(machineId), days);
       toast.info("Reproduzindo as sessões quatro vezes.", "Pode levar dezenas de minutos; o resultado aparece aqui.");
@@ -105,8 +101,8 @@ export function RealEvaluation() {
   }
 
   const live = data?.live;
-  const semSessoes = live && live.sessions.length === 0;
-  const testes = Object.entries(live?.tests ?? {});
+  const noSessions = live && live.sessions.length === 0;
+  const tests = Object.entries(live?.tests ?? {});
   const replay = data?.replay;
   const configs = Object.entries((replay?.configs ?? {}) as Record<string, Score & { label: string }>);
 
@@ -150,7 +146,7 @@ export function RealEvaluation() {
         />
       ) : loading && !data ? (
         <Skeleton className="h-40 w-full rounded-panel" />
-      ) : semSessoes ? (
+      ) : noSessions ? (
         <EmptyState
           title="Nenhuma sessão marcada neste período"
           body="Marque o que está fazendo (jogando, trabalho pesado, uso normal ou um teste) pela bandeja do agente ou pela página do computador. Cada sessão marcada vira uma linha desta avaliação."
@@ -187,7 +183,7 @@ export function RealEvaluation() {
             </Panel>
           </div>
 
-          {testes.length > 0 && (
+          {tests.length > 0 && (
             <div className="scroll-hint overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -200,13 +196,13 @@ export function RealEvaluation() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-hairline">
-                  {testes.map(([id, t]) => (
+                  {tests.map(([id, t]) => (
                     <tr key={id}>
                       <td className="py-2 text-fg-2">{t.name}</td>
                       <td className="tnum py-2 text-right font-mono text-fg-2">{t.sessions}</td>
                       <td className="tnum py-2 text-right font-mono text-fg">{t.detected}</td>
                       <td className="tnum py-2 text-right font-mono text-fg">{t.interrupted}</td>
-                      <td className="tnum py-2 text-right font-mono text-fg-2">{tempo(t.median_seconds_to_detection)}</td>
+                      <td className="tnum py-2 text-right font-mono text-fg-2">{duration(t.median_seconds_to_detection)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -220,7 +216,7 @@ export function RealEvaluation() {
                 Reprodução: as mesmas leituras passam de novo pelo sistema, com e sem contexto de uso e camada por
                 camada.
               </p>
-              <Button size="sm" variant="secondary" loading={replay?.status === "running"} onClick={reproduzir}>
+              <Button size="sm" variant="secondary" loading={replay?.status === "running"} onClick={runReplay}>
                 Reproduzir
               </Button>
             </div>

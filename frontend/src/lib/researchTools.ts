@@ -8,33 +8,33 @@ import { useSyncExternalStore } from "react";
  * confundem. Ficam escondidas por padrão e se ligam na Conta; a busca do
  * Ctrl+K continua alcançando as três de qualquer jeito.
  */
-const CHAVE = "researchTools";
-const ouvintes = new Set<() => void>();
+const STORAGE_KEY = "researchTools";
+const listeners = new Set<() => void>();
 
-function ler(): boolean {
+function read(): boolean {
   try {
-    return localStorage.getItem(CHAVE) === "1";
+    return localStorage.getItem(STORAGE_KEY) === "1";
   } catch {
     return false;
   }
 }
 
-export function setResearchTools(ligado: boolean) {
+export function setResearchTools(enabled: boolean) {
   try {
-    localStorage.setItem(CHAVE, ligado ? "1" : "0");
+    localStorage.setItem(STORAGE_KEY, enabled ? "1" : "0");
   } catch {
     /* sem armazenamento: vale só até recarregar */
   }
-  ouvintes.forEach((avisar) => avisar());
+  listeners.forEach((notify) => notify());
 }
 
-function assinar(avisar: () => void) {
-  ouvintes.add(avisar);
+function subscribe(notify: () => void) {
+  listeners.add(notify);
   return () => {
-    ouvintes.delete(avisar);
+    listeners.delete(notify);
   };
 }
 
 export function useResearchTools(): boolean {
-  return useSyncExternalStore(assinar, ler, () => false);
+  return useSyncExternalStore(subscribe, read, () => false);
 }

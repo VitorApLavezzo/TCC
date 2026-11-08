@@ -17,12 +17,8 @@ function urlBase64ToBytes(base64: string): ArrayBuffer {
 }
 
 /**
- * Notificação no celular.
- *
- * Telegram e e-mail dependem de outro aplicativo. Com o painel instalado pela
- * tela inicial, o aviso chega como notificação do próprio sistema — e o botão
- * de teste existe porque ninguém confia num canal de aviso que nunca viu
- * funcionar.
+ * Notificação no celular pelo próprio sistema. O botão de teste existe porque
+ * ninguém confia num canal de aviso que nunca viu funcionar.
  */
 export function PushDevices() {
   const toast = useToast();
@@ -33,7 +29,7 @@ export function PushDevices() {
     keys_configured?: boolean;
   } | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
-  const [ocupado, setOcupado] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -49,38 +45,36 @@ export function PushDevices() {
     load();
   }, [load]);
 
-  // Contexto seguro é pré-requisito, não detalhe: fora de HTTPS (ou localhost)
-  // o navegador nem expõe Service Worker e PushManager. Sem separar os dois
-  // casos, um painel servido por HTTP na rede local aparece como "navegador
-  // não aceita", que manda a pessoa procurar no lugar errado.
-  const seguro = window.isSecureContext;
-  const suportado = seguro && "serviceWorker" in navigator && "PushManager" in window;
+  // Fora de HTTPS (ou localhost) o navegador nem expõe Service Worker e
+  // PushManager: separa esse caso do "navegador não aceita".
+  const secure = window.isSecureContext;
+  const supported = secure && "serviceWorker" in navigator && "PushManager" in window;
 
-  async function ativar() {
+  async function enable() {
     if (!config?.public_key) return;
-    setOcupado(true);
+    setBusy(true);
     try {
-      const permissao = await Notification.requestPermission();
-      if (permissao !== "granted") {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
         toast.error("O navegador não autorizou os avisos.", "Permita as notificações deste site e tente de novo.");
         return;
       }
-      const registro = await navigator.serviceWorker.ready;
-      const assinatura = await registro.pushManager.subscribe({
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToBytes(config.public_key),
       });
-      await pushApi.subscribe(assinatura.toJSON());
+      await pushApi.subscribe(subscription.toJSON());
       toast.success("Este aparelho vai receber os avisos.");
       load();
     } catch (e) {
       toast.error(errorMessage(e, "Não foi possível ativar os avisos neste aparelho."));
     } finally {
-      setOcupado(false);
+      setBusy(false);
     }
   }
 
-  async function testar() {
+  async function sendTest() {
     try {
       const r = await pushApi.test();
       if (r.data.delivered) toast.success("Aviso de teste enviado.");
@@ -112,7 +106,7 @@ export function PushDevices() {
               </>
             )}
           </p>
-        ) : !seguro ? (
+        ) : !secure ? (
           <div className="max-w-prose space-y-2 text-sm leading-relaxed text-fg-2">
             <p>
               Os avisos no celular exigem uma conexão segura. Este painel está sendo aberto por
@@ -141,7 +135,7 @@ export function PushDevices() {
               — Telegram e e-mail — funcionam sem isso.
             </p>
           </div>
-        ) : !suportado ? (
+        ) : !supported ? (
           <p className="max-w-prose text-sm leading-relaxed text-fg-2">
             Este navegador não aceita notificações em segundo plano. No iPhone, é preciso primeiro
             adicionar o painel à tela de início pelo Compartilhar do Safari.
@@ -154,11 +148,11 @@ export function PushDevices() {
                 : `${devices.length} aparelho(s) recebendo avisos.`}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button variant="primary" loading={ocupado} onClick={ativar}>
+              <Button variant="primary" loading={busy} onClick={enable}>
                 Receber avisos neste aparelho
               </Button>
               {devices.length > 0 && (
-                <Button variant="secondary" onClick={testar}>
+                <Button variant="secondary" onClick={sendTest}>
                   Enviar um teste
                 </Button>
               )}

@@ -2,9 +2,8 @@ import { describe, expect, it } from "vitest";
 import { pageTitle } from "../title";
 
 /**
- * O título da aba diz em que tela a pessoa está. Era "AnomalyDetect" em todas:
- * com três abas abertas, não dava para saber qual era qual, e o leitor de
- * tela não anunciava a troca de página.
+ * O título da aba diz em que tela a pessoa está, para distinguir abas e o
+ * leitor de tela anunciar a troca de página.
  */
 describe("pageTitle", () => {
   it("nomeia cada tela principal", () => {

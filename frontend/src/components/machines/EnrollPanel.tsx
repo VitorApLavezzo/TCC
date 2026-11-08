@@ -14,13 +14,7 @@ export interface EnrollCode {
   expires_at: string;
 }
 
-/**
- * Os três passos para conectar um computador.
- *
- * A ordem importa: primeiro o caminho de dois cliques, que serve à maioria. O
- * comando de terminal e o código manual ficam recolhidos — antes competiam
- * visualmente com o caminho principal.
- */
+/** Primeiro o caminho de dois cliques, que serve à maioria; comando de terminal e código manual ficam recolhidos. */
 export function EnrollPanel({ enrollCode, onClose }: { enrollCode: EnrollCode; onClose: () => void }) {
   const [copied, setCopied] = useState<"code" | "cmd" | null>(null);
   const toast = useToast();

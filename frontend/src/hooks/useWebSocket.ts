@@ -8,15 +8,8 @@ interface WSMessage {
 export type WSStatus = "idle" | "connecting" | "open" | "closed";
 
 /**
- * Conexão em tempo real com reconexão automática.
- *
- * Devolve o estado da conexão para a interface poder dizer a verdade: antes o
- * selo "AO VIVO" acendia na primeira mensagem e nunca mais apagava, então um
- * agente morto continuava aparecendo como ao vivo.
- *
- * Corrige também dois defeitos da versão anterior: o ping de 25s era limpo no
- * `onopen` (ou seja, nunca era enviado), e o `onclose` reagendava a conexão
- * mesmo depois de o componente desmontar.
+ * Conexão em tempo real com reconexão automática. Devolve o estado da conexão
+ * para o selo "AO VIVO" apagar quando ela cai.
  */
 export function useWebSocket(path: string | null, onMessage: (msg: WSMessage) => void): WSStatus {
   const [status, setStatus] = useState<WSStatus>("idle");

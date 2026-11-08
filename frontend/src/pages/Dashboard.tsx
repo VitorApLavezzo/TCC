@@ -42,8 +42,8 @@ export function Dashboard() {
   // página de detalhe.
   const [params] = useSearchParams();
   const [selectedMachine, setSelectedMachine] = useState<number | null>(() => {
-    const pedido = Number(params.get("computador"));
-    return Number.isFinite(pedido) && pedido > 0 ? pedido : null;
+    const requested = Number(params.get("computador"));
+    return Number.isFinite(requested) && requested > 0 ? requested : null;
   });
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [latestMetric, setLatestMetric] = useState<Metric | null>(null);
@@ -52,7 +52,6 @@ export function Dashboard() {
   const [baseline, setBaseline] = useState<LearnedBaseline | null>(null);
   const [switching, setSwitching] = useState(false);
   // Falha de verdade (rede, servidor), separada do 404 de "ainda sem leitura".
-  // Antes as duas viravam "este computador ainda não enviou leituras".
   const [metricsFailed, setMetricsFailed] = useState(false);
   const [metricsAttempt, setMetricsAttempt] = useState(0);
   const selectedRef = useRef<number | null>(null);
@@ -64,15 +63,13 @@ export function Dashboard() {
     setMachines(machineList);
     setAnomalies(anomRes.data);
 
-    const atual = machineList.some((m) => m.id === selectedRef.current) ? selectedRef.current : null;
-    const first = atual ?? machineList.find((m) => m.is_active)?.id ?? machineList[0]?.id ?? null;
-    if (atual === null && first) setSelectedMachine(first);
+    const current = machineList.some((m) => m.id === selectedRef.current) ? selectedRef.current : null;
+    const first = current ?? machineList.find((m) => m.is_active)?.id ?? machineList[0]?.id ?? null;
+    if (current === null && first) setSelectedMachine(first);
   }, []);
 
   const poll = usePolling(fetchAll, 60000);
 
-  // Troca de máquina: busca imediata, com esqueleto no lugar dos dados da
-  // anterior. Antes a tela ficava vazia e parecia que a máquina não tinha dados.
   useEffect(() => {
     if (!selectedMachine) return;
     let cancelled = false;
@@ -108,13 +105,9 @@ export function Dashboard() {
     };
   }, [selectedMachine, metricsAttempt]);
 
-  // Quanto falta de aprendizado é todo derivado no servidor: leituras que
-  // faltam, horas que faltam, se cada régua já fechou. O cliente não tem como
-  // recalcular — tentar era o que deixava os números parados até um F5, e pior:
-  // `collected` subia sozinho enquanto "faltam N leituras" ficava congelado, de
-  // modo que a tela chegava a se contradizer. Busca de novo enquanto durar, e
-  // o `enabled` desliga sozinho quando a máquina se forma: nada de tráfego por
-  // um dado que não muda mais.
+  // O progresso do aprendizado é derivado no servidor e o cliente não consegue
+  // recalculá-lo: busca de novo enquanto durar, e o `enabled` desliga quando a
+  // máquina se forma.
   const refreshLearning = useCallback(async () => {
     if (!selectedMachine) return;
     const res = await metricsApi.learning(selectedMachine).catch(() => null);
@@ -164,14 +157,9 @@ export function Dashboard() {
   const openAnomalies = machineAnomalies.filter((a) => !a.is_resolved);
 
   /**
-   * A faixa desenhada atrás do traço: o normal APRENDIDO desta máquina nesta
-   * hora, quando já houver histórico suficiente; senão, o limite fixo de saúde.
-   *
-   * Um servidor que vive em 70% de CPU e um notebook que vive em 5% têm
-   * "normais" diferentes — e o mesmo notebook tem um normal às 3h e outro às
-   * 15h. Sair dessa faixa significa "diferente do seu normal", que não é
-   * "perigoso": por isso o desvio só ganha cor de estado quando a leitura
-   * também passa do limite de saúde (`breachTone`).
+   * A faixa atrás do traço: o normal aprendido desta máquina nesta hora, se já
+   * houver histórico; senão, o limite fixo de saúde. Sair dela não é "perigoso",
+   * por isso o desvio só ganha cor quando passa também do limite (`breachTone`).
    */
   const bandOf = (key: string, fallback: keyof typeof THRESHOLDS, reading: { level: string }) => {
     const learned = baseline?.metrics?.[key]?.now;
@@ -187,8 +175,6 @@ export function Dashboard() {
     };
   };
 
-  // Quatro medidas, escolhidas por relevância — não por quantas cabem na tela.
-  // A quarta é temperatura quando o sensor existe, senão memória virtual.
   // A cabeça do traço só é "ao vivo" enquanto o WebSocket estiver aberto; a
   // chave de pulso muda a cada leitura e dispara um único anel no ponto.
   const liveHead = wsStatus === "open";
@@ -271,19 +257,14 @@ export function Dashboard() {
       ]
     : [];
 
-  /*
-   * Qual medida está puxando o estado geral. O veredito diz "sob pressão";
-   * sem isto a pessoa precisa varrer os quatro canais para descobrir qual.
-   * Só aponta quando há de fato um desvio — em estado normal não há o que
-   * culpar, e a frase viraria ruído.
-   */
+  // Qual medida está puxando o estado geral; só aponta quando há desvio.
   const driver = (() => {
     const worst = vitals.find((v) => v.reading.level === "crit") ?? vitals.find((v) => v.reading.level === "warn");
     if (!worst) return null;
     return { label: worst.label.toLowerCase(), value: `${worst.value}${worst.unit ?? ""}` };
   })();
 
-  const avisosPanel = (
+  const alertsPanel = (
     <Panel className="flex flex-col gap-3 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
@@ -346,8 +327,6 @@ export function Dashboard() {
     <div className="space-y-8">
       <StaleBanner onRetry={poll.refresh} />
 
-      {/* A frota primeiro: qual computador precisa de mim agora. Só aparece
-          com dois ou mais — com um, o painel abaixo já responde. */}
       <FleetOverview onSelect={setSelectedMachine} />
 
       <PageHeader
@@ -356,19 +335,18 @@ export function Dashboard() {
           machines.length > 1 ? (
             <label className="flex w-full min-w-0 items-center gap-2 text-xs text-fg-2 sm:w-auto">
               <span className="sr-only sm:not-sr-only">Computador</span>
-              {/* Largura limitada: com nome longo, o seletor passava da borda
-                  da tela no celular. */}
+              {/* Largura limitada: com nome longo, o seletor passava da borda da tela no celular. */}
               <select
                 value={selectedMachine ?? ""}
                 onChange={(e) => setSelectedMachine(Number(e.target.value))}
                 className="h-8 w-full min-w-0 max-w-full rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent sm:w-auto sm:max-w-sm"
               >
                 {machines.map((m) => {
-                  const pend = anomalies.filter((a) => a.machine_id === m.id && !a.is_resolved).length;
+                  const openCount = anomalies.filter((a) => a.machine_id === m.id && !a.is_resolved).length;
                   return (
                     <option key={m.id} value={m.id}>
                       {m.name}
-                      {pend > 0 ? ` · ${pluralize(pend, "aviso", "avisos")}` : ""}
+                      {openCount > 0 ? ` · ${pluralize(openCount, "aviso", "avisos")}` : ""}
                     </option>
                   );
                 })}
@@ -450,8 +428,7 @@ export function Dashboard() {
         />
       )}
 
-      {/* Depois do estado do computador, não antes: no alto ele empurrava o
-          veredito para baixo — no celular, para fora da primeira tela. */}
+      {/* Depois do estado do computador: no alto, empurrava o veredito para fora da primeira tela no celular. */}
       <NextSteps />
 
       {lm && !switching && metrics.length > 1 ? (
@@ -463,10 +440,10 @@ export function Dashboard() {
             className="min-[1081px]:col-span-2"
           />
 
-          {avisosPanel}
+          {alertsPanel}
         </div>
       ) : (
-        avisosPanel
+        alertsPanel
       )}
 
       {lm && !switching && (

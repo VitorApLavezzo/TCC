@@ -5,14 +5,8 @@ import { Section } from "../ui/Layout";
 import { Skeleton } from "../ui/Skeleton";
 
 /**
- * Comparação entre os computadores da conta.
- *
- * O histórico da própria máquina não responde a tudo: se ela sempre gastou
- * muita memória, gastar muita memória é o normal dela. Comparar com as outras
- * de perfil parecido mostra o que o histórico esconde.
- *
- * Só aparece com três computadores ou mais — abaixo disso não há mediana que
- * signifique alguma coisa.
+ * Comparar com máquinas de perfil parecido mostra o que o histórico próprio esconde.
+ * Só aparece com três computadores ou mais: abaixo disso a mediana não significa nada.
  */
 export function FleetCompare() {
   const navigate = useNavigate();

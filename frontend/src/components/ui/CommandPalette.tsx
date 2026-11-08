@@ -7,7 +7,7 @@ import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 type Item = { id: string; label: string; hint?: string; to: string };
 
-const PAGINAS: Item[] = [
+const PAGES: Item[] = [
   { id: "p-painel", label: "Painel", to: "/" },
   { id: "p-maquinas", label: "Computadores", to: "/machines" },
   { id: "p-avisos", label: "Avisos", to: "/anomalies" },
@@ -18,33 +18,25 @@ const PAGINAS: Item[] = [
   { id: "p-estudo", label: "Estudo de compreensão", hint: "ferramenta do TCC", to: "/estudo" },
 ];
 
-/**
- * Ir direto ao ponto, com Ctrl+K.
- *
- * Com uma máquina, navegar pelo menu é rápido. Com doze e uma lista de
- * avisos, a pessoa passa mais tempo procurando a tela do que lendo o que
- * está nela. Aqui páginas, computadores e avisos em aberto ficam no mesmo
- * campo de busca — o mesmo gesto que já existe no editor de quem programa e
- * na busca do sistema operacional.
- */
+/** Busca com Ctrl+K: páginas, computadores e avisos em aberto num campo só. */
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
-  const [busca, setBusca] = useState("");
-  const [dinamicos, setDinamicos] = useState<Item[]>([]);
-  const [indice, setIndice] = useState(0);
+  const [query, setQuery] = useState("");
+  const [dynamicItems, setDynamicItems] = useState<Item[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   useDialogFocus(open, dialogRef, onClose, inputRef);
 
   useEffect(() => {
     if (!open) return;
-    setBusca("");
-    setIndice(0);
+    setQuery("");
+    setActiveIndex(0);
     // Carregado ao abrir, e não a cada tecla: a lista é curta e a busca
     // acontece na memória, sem ida ao servidor por caractere digitado.
     Promise.all([machinesApi.list(), anomaliesApi.list({ hours: 168, unresolved_only: true })])
       .then(([m, a]) => {
-        setDinamicos([
+        setDynamicItems([
           ...m.data.map((x: any) => ({
             id: `m-${x.id}`, label: x.name, hint: "computador", to: `/machines/${x.id}`,
           })),
@@ -56,19 +48,19 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           })),
         ]);
       })
-      .catch(() => setDinamicos([]));
+      .catch(() => setDynamicItems([]));
   }, [open]);
 
-  const itens = useMemo(() => {
-    const todos = [...PAGINAS, ...dinamicos];
-    const termo = busca.trim().toLowerCase();
-    if (!termo) return todos.slice(0, 8);
-    return todos.filter((i) => i.label.toLowerCase().includes(termo)).slice(0, 12);
-  }, [busca, dinamicos]);
+  const items = useMemo(() => {
+    const all = [...PAGES, ...dynamicItems];
+    const term = query.trim().toLowerCase();
+    if (!term) return all.slice(0, 8);
+    return all.filter((i) => i.label.toLowerCase().includes(term)).slice(0, 12);
+  }, [query, dynamicItems]);
 
   if (!open) return null;
 
-  const ir = (item?: Item) => {
+  const go = (item?: Item) => {
     if (!item) return;
     onClose();
     navigate(item.to);
@@ -85,19 +77,19 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           <Search size={15} className="flex-shrink-0 text-fg-3" aria-hidden="true" />
           <input
             ref={inputRef}
-            value={busca}
-            onChange={(e) => { setBusca(e.target.value); setIndice(0); }}
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setActiveIndex(0); }}
             onKeyDown={(e) => {
-              if (e.key === "ArrowDown") { e.preventDefault(); setIndice((i) => Math.min(i + 1, itens.length - 1)); }
-              if (e.key === "ArrowUp") { e.preventDefault(); setIndice((i) => Math.max(i - 1, 0)); }
-              if (e.key === "Enter") { e.preventDefault(); ir(itens[indice]); }
+              if (e.key === "ArrowDown") { e.preventDefault(); setActiveIndex((i) => Math.min(i + 1, items.length - 1)); }
+              if (e.key === "ArrowUp") { e.preventDefault(); setActiveIndex((i) => Math.max(i - 1, 0)); }
+              if (e.key === "Enter") { e.preventDefault(); go(items[activeIndex]); }
             }}
             placeholder="Buscar computador, aviso ou tela..."
             aria-label="Buscar computador, aviso ou tela"
             role="combobox"
-            aria-expanded={itens.length > 0}
+            aria-expanded={items.length > 0}
             aria-controls="paleta-resultados"
-            aria-activedescendant={itens[indice] ? `paleta-${itens[indice].id}` : undefined}
+            aria-activedescendant={items[activeIndex] ? `paleta-${items[activeIndex].id}` : undefined}
             aria-autocomplete="list"
             className="h-12 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-fg-3"
           />
@@ -105,22 +97,22 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             esc
           </kbd>
         </div>
-        {itens.length === 0 && <p className="px-4 py-6 text-center text-sm text-fg-3">Nada encontrado.</p>}
+        {items.length === 0 && <p className="px-4 py-6 text-center text-sm text-fg-3">Nada encontrado.</p>}
         {/* Lista de opções do campo: o foco fica no campo e as setas movem a
             seleção, que o leitor de tela acompanha pelo activedescendant. */}
         <ul id="paleta-resultados" role="listbox" aria-label="Resultados" className="max-h-[50vh] overflow-y-auto py-1">
-          {itens.map((item, i) => (
+          {items.map((item, i) => (
             <li key={item.id} role="presentation">
               <button
                 type="button"
                 id={`paleta-${item.id}`}
                 role="option"
-                aria-selected={i === indice}
+                aria-selected={i === activeIndex}
                 tabIndex={-1}
-                onMouseEnter={() => setIndice(i)}
-                onClick={() => ir(item)}
+                onMouseEnter={() => setActiveIndex(i)}
+                onClick={() => go(item)}
                 className={`flex w-full items-baseline justify-between gap-3 px-4 py-2 text-left text-sm ${
-                  i === indice ? "bg-raised text-fg" : "text-fg-2"
+                  i === activeIndex ? "bg-raised text-fg" : "text-fg-2"
                 }`}
               >
                 <span className="truncate">{item.label}</span>

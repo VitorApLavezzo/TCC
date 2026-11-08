@@ -10,7 +10,7 @@ import { Skeleton } from "../ui/Skeleton";
 import { EmptyState } from "../ui/EmptyState";
 import { LoadError } from "../ui/LoadError";
 
-type Evento = {
+type TimelineEvent = {
   kind: "anomaly" | "change" | "action" | "playbook";
   at: string;
   id: number;
@@ -21,38 +21,31 @@ type Evento = {
   link: string | null;
 };
 
-const ICONE = { anomaly: AlertTriangle, change: Package, action: Play, playbook: Zap };
-const ROTULO = { anomaly: "Aviso", change: "Mudança", action: "Ação", playbook: "Automação" };
+const ICONS = { anomaly: AlertTriangle, change: Package, action: Play, playbook: Zap };
+const LABELS = { anomaly: "Aviso", change: "Mudança", action: "Ação", playbook: "Automação" };
 
-/**
- * Tudo o que aconteceu nesta máquina, num eixo só.
- *
- * Avisos, mudanças, ações e automações viviam em abas diferentes — e a
- * história real cruza as quatro: "instalou o programa (mudança), ele passou a
- * comer memória (aviso), a automação fechou (ação), voltou ao normal". Lida
- * de cima para baixo, esta lista é essa frase.
- */
+/** Avisos, mudanças, ações e automações desta máquina num eixo só: a história real cruza os quatro. */
 export function Timeline({ machineId }: { machineId: number }) {
-  const [eventos, setEventos] = useState<Evento[] | null>(null);
-  const [erro, setErro] = useState(false);
-  const [dias, setDias] = useState(30);
+  const [events, setEvents] = useState<TimelineEvent[] | null>(null);
+  const [error, setError] = useState(false);
+  const [days, setDays] = useState(30);
 
   const load = useCallback(() => {
     reliabilityApi
-      .timeline(machineId, dias)
+      .timeline(machineId, days)
       .then((r) => {
-        setEventos(r.data.events);
-        setErro(false);
+        setEvents(r.data.events);
+        setError(false);
       })
-      .catch(() => setErro(true));
-  }, [machineId, dias]);
+      .catch(() => setError(true));
+  }, [machineId, days]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  if (erro) return <LoadError what="a linha do tempo deste computador" onRetry={load} />;
-  if (!eventos) return <Skeleton className="h-64" />;
+  if (error) return <LoadError what="a linha do tempo deste computador" onRetry={load} />;
+  if (!events) return <Skeleton className="h-64" />;
 
   return (
     <Section
@@ -61,8 +54,8 @@ export function Timeline({ machineId }: { machineId: number }) {
       description="Avisos, mudanças no sistema, ações executadas e automações — na ordem em que aconteceram"
       actions={
         <select
-          value={dias}
-          onChange={(e) => setDias(Number(e.target.value))}
+          value={days}
+          onChange={(e) => setDays(Number(e.target.value))}
           aria-label="Período da linha do tempo"
           className="h-8 rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
         >
@@ -72,19 +65,19 @@ export function Timeline({ machineId }: { machineId: number }) {
         </select>
       }
     >
-      {eventos.length === 0 ? (
+      {events.length === 0 ? (
         <EmptyState
           title="Nada registrado neste período"
           body="Quando um aviso aparecer, um programa for instalado ou uma ação for executada, a história fica aqui."
         />
       ) : (
         <ol className="relative space-y-0 border-l border-hairline pl-5">
-          {eventos.map((e) => {
-            const Icone = ICONE[e.kind];
-            const conteudo = (
+          {events.map((e) => {
+            const Icon = ICONS[e.kind];
+            const content = (
               <>
                 <div className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="channel-label">{ROTULO[e.kind]}</span>
+                  <span className="channel-label">{LABELS[e.kind]}</span>
                   <span className="tnum font-mono text-micro text-fg-3">
                     {e.at ? format(new Date(e.at), "dd/MM HH:mm", { locale: ptBR }) : "--"}
                   </span>
@@ -102,15 +95,15 @@ export function Timeline({ machineId }: { machineId: number }) {
                   {e.severity ? (
                     <StatusDot tone={severityTone(e.severity)} />
                   ) : (
-                    <Icone size={11} className="text-fg-3" aria-hidden="true" />
+                    <Icon size={11} className="text-fg-3" aria-hidden="true" />
                   )}
                 </span>
                 {e.link ? (
                   <Link to={e.link} className="block rounded transition-colors hover:bg-raised">
-                    {conteudo}
+                    {content}
                   </Link>
                 ) : (
-                  conteudo
+                  content
                 )}
               </li>
             );

@@ -4,11 +4,7 @@ import { shareApi, errorMessage } from "../../services/api";
 import { Button, TextButton } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 
-/**
- * Pacote para o técnico: um link temporário, somente leitura, com tudo do
- * incidente — para o leigo mandar a quem vai ajudar, sem que a pessoa precise
- * de conta.
- */
+/** Link temporário, somente leitura, com tudo do incidente, para mandar ao técnico sem que ele precise de conta. */
 export function ShareButton({ anomalyId }: { anomalyId: number }) {
   const toast = useToast();
   const [link, setLink] = useState<string | null>(null);

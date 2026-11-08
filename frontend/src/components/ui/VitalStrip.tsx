@@ -151,12 +151,12 @@ function Vital({ item }: { item: VitalItem }) {
     const max = item.historyMax ?? 100;
     const raw = parseFloat(item.value.replace(",", "."));
     const value = Number.isFinite(raw) ? raw : 0;
-  const animado = useCountUp(value);
+  const animated = useCountUp(value);
   // Mesma quantidade de casas do texto original, com vírgula: "42,3" continua
   // com uma casa enquanto caminha, senão o número treme de largura.
-  const casas = (item.value.split(/[.,]/)[1] ?? "").length;
-  const exibido = Number.isFinite(raw)
-    ? animado.toFixed(casas).replace(".", ",")
+  const decimals = (item.value.split(/[.,]/)[1] ?? "").length;
+  const shown = Number.isFinite(raw)
+    ? animated.toFixed(decimals).replace(".", ",")
     : item.value;
   return (
       <article
@@ -178,7 +178,7 @@ function Vital({ item }: { item: VitalItem }) {
 
         <p className="tnum flex items-baseline gap-1 font-mono text-fg">
           <b className="text-[2rem] font-medium leading-none tracking-tight min-[1500px]:text-[2.6rem]">
-            {exibido}
+            {shown}
           </b>
           {item.unit && <span className="text-base text-fg-3">{item.unit}</span>}
         </p>
@@ -195,7 +195,7 @@ function Vital({ item }: { item: VitalItem }) {
             item.bandLabel ? `. ${item.bandLabel}` : ""
           }`}
         >
-          <Segments value={animado} max={max} limit={item.limit} crit={item.critAt} />
+          <Segments value={animated} max={max} limit={item.limit} crit={item.critAt} />
         </div>
 
         <div className="flex items-center justify-between gap-2 text-xs text-fg-2">

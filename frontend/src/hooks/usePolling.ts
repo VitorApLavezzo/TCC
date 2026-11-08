@@ -5,20 +5,15 @@ export interface PollingState {
   initialLoading: boolean;
   /** Erro da última tentativa. `null` quando a última tentativa deu certo. */
   error: unknown | null;
-  /** Momento da última carga bem-sucedida. */
   lastUpdatedAt: number | null;
   /** Força uma busca agora (botão "tentar de novo"). */
   refresh: () => void;
 }
 
 /**
- * Executa `callback` na hora e a cada `intervalMs`, informando estado de
- * carga e de erro.
- *
- * O ponto principal: se o callback rejeitar, o erro é capturado e devolvido
- * em `error` em vez de virar uma promise não tratada. Antes, o backend cair
- * fazia o polling falhar em silêncio e a tela continuar exibindo os números
- * antigos como se fossem atuais.
+ * Executa `callback` na hora e a cada `intervalMs`. Se ele rejeitar, o erro
+ * volta em `error` em vez de virar promise não tratada, para a tela não
+ * exibir números velhos como atuais.
  *
  * `callback` DEVE vir de useCallback — uma função nova a cada render
  * reiniciaria o polling continuamente.
@@ -67,13 +62,13 @@ export function usePolling(callback: () => Promise<void> | void, intervalMs: num
     const id = setInterval(() => {
       if (!document.hidden) run();
     }, intervalMs);
-    const aoVoltar = () => {
+    const onVisible = () => {
       if (!document.hidden) run();
     };
-    document.addEventListener("visibilitychange", aoVoltar);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       clearInterval(id);
-      document.removeEventListener("visibilitychange", aoVoltar);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [run, intervalMs, enabled, tick]);
 

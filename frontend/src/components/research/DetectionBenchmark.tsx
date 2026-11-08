@@ -26,17 +26,7 @@ const FAMILY_LABEL: Record<string, string> = {
 
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${decimal(v * 100, 1)}%`);
 
-/**
- * Benchmark de detecção.
- *
- * A outra seção desta página mede a qualidade do texto que explica um
- * problema. Esta mede a função central — encontrar o problema e ficar calado
- * quando não há nenhum —, que é a afirmação que a banca vai querer ver com
- * número.
- *
- * A matriz vem primeiro porque é a resposta; a lista por cenário vem depois
- * porque é onde se responde "e nos casos em que erra?".
- */
+/** Mede a função central: encontrar o problema e ficar calado quando não há nenhum. */
 export function DetectionBenchmark({ realMachineId }: { realMachineId?: number }) {
   const toast = useToast();
   const [data, setData] = useState<any>(null);
@@ -58,14 +48,13 @@ export function DetectionBenchmark({ realMachineId }: { realMachineId?: number }
     load();
   }, [load]);
 
-  // Uma rodada leva minutos: em vez de travar a tela, busca o resultado de
-  // tempos em tempos e para quando um mais novo aparece.
+  // Uma rodada leva minutos: consulta de tempos em tempos até aparecer um resultado mais novo.
   useEffect(() => {
     if (!running) return;
-    const inicial = data?.run?.id ?? null;
+    const initialRunId = data?.run?.id ?? null;
     const t = setInterval(async () => {
       const r = await evaluationApi.benchmark().catch(() => null);
-      if (r && r.data?.run?.id && r.data.run.id !== inicial) {
+      if (r && r.data?.run?.id && r.data.run.id !== initialRunId) {
         setData(r.data);
         setRunning(false);
         toast.success("Benchmark concluído.");
@@ -85,7 +74,7 @@ export function DetectionBenchmark({ realMachineId }: { realMachineId?: number }
     }
   };
 
-  const baixar = async (fmt: "md" | "csv") => {
+  const download = async (fmt: "md" | "csv") => {
     try {
       const r = await evaluationApi.benchmarkDownload(data.run.id, fmt);
       const blob = new Blob([r.data], { type: "text/plain;charset=utf-8" });
@@ -111,8 +100,8 @@ export function DetectionBenchmark({ realMachineId }: { realMachineId?: number }
         <div className="flex flex-wrap items-center gap-3">
           {data?.run && (
             <>
-              <TextButton onClick={() => baixar("md")}>Baixar .md</TextButton>
-              <TextButton onClick={() => baixar("csv")}>Baixar .csv</TextButton>
+              <TextButton onClick={() => download("md")}>Baixar .md</TextButton>
+              <TextButton onClick={() => download("csv")}>Baixar .csv</TextButton>
             </>
           )}
           <Button size="sm" variant="secondary" onClick={run} loading={running} loadingLabel="Rodando...">

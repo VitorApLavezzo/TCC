@@ -17,8 +17,8 @@ export function Explain({ term, text, className }: { term?: string; text?: strin
   const policy = usePolicy();
   // Frase que depende de número do servidor some enquanto ele não chega, em
   // vez de mostrar o marcador cru ou um número velho guardado aqui.
-  const bruto = text ?? (term ? GLOSSARY[term] : undefined);
-  const body = bruto ? fillPolicy(bruto, policy) : undefined;
+  const raw = text ?? (term ? GLOSSARY[term] : undefined);
+  const body = raw ? fillPolicy(raw, policy) : undefined;
 
   useEffect(() => {
     if (!open) return;
@@ -47,11 +47,11 @@ export function Explain({ term, text, className }: { term?: string; text?: strin
       return;
     }
     const r = bubbleRef.current.getBoundingClientRect();
-    const margem = 12;
-    if (r.left < margem) setShift(margem - r.left);
-    else if (r.right > window.innerWidth - margem) setShift(window.innerWidth - margem - r.right);
-    const rodape = window.innerWidth < 1024 ? 72 : margem;
-    if (r.bottom > window.innerHeight - rodape && r.top - r.height - 24 > 0) setUp(true);
+    const margin = 12;
+    if (r.left < margin) setShift(margin - r.left);
+    else if (r.right > window.innerWidth - margin) setShift(window.innerWidth - margin - r.right);
+    const bottomInset = window.innerWidth < 1024 ? 72 : margin;
+    if (r.bottom > window.innerHeight - bottomInset && r.top - r.height - 24 > 0) setUp(true);
   }, [open]);
 
   if (!body) return null;

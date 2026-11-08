@@ -26,9 +26,8 @@ type Playbook = {
 
 type Option = { value: string; label: string };
 
-// Tipos que fazem sentido automatizar: problemas de desempenho com um
-// programa responsável claro. Ameaça de segurança não entra — encerrar um
-// processo suspeito sozinho pode destruir a evidência do que aconteceu.
+// Só desempenho com programa responsável claro: encerrar sozinho um processo suspeito
+// de segurança pode destruir a evidência do que aconteceu.
 const AUTOMATABLE_TYPES = [
   "high_memory",
   "high_cpu",
@@ -42,14 +41,7 @@ const AUTOMATABLE_TYPES = [
 const select =
   "h-9 w-full rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent";
 
-/**
- * Automação com autonomia graduada.
- *
- * O degrau é o assunto desta tela, e por isso ele aparece em cada linha, com
- * o nome em português do que vai acontecer — "só sugerir", "pedir
- * confirmação", "fazer sozinho e avisar". Uma regra nova nasce no degrau mais
- * tímido: subir é escolha de quem lê, não padrão de quem programou.
- */
+/** Automação com autonomia graduada: uma regra nova nasce no degrau mais tímido; subir é escolha da pessoa. */
 export function Playbooks() {
   const toast = useToast();
   const confirm = useConfirm();
@@ -58,7 +50,7 @@ export function Playbooks() {
   const [autonomies, setAutonomies] = useState<Option[]>([]);
   const [machines, setMachines] = useState<{ id: number; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
-  const [criando, setCriando] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({
     name: "",
     anomaly_type: AUTOMATABLE_TYPES[0],
@@ -85,12 +77,12 @@ export function Playbooks() {
     load();
   }, [load]);
 
-  async function criar() {
+  async function createPlaybook() {
     if (!form.name.trim()) {
       toast.error("Dê um nome à automação.", "Por exemplo: “Fechar o navegador travado”.");
       return;
     }
-    setCriando(true);
+    setCreating(true);
     try {
       await playbooksApi.create({
         name: form.name.trim(),
@@ -106,14 +98,13 @@ export function Playbooks() {
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
-      setCriando(false);
+      setCreating(false);
     }
   }
 
-  async function mudar(playbook: Playbook, mudancas: Partial<Playbook>) {
-    // Ligar o modo automático é a única mudança que faz a máquina agir sem
-    // ninguém olhando: pede confirmação explícita, com o efeito por escrito.
-    if (mudancas.autonomy === "automatico") {
+  async function updatePlaybook(playbook: Playbook, changes: Partial<Playbook>) {
+    // O modo automático faz a máquina agir sem ninguém olhando: pede confirmação explícita.
+    if (changes.autonomy === "automatico") {
       const ok = await confirm({
         title: "Deixar esta automação agir sozinha?",
         body: (
@@ -128,14 +119,14 @@ export function Playbooks() {
       if (!ok) return;
     }
     try {
-      await playbooksApi.update(playbook.id, mudancas);
+      await playbooksApi.update(playbook.id, changes);
       load();
     } catch (e) {
       toast.error(errorMessage(e));
     }
   }
 
-  async function remover(playbook: Playbook) {
+  async function removePlaybook(playbook: Playbook) {
     const ok = await confirm({
       title: "Apagar esta automação?",
       body: <><strong>{playbook.name}</strong> deixa de existir. O histórico do que ela já fez continua no registro.</>,
@@ -184,7 +175,7 @@ export function Playbooks() {
                     <select
                       id={`autonomia-${p.id}`}
                       value={p.autonomy}
-                      onChange={(e) => mudar(p, { autonomy: e.target.value as Playbook["autonomy"] })}
+                      onChange={(e) => updatePlaybook(p, { autonomy: e.target.value as Playbook["autonomy"] })}
                       className="h-8 rounded-control border border-edge bg-surface px-2 text-xs text-fg focus:border-accent"
                     >
                       {autonomies.map((a) => (
@@ -193,10 +184,10 @@ export function Playbooks() {
                         </option>
                       ))}
                     </select>
-                    <Button size="sm" variant="quiet" onClick={() => mudar(p, { enabled: !p.enabled })}>
+                    <Button size="sm" variant="quiet" onClick={() => updatePlaybook(p, { enabled: !p.enabled })}>
                       {p.enabled ? "Pausar" : "Retomar"}
                     </Button>
-                    <Button size="sm" variant="danger" onClick={() => remover(p)}>
+                    <Button size="sm" variant="danger" onClick={() => removePlaybook(p)}>
                       Apagar
                     </Button>
                   </div>
@@ -275,7 +266,7 @@ export function Playbooks() {
           />
           Começar em ensaio (registra o que faria, sem fazer)
         </label>
-        <Button className="mt-3" variant="primary" loading={criando} onClick={criar}>
+        <Button className="mt-3" variant="primary" loading={creating} onClick={createPlaybook}>
           Criar automação
         </Button>
         <p className="mt-2 max-w-prose text-micro leading-relaxed text-fg-3">

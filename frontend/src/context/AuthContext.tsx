@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { User } from "../types";
 import { authApi, pushApi } from "../services/api";
-import { pararAvisosNesteAparelho } from "../lib/push";
+import { stopPushOnThisDevice } from "../lib/push";
 
 interface AuthContextType {
   user: User | null;
@@ -52,8 +52,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     // A assinatura de avisos é da conta que está saindo: sai junto. O token
     // vai explícito porque some do localStorage antes da requisição sair.
-    const tokenAtual = localStorage.getItem("token");
-    void pararAvisosNesteAparelho((endpoint) => pushApi.unsubscribe(endpoint, tokenAtual));
+    const currentToken = localStorage.getItem("token");
+    void stopPushOnThisDevice((endpoint) => pushApi.unsubscribe(endpoint, currentToken));
     localStorage.removeItem("token");
     setToken(null);
     setUser(null);

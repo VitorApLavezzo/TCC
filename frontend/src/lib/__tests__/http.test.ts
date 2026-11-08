@@ -2,9 +2,8 @@ import { describe, expect, it } from "vitest";
 import { isNotFound } from "../http";
 
 /**
- * "Não existe" só quando o servidor disse que não existe. Antes, qualquer
- * falha — rede caída, servidor reiniciando — virava "este aviso não existe
- * mais", e a pessoa concluía uma coisa falsa.
+ * "Não existe" só quando o servidor disse que não existe; rede caída ou
+ * servidor reiniciando não são "este aviso não existe mais".
  */
 describe("isNotFound", () => {
   it("é 'não existe' quando o servidor respondeu 404", () => {

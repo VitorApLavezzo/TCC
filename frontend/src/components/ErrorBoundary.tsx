@@ -1,9 +1,6 @@
 import { Component, ErrorInfo, ReactNode } from "react";
 
-/**
- * Rede de segurança para erro de renderização, que antes resultava em tela
- * branca sem nenhuma pista para o usuário.
- */
+/** Rede de segurança para erro de renderização, que daria tela branca sem pista. */
 export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
 

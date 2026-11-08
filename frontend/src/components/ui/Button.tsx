@@ -24,8 +24,7 @@ const VARIANT: Record<Variant, string> = {
   danger: "border border-edge text-crit hover:bg-crit/10 hover:border-crit/50 active:bg-crit/15",
 };
 
-// Alturas de alvo de toque: 32px e 36px. A escala anterior começava em 28px,
-// abaixo do mínimo confortavel para dedo.
+// Alturas de alvo de toque: 32px e 36px, nada abaixo do mínimo confortável para dedo.
 const SIZE: Record<Size, string> = {
   sm: "h-8 gap-1.5 px-2.5 text-xs",
   md: "h-9 gap-2 px-3.5 text-sm",
@@ -56,10 +55,7 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
   );
 });
 
-/**
- * Botão só-ícone. `label` é obrigatório e vira aria-label + title — antes
- * esses controles tinham apenas `title` e eram mudos no leitor de tela.
- */
+/** Botão só-ícone. `label` é obrigatório e vira aria-label + title, para o leitor de tela. */
 export function IconButton({
   label,
   icon,

@@ -28,15 +28,9 @@ type Results = {
   sentence: string;
 };
 
-const num = (v: number | null | undefined, sufixo = "") => (v == null ? "—" : `${v}${sufixo}`);
+const num = (v: number | null | undefined, suffix = "") => (v == null ? "—" : `${v}${suffix}`);
 
-/**
- * Resultado do estudo com pessoas.
- *
- * É a única seção desta página em que o dado não vem do sistema medindo a si
- * mesmo. Duas condições, mesmo participante, tempo e acerto cronometrados —
- * e o p-valor ao lado, para a conclusão não depender de quem está lendo.
- */
+/** Estudo com pessoas: duas condições, mesmo participante, tempo e acerto cronometrados, com p-valor. */
 export function HumanStudy() {
   const toast = useToast();
   const [results, setResults] = useState<Results | null>(null);
@@ -54,7 +48,7 @@ export function HumanStudy() {
     load();
   }, [load]);
 
-  async function baixar() {
+  async function download() {
     try {
       const r = await studyApi.exportCsv();
       const url = URL.createObjectURL(new Blob([r.data], { type: "text/csv;charset=utf-8" }));
@@ -68,7 +62,7 @@ export function HumanStudy() {
     }
   }
 
-  const vazio = !results || results.respostas === 0;
+  const empty = !results || results.respostas === 0;
 
   return (
     <Section
@@ -81,15 +75,15 @@ export function HumanStudy() {
               Aplicar a alguém
             </Button>
           </Link>
-          {!vazio && (
-            <Button size="sm" variant="quiet" onClick={baixar}>
+          {!empty && (
+            <Button size="sm" variant="quiet" onClick={download}>
               Baixar CSV
             </Button>
           )}
         </div>
       }
     >
-      {vazio ? (
+      {empty ? (
         <EmptyState
           title="Nenhuma sessão registrada"
           body="Cada participante responde a seis avisos reais, metade com explicação da IA. O sistema cronometra e compara."
@@ -98,9 +92,9 @@ export function HumanStudy() {
         <>
           <div className="grid gap-3 sm:grid-cols-2">
             {([["Com explicação", results!.com_explicacao], ["Só com os números", results!.sem_explicacao]] as const).map(
-              ([titulo, arm]) => (
-                <Panel key={titulo} className="p-4">
-                  <p className="channel-label">{titulo}</p>
+              ([title, arm]) => (
+                <Panel key={title} className="p-4">
+                  <p className="channel-label">{title}</p>
                   <p className="tnum mt-2 font-mono text-xl text-fg">{num(arm.acerto_pct, "%")}</p>
                   <p className="text-xs text-fg-3">identificaram o problema corretamente</p>
                   <dl className="mt-3 space-y-1 border-t border-hairline pt-3 text-xs">

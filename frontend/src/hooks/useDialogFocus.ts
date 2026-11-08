@@ -3,7 +3,7 @@ import { RefObject, useEffect, useRef } from "react";
 // Só o que o Tab alcança: as opções da busca são botões com tabindex=-1
 // (navegadas pelas setas) e, contadas aqui, o "último" nunca recebia foco —
 // a trava não disparava e o Tab escapava para a página atrás.
-const FOCAVEIS = [
+const FOCUSABLE = [
   "button:not([disabled])",
   "[href]",
   "input:not([disabled])",
@@ -17,10 +17,6 @@ const FOCAVEIS = [
 /**
  * Foco de uma janela sobreposta: entra no elemento inicial, fica preso no
  * Tab, Esc fecha de qualquer ponto e, ao fechar, volta para quem abriu.
- *
- * Era o que só o diálogo de confirmação fazia. A busca (Ctrl+K) e a lista de
- * atalhos deixavam o Tab escapar para a página atrás — inerte sob o fundo
- * escuro — e o foco se perdia ao fechar.
  */
 export function useDialogFocus(
   open: boolean,
@@ -30,37 +26,37 @@ export function useDialogFocus(
 ) {
   // Em ref, para o efeito não reiniciar a cada render de quem passa uma
   // função nova em `onClose`.
-  const fechar = useRef(onClose);
-  fechar.current = onClose;
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
-    const anterior = document.activeElement as HTMLElement | null;
-    (initialRef?.current ?? dialogRef.current?.querySelector<HTMLElement>(FOCAVEIS))?.focus();
+    const previous = document.activeElement as HTMLElement | null;
+    (initialRef?.current ?? dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        fechar.current();
+        closeRef.current();
         return;
       }
       if (e.key !== "Tab") return;
-      const foco = dialogRef.current?.querySelectorAll<HTMLElement>(FOCAVEIS);
-      if (!foco || foco.length === 0) return;
-      const primeiro = foco[0];
-      const ultimo = foco[foco.length - 1];
-      if (e.shiftKey && document.activeElement === primeiro) {
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
+      if (!focusable || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();
-        ultimo.focus();
-      } else if (!e.shiftKey && document.activeElement === ultimo) {
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
         e.preventDefault();
-        primeiro.focus();
+        first.focus();
       }
     };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
-      anterior?.focus?.();
+      previous?.focus?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);

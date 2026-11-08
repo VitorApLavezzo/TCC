@@ -1,9 +1,6 @@
 /**
- * Faixas de saúde por métrica.
- *
- * Todo número que aparece no painel passa por aqui antes de ir para a tela.
- * Sem isso o usuário precisa já saber que 94% de CPU é ruim e 12% é bom —
- * que é exatamente o conhecimento que ele não tem.
+ * Faixas de saúde por métrica: todo número do painel passa por aqui, para a
+ * pessoa não precisar saber que 94% de CPU é ruim e 12% é bom.
  */
 
 export type Level = "ok" | "warn" | "crit" | "unknown";
@@ -68,11 +65,8 @@ export function worstLevel(levels: Level[]): Level {
 }
 
 /**
- * Os limites de cada medida, expostos para o desenho da faixa do normal.
- *
- * São os mesmos números que decidem o rótulo de estado — a faixa desenhada
- * atrás do traço é, literalmente, a regra que classifica a leitura. Nenhum
- * valor aqui é ilustrativo.
+ * Limites de cada medida. São os mesmos números que decidem o rótulo de
+ * estado e a faixa do normal desenhada atrás do traço.
  */
 export const THRESHOLDS: Record<string, { warn: number; crit: number; max: number }> = {
   cpu: { warn: 80, crit: 92, max: 100 },
@@ -99,7 +93,6 @@ function byThreshold(value: number | null | undefined, warn: number, crit: numbe
   return { level, label: LEVEL_LABEL[level] };
 }
 
-/** Aplica os limites declarados em THRESHOLDS a uma leitura. */
 function rated(metric: keyof typeof THRESHOLDS) {
   const t = THRESHOLDS[metric];
   return (v?: number | null) => byThreshold(v, t.warn, t.crit);

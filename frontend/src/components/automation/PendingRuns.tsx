@@ -15,51 +15,38 @@ type Run = {
   can_approve: boolean;
 };
 
-/**
- * O tempo que resta antes da ação acontecer, visível.
- *
- * O texto dizia "executa em 2 min" e pedia confiança. A barra esvaziando
- * mostra o tempo correndo: é o mesmo dado, num canal que não exige leitura —
- * e é o que torna a automação aceitável para quem não é técnico.
- */
+/** A barra esvaziando mostra o tempo até a ação acontecer, sem exigir leitura. */
 function Countdown({ run }: { run: Run }) {
-  const [agora, setAgora] = useState(Date.now());
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
-    const id = window.setInterval(() => setAgora(Date.now()), 1000);
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
   if (!run.undo_until || run.status !== "agendado") return null;
-  const fim = new Date(run.undo_until).getTime();
-  const inicio = run.created_at ? new Date(run.created_at).getTime() : fim - 120000;
-  const total = Math.max(1, fim - inicio);
-  const restante = Math.max(0, fim - agora);
-  const segundos = Math.ceil(restante / 1000);
+  const end = new Date(run.undo_until).getTime();
+  const start = run.created_at ? new Date(run.created_at).getTime() : end - 120000;
+  const total = Math.max(1, end - start);
+  const remaining = Math.max(0, end - now);
+  const seconds = Math.ceil(remaining / 1000);
 
   return (
     <div className="mt-2">
       <div className="h-1 overflow-hidden rounded-full bg-sunken" role="presentation">
         <div
           className="h-full rounded-full bg-warn transition-[width] duration-1000 ease-linear"
-          style={{ width: `${(restante / total) * 100}%` }}
+          style={{ width: `${(remaining / total) * 100}%` }}
         />
       </div>
       <p className="mt-1 tnum font-mono text-micro text-fg-3">
-        {segundos > 0 ? `${segundos}s para cancelar` : "executando..."}
+        {seconds > 0 ? `${seconds}s para cancelar` : "executando..."}
       </p>
     </div>
   );
 }
 
-/**
- * O freio da automação.
- *
- * Uma ação automática é anunciada antes de acontecer e fica aqui, com o
- * relógio correndo, enquanto dá para cancelar. É o que separa "o sistema
- * age sozinho" de "o sistema age pelas suas costas": a diferença é só esta
- * janela, mas é ela que torna a automação aceitável para quem não é técnico.
- */
+/** O freio da automação: uma ação automática é anunciada e fica aqui enquanto dá para cancelar. */
 export function PendingRuns() {
   const toast = useToast();
   const [runs, setRuns] = useState<Run[]>([]);
@@ -75,18 +62,17 @@ export function PendingRuns() {
 
   useEffect(() => {
     load();
-    // Enquanto há algo a decidir, a lista se atualiza sozinha: a janela de
-    // cancelamento é curta e uma tela parada mostraria opção que já venceu.
+    // A janela de cancelamento é curta: uma tela parada mostraria opção que já venceu.
     const id = window.setInterval(load, 15000);
     return () => window.clearInterval(id);
   }, [load]);
 
   if (runs.length === 0) return null;
 
-  async function decidir(run: Run, aprovar: boolean) {
+  async function decide(run: Run, approve: boolean) {
     try {
-      await playbooksApi.decide(run.id, aprovar);
-      toast.success(aprovar ? "Ação liberada." : "Ação cancelada.");
+      await playbooksApi.decide(run.id, approve);
+      toast.success(approve ? "Ação liberada." : "Ação cancelada.");
       load();
     } catch (e) {
       toast.error(errorMessage(e));
@@ -104,11 +90,11 @@ export function PendingRuns() {
           </div>
           <div className="flex flex-shrink-0 gap-2">
             {run.can_approve && (
-              <Button size="sm" variant="primary" onClick={() => decidir(run, true)}>
+              <Button size="sm" variant="primary" onClick={() => decide(run, true)}>
                 Pode fazer
               </Button>
             )}
-            <Button size="sm" variant="secondary" onClick={() => decidir(run, false)}>
+            <Button size="sm" variant="secondary" onClick={() => decide(run, false)}>
               Cancelar
             </Button>
           </div>

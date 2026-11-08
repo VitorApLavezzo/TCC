@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 
-const ATALHOS: [string, string][] = [
+const SHORTCUTS: [string, string][] = [
   ["Ctrl K  ou  /", "Buscar computador, aviso ou tela"],
   ["g depois p", "Ir para o painel"],
   ["g depois c", "Ir para os computadores"],
@@ -25,11 +25,11 @@ export function ShortcutsSheet({ open, onClose }: { open: boolean; onClose: () =
            className="w-full max-w-sm rounded-panel border border-edge bg-surface p-5 shadow-float">
         <h2 className="font-display text-base font-semibold text-fg">Atalhos de teclado</h2>
         <dl className="mt-3 divide-y divide-hairline">
-          {ATALHOS.map(([tecla, oque]) => (
-            <div key={tecla} className="flex items-baseline justify-between gap-4 py-2">
-              <dt className="text-sm text-fg-2">{oque}</dt>
+          {SHORTCUTS.map(([keys, action]) => (
+            <div key={keys} className="flex items-baseline justify-between gap-4 py-2">
+              <dt className="text-sm text-fg-2">{action}</dt>
               <dd>
-                <kbd className="rounded border border-edge px-1.5 py-0.5 font-mono text-micro text-fg-3">{tecla}</kbd>
+                <kbd className="rounded border border-edge px-1.5 py-0.5 font-mono text-micro text-fg-3">{keys}</kbd>
               </dd>
             </div>
           ))}

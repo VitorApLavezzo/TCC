@@ -3,12 +3,8 @@ import { Panel } from "./Layout";
 import { Button } from "./Button";
 
 /**
- * Uma seção que não conseguiu carregar.
- *
- * O padrão anterior era `catch(() => setDados(null))` e não renderizar nada:
- * a seção simplesmente sumia. Quem olha não distingue "não há nada aqui" de
- * "a chamada falhou" — e some justamente o botão que resolveria. Falha é
- * informação: diz o que não veio e oferece tentar de novo.
+ * Uma seção que não conseguiu carregar: diz o que não veio e oferece tentar de
+ * novo, em vez de sumir e parecer que não há nada ali.
  */
 export function LoadError({
   what,
@@ -20,7 +16,7 @@ export function LoadError({
   onRetry?: () => void;
   compact?: boolean;
 }) {
-  const corpo = (
+  const content = (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <p className="text-sm text-fg-2">
         Não foi possível carregar {what}.{" "}
@@ -33,5 +29,5 @@ export function LoadError({
       )}
     </div>
   );
-  return compact ? corpo : <Panel className="p-4">{corpo}</Panel>;
+  return compact ? content : <Panel className="p-4">{content}</Panel>;
 }

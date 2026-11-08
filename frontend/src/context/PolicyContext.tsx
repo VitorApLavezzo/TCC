@@ -6,18 +6,11 @@ import type { Policy } from "../types";
 /**
  * Os números que descrevem como o sistema trabalha, vindos do servidor.
  *
- * Antes estavam escritos à mão no texto de cada tela, e divergiam: quatro
- * telas afirmavam "a cada 30 segundos" numa coleta que vai de 10 a 60 conforme
- * o que está acontecendo, e a frase do aprendizado precisava ser editada aqui
- * toda vez que a régua mudava no servidor.
+ * Carrega quando alguém entra, não quando a página abre: o endpoint exige
+ * login, e buscar antes devolvia 401 nas telas públicas.
  *
- * Carrega uma vez por sessão — quando alguém entra, não quando a página abre:
- * o endpoint exige login, e buscar antes disso devolvia 401 nas telas
- * públicas e deixava a política vazia até a pessoa apertar F5.
- *
- * Falha em silêncio de propósito: nenhuma frase que depende destes números é
- * essencial, e todas somem sozinhas quando a política não chega
- * (`fillPolicy` devolve nulo) — melhor uma frase a menos que um número errado.
+ * Falha em silêncio de propósito: as frases que dependem destes números somem
+ * sozinhas (`fillPolicy` devolve nulo) — melhor uma frase a menos que um número errado.
  */
 const PolicyContext = createContext<Policy | null>(null);
 
@@ -31,13 +24,13 @@ export function PolicyProvider({ children }: { children: ReactNode }) {
       setPolicy(null);
       return;
     }
-    let vivo = true;
+    let alive = true;
     metaApi
       .policy()
-      .then((res) => vivo && setPolicy(res.data))
+      .then((res) => alive && setPolicy(res.data))
       .catch(() => undefined);
     return () => {
-      vivo = false;
+      alive = false;
     };
   }, [userId]);
 

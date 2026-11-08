@@ -48,10 +48,7 @@ export function Register() {
       setLoading(false);
       return;
     }
-    // Conta criada: entra direto e vai conectar o primeiro computador. Pedir
-    // de novo a senha que acabou de ser digitada era um passo sem motivo — e
-    // o acolhimento em /welcome nunca era visto, porque o login levava ao
-    // painel vazio.
+    // Conta criada: entra direto e vai conectar o primeiro computador.
     try {
       await login(username, password);
       navigate("/welcome");

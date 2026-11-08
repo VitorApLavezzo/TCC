@@ -8,16 +8,8 @@ import { StatusDot } from "./ui/Layout";
 import { processName } from "../lib/format";
 
 /**
- * Um aviso apresentado como evento detectado, não como item de lista.
- *
- * A composição é a de uma fita de registro: o horário à esquerda, uma calha
- * vertical contínua, e um tique na calha exatamente na altura do evento. Lidas
- * em sequência, as linhas viram a linha do tempo das detecções daquela
- * máquina — que é o que elas são de fato. É também o que dá à parte mais
- * importante do produto uma forma própria, em vez de mais uma lista.
- *
- * O tique usa a íris, a mesma cor que marca o instante da detecção nos
- * gráficos e o item ativo na navegação. Detecção tem uma cor só no produto.
+ * Aviso como evento numa fita de registro: horário, calha vertical e um tique na
+ * altura do evento. O tique usa a íris, a cor única de detecção no produto.
  */
 export function AnomalyEvent({
   anomaly,
@@ -31,7 +23,6 @@ export function AnomalyEvent({
   /** Só aparece quando a lista mistura máquinas. */
   machineName?: string;
   onOpen: () => void;
-  /** Ação à direita, como resolver ou reabrir. */
   action?: ReactNode;
   showDate?: boolean;
   /** Usado pela lista para recolher o item que acabou de ser resolvido. */
@@ -43,10 +34,8 @@ export function AnomalyEvent({
 
   return (
     <li className={`flex items-stretch gap-3 overflow-hidden ${className ?? ""}`}>
-      {/* Carimbo de tempo: dado medido, então na face da máquina. */}
       <div className="w-11 flex-shrink-0 pt-3 text-right sm:w-12">
-        {/* `title` com data e hora completas: o relativo serve para ler rápido,
-            e quem vai registrar a ocorrência num chamado precisa do exato. */}
+        {/* `title` com data e hora completas: quem registra a ocorrência num chamado precisa do exato. */}
         <p
           className="tnum font-mono text-xs leading-none text-fg-2"
           title={format(at, "EEEE, d 'de' MMMM 'de' yyyy 'às' HH:mm:ss", { locale: ptBR })}
@@ -60,7 +49,6 @@ export function AnomalyEvent({
         )}
       </div>
 
-      {/* A calha e o tique da detecção. */}
       <div className="relative flex w-2 flex-shrink-0 justify-center" aria-hidden="true">
         <span className="w-px bg-hairline" />
         <span
@@ -72,9 +60,8 @@ export function AnomalyEvent({
       </div>
 
       <div className="flex min-w-0 flex-1 items-start gap-3 py-2.5">
-        {/* Sem aria-label: o nome do botão sai do próprio conteúdo (tipo,
-            gravidade, resumo, computador). Um aria-label só com o tipo
-            escondia do leitor de tela a gravidade e o "Resolvido". */}
+        {/* Sem aria-label: o nome acessível sai do conteúdo (tipo, gravidade,
+            resumo); um rótulo só com o tipo esconderia o resto do leitor de tela. */}
         <button
           type="button"
           onClick={onOpen}
@@ -134,7 +121,6 @@ export function AnomalyEvent({
   );
 }
 
-/** A fita em que os eventos são inseridos. */
 export function AnomalyTimeline({ children }: { children: ReactNode }) {
   return <ul className="divide-y divide-hairline border-y border-hairline">{children}</ul>;
 }

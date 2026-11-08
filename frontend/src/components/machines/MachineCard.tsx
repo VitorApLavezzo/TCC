@@ -27,10 +27,7 @@ function intervalLabel(value?: number | null): string {
   return "Automática";
 }
 
-/**
- * A pergunta que a lista não respondia: este computador está bem? Antes só
- * dizia se ele estava conectado.
- */
+/** Este computador está bem? (não só se está conectado) */
 function HealthLine({ machine, status }: { machine: Machine; status?: MachineStatus }) {
   if (!status || !machine.is_active) return null;
   if (status.open === 0) {
@@ -56,13 +53,7 @@ function HealthLine({ machine, status }: { machine: Machine; status?: MachineSta
   );
 }
 
-/**
- * Uma máquina na lista.
- *
- * O conteúdo secundário — reinstalar, desinstalar — fica numa região expansível
- * separada por filete, não em caixas com borda e fundo próprios dentro do
- * cartão. A versão anterior tinha três níveis de caixa aninhada aqui.
- */
+/** O conteúdo secundário (reinstalar, desinstalar) fica numa região expansível, sem caixas aninhadas. */
 export function MachineCard({
   machine,
   onTogglePause,
@@ -73,7 +64,7 @@ export function MachineCard({
   status,
 }: {
   machine: Machine;
-  /** Avisos em aberto deste computador; ausente enquanto carrega. */
+  /** Ausente enquanto carrega. */
   status?: MachineStatus;
   onTogglePause: (m: Machine) => void;
   onDelete: (m: Machine) => void;
@@ -112,8 +103,7 @@ export function MachineCard({
     <li className="py-4">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
-          {/* Seta ao lado do nome: sem ela, nada dizia que o nome abre o
-              histórico do computador. */}
+          {/* Seta ao lado do nome: sinaliza que o nome abre o histórico do computador. */}
           <Link
             to={`/machines/${machine.id}`}
             className="group inline-flex max-w-full items-center gap-1 text-sm font-medium text-fg hover:text-accent"
@@ -127,8 +117,7 @@ export function MachineCard({
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
             <HealthLine machine={machine} status={status} />
-            {/* wsStatus="idle": esta página não abre WebSocket, então o frescor
-                vem do "visto por último". O horário exato fica no title. */}
+            {/* wsStatus="idle": esta página não abre WebSocket; o frescor vem do "visto por último". */}
             <FreshnessTag lastMetricAt={machine.last_seen} wsStatus="idle" paused={!machine.is_active} />
           </div>
           {realtimeActive && (
@@ -180,9 +169,7 @@ export function MachineCard({
         </p>
       )}
 
-      {/* Frequência de leitura e tempo real ficavam à mostra em toda linha:
-          ajuste fino que quase ninguém usa, disputando espaço com o que
-          importa — se o computador está bem. */}
+      {/* Ajuste fino que quase ninguém usa: recolhido para não disputar espaço com o estado do computador. */}
       {open && (
         <div className="mt-3 space-y-4 border-t border-hairline pt-3">
           <div>
@@ -217,8 +204,7 @@ export function MachineCard({
                   <Explain term="tempo_real" />
                 </span>
               )}
-              {/* Sem leitura ainda, o intervalo é desconhecido — melhor não
-                  dizer nada do que mostrar um "?" no lugar do número. */}
+              {/* Sem leitura ainda, o intervalo é desconhecido: melhor não mostrar nada que um "?". */}
               {machine.collection_interval != null && (
                 <span className="tnum text-xs text-fg-3">Lendo a cada {machine.collection_interval} s agora</span>
               )}

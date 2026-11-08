@@ -25,36 +25,29 @@ type Row = {
 const SEV_TONE: Record<string, Level> = { critical: "crit", high: "warn", medium: "warn", low: "ok" };
 
 /** Pior sinal entre os três vitais, ou o do aviso mais grave em aberto. */
-function estado(row: Row): Level {
+function levelOf(row: Row): Level {
   if (row.worst_severity) return SEV_TONE[row.worst_severity] ?? "warn";
   return worstLevel([health.cpu(row.cpu).level, health.memory(row.memory).level, health.disk(row.disk).level]);
 }
 
-const ORDEM: Record<Level, number> = { crit: 0, warn: 1, unknown: 2, ok: 3 };
+const LEVEL_ORDER: Record<Level, number> = { crit: 0, warn: 1, unknown: 2, ok: 3 };
 
-/**
- * Todos os computadores numa tela, ordenados por quem precisa de atenção.
- *
- * O painel mostra um computador por vez, escolhido num seletor — o que
- * funciona com um e esconde o problema com doze: para saber qual está mal,
- * era preciso abrir um por um. Aqui a pergunta "qual precisa de mim agora?"
- * se responde no primeiro cartão, porque a ordem é essa.
- */
+/** Todos os computadores numa tela, ordenados por quem precisa de atenção. */
 export function FleetOverview({ onSelect }: { onSelect?: (id: number) => void }) {
   const navigate = useNavigate();
   const [rows, setRows] = useState<Row[] | null>(null);
-  const [erro, setErro] = useState(false);
-  const [agora, setAgora] = useState(Date.now());
+  const [error, setError] = useState(false);
+  const [now, setNow] = useState(Date.now());
 
   const load = useCallback(() => {
     reliabilityApi
       .fleetOverview()
       .then((r) => {
         setRows(r.data.machines);
-        setErro(false);
-        setAgora(Date.now());
+        setError(false);
+        setNow(Date.now());
       })
-      .catch(() => setErro(true));
+      .catch(() => setError(true));
   }, []);
 
   useEffect(() => {
@@ -63,26 +56,26 @@ export function FleetOverview({ onSelect }: { onSelect?: (id: number) => void })
     return () => window.clearInterval(id);
   }, [load]);
 
-  if (erro) return <LoadError what="a visão geral dos computadores" onRetry={load} />;
+  if (error) return <LoadError what="a visão geral dos computadores" onRetry={load} />;
   if (!rows) return <Skeleton className="h-32" />;
   // Com um computador só, o painel abaixo já é a visão geral.
   if (rows.length < 2) return null;
 
-  const ordenados = [...rows].sort((a, b) => ORDEM[estado(a)] - ORDEM[estado(b)]);
-  const precisam = ordenados.filter((r) => estado(r) !== "ok").length;
+  const sorted = [...rows].sort((a, b) => LEVEL_ORDER[levelOf(a)] - LEVEL_ORDER[levelOf(b)]);
+  const needAttention = sorted.filter((r) => levelOf(r) !== "ok").length;
 
   return (
     <Section
       title="Seus computadores"
       description={
-        precisam
-          ? `${precisam} de ${rows.length} ${precisam === 1 ? "precisa" : "precisam"} de atenção`
+        needAttention
+          ? `${needAttention} de ${rows.length} ${needAttention === 1 ? "precisa" : "precisam"} de atenção`
           : `${rows.length} computadores, todos dentro do normal`
       }
     >
       <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {ordenados.map((row) => {
-          const tone = estado(row);
+        {sorted.map((row) => {
+          const tone = levelOf(row);
           return (
             <li key={row.id}>
               <button
@@ -104,11 +97,11 @@ export function FleetOverview({ onSelect }: { onSelect?: (id: number) => void })
                   </div>
 
                   <dl className="mt-3 grid grid-cols-3 gap-2 text-micro">
-                    {([["Proc.", row.cpu], ["Mem.", row.memory], ["Disco", row.disk]] as const).map(([rotulo, valor]) => (
-                      <div key={rotulo}>
-                        <dt className="text-fg-3">{rotulo}</dt>
+                    {([["Proc.", row.cpu], ["Mem.", row.memory], ["Disco", row.disk]] as const).map(([label, value]) => (
+                      <div key={label}>
+                        <dt className="text-fg-3">{label}</dt>
                         <dd className="tnum font-mono text-sm text-fg">
-                          {valor == null ? "--" : `${Math.round(valor)}%`}
+                          {value == null ? "--" : `${Math.round(value)}%`}
                         </dd>
                       </div>
                     ))}
@@ -120,7 +113,7 @@ export function FleetOverview({ onSelect }: { onSelect?: (id: number) => void })
                       : row.worst_label
                         ? row.worst_label
                         : row.last_seen
-                          ? `Sem novidade · ${timeAgo(row.last_seen, agora)}`
+                          ? `Sem novidade · ${timeAgo(row.last_seen, now)}`
                           : "Aguardando a primeira leitura"}
                   </p>
                 </Panel>

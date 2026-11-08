@@ -7,11 +7,6 @@ import { ChevronDown } from "lucide-react";
  *
  * Usa `<details>` nativo: já vem focável, operável por teclado e anunciado
  * como expansível pelo leitor de tela, sem estado em React nem ARIA à mão.
- *
- * O uso aqui não é economizar espaço — é ordenar. Numa tela onde a IA escreve
- * três mil caracteres, mostrar tudo de uma vez faz a pessoa não ler nada. O
- * que responde "o que eu faço agora" fica aberto; o aprofundamento fica a um
- * clique, com o rótulo dizendo o que há dentro para a escolha ser informada.
  */
 export function Disclosure({
   title,

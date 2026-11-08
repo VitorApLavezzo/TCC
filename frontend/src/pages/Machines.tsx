@@ -56,8 +56,7 @@ export function Machines() {
     }
   };
 
-  // O diálogo nomeia a máquina. O confirm() nativo dizia apenas "esta máquina",
-  // o que com vários computadores na lista era risco de apagar o errado.
+  // O diálogo nomeia a máquina: com vários computadores, evita apagar o errado.
   const remove = async (m: Machine) => {
     const ok = await confirm({
       title: `Remover ${m.name} do painel?`,

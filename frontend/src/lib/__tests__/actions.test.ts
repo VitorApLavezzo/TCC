@@ -3,8 +3,7 @@ import { confirmBody } from "../actions";
 
 /**
  * A confirmação antes de uma ação remota precisa dizer a verdade sobre o que
- * dá para desfazer. Antes, toda ação perigosa prometia "você pode reverter
- * depois pelo painel" — inclusive encerrar um programa e apagar temporários.
+ * dá para desfazer.
  */
 describe("confirmBody", () => {
   it("não promete desfazer o que não tem volta", () => {

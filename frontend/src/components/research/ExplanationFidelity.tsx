@@ -11,36 +11,29 @@ type Row = {
   erro_medio_pontos: number | null;
 };
 
-/**
- * Fidelidade das previsões, por provedor.
- *
- * A checagem de números diz se a IA citou dados que existem. Esta tabela diz
- * outra coisa, mais difícil: quando ela previu um efeito ("a memória cai para
- * 48%"), o efeito aconteceu? É a medida que fecha o laço entre explicar e
- * acertar.
- */
+/** Por provedor: quando a IA previu um efeito ("a memória cai para 48%"), ele aconteceu? */
 export function ExplanationFidelity({ days = 90 }: { days?: number }) {
   const [data, setData] = useState<any>(null);
 
   useEffect(() => {
-    let vivo = true;
+    let alive = true;
     evaluationApi
       .fidelity(days)
-      .then((r) => vivo && setData(r.data))
-      .catch(() => vivo && setData(null));
+      .then((r) => alive && setData(r.data))
+      .catch(() => alive && setData(null));
     return () => {
-      vivo = false;
+      alive = false;
     };
   }, [days]);
 
-  const provedores: [string, Row][] = Object.entries(data?.by_provider ?? {});
+  const providers: [string, Row][] = Object.entries(data?.by_provider ?? {});
 
   return (
     <Section
       title="A IA acertou o que previu?"
       description="Cada “se você fechar X, cai para Y” é conferido nas leituras seguintes à ação"
     >
-      {provedores.length === 0 ? (
+      {providers.length === 0 ? (
         <EmptyState
           title="Nenhuma previsão conferida ainda"
           body="Assim que alguém executar uma ação a partir de um aviso com o cartão “e se eu fechar?”, o resultado aparece aqui."
@@ -59,9 +52,9 @@ export function ExplanationFidelity({ days = 90 }: { days?: number }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
-                {provedores.map(([nome, row]) => (
-                  <tr key={nome}>
-                    <td className="py-2 font-mono text-xs text-fg-2">{nome}</td>
+                {providers.map(([name, row]) => (
+                  <tr key={name}>
+                    <td className="py-2 font-mono text-xs text-fg-2">{name}</td>
                     <td className="tnum py-2 text-right font-mono text-fg-2">{row.previsoes}</td>
                     <td className="tnum py-2 text-right font-mono text-fg-2">{row.medidas}</td>
                     <td className="tnum py-2 text-right font-mono text-fg">

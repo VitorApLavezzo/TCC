@@ -5,16 +5,10 @@ import { StatusDot } from "./ui/Layout";
 import { LiveDot } from "./ui/SignalTrace";
 import { WSStatus } from "../hooks/useWebSocket";
 
-/** Quantos segundos sem leitura já contam como "o agente parou". */
+/** Tempo sem leitura que já conta como "o agente parou". */
 const STALE_AFTER_MS = 150000;
 
-/**
- * De quando é a leitura na tela e se ela ainda está chegando.
- *
- * Substitui o selo "AO VIVO", que acendia na primeira mensagem do WebSocket e
- * nunca apagava — um agente desligado seguia aparecendo como ao vivo. É texto
- * com um ponto, não uma pílula: é metadado, não destaque.
- */
+/** De quando é a leitura na tela e se ela ainda está chegando (agente desligado não aparece "ao vivo"). */
 export function FreshnessTag({
   lastMetricAt,
   wsStatus,
@@ -38,13 +32,12 @@ export function FreshnessTag({
     return <Tag tone="idle">Aguardando a primeira leitura</Tag>;
   }
 
-  // Horário exato no title: "há 2 min" é o que se lê, mas a hora cheia é o
-  // que se anota.
-  const exato = lastMetricAt ? new Date(lastMetricAt).toLocaleString("pt-BR") : undefined;
+  // Horário exato no title: "há 2 min" é o que se lê, a hora cheia é o que se anota.
+  const exactTime = lastMetricAt ? new Date(lastMetricAt).toLocaleString("pt-BR") : undefined;
 
   if (age < STALE_AFTER_MS) {
     return (
-      <Tag tone="ok" breathing={wsStatus === "open"} title={exato}>
+      <Tag tone="ok" breathing={wsStatus === "open"} title={exactTime}>
         {wsStatus === "open" ? (
           <>
             Ao vivo
@@ -58,18 +51,14 @@ export function FreshnessTag({
   }
 
   return (
-    <Tag tone="warn" title={exato}>
+    <Tag tone="warn" title={exactTime}>
       Sem leitura {timeAgo(lastMetricAt, now)}
       <Explain text="Este computador parou de enviar dados. Pode estar desligado, sem internet, ou o agente foi encerrado." />
     </Tag>
   );
 }
 
-/**
- * `breathing` só é usado no estado "ao vivo": é a única animação contínua do
- * produto, de baixa amplitude e ciclo longo. Serve para dizer que o sistema
- * está observando agora — em qualquer outro estado ela seria só distração.
- */
+/** `breathing` só no estado "ao vivo": única animação contínua do produto; em outro estado distrairia. */
 function Tag({
   children,
   tone,
@@ -79,7 +68,6 @@ function Tag({
   children: React.ReactNode;
   tone: "ok" | "warn" | "idle";
   breathing?: boolean;
-  /** Horário exato da leitura, para quem precisa anotar. */
   title?: string;
 }) {
   return (

@@ -26,31 +26,27 @@ const TONE: Record<string, "ok" | "warn" | "crit"> = {
 };
 
 /**
- * Risco de falha das peças.
- *
- * SMART, ciclos de bateria e erros de hardware já eram coletados, mas em
- * unidade que só técnico lê. O que aparece aqui é a decisão que a pessoa
- * precisa tomar — fazer backup hoje ou não —, com a conta aberta embaixo
- * para quem quiser conferir de onde saiu o número.
+ * Risco de falha das peças (SMART, bateria, erros de hardware) como a decisão a
+ * tomar — fazer backup hoje ou não —, com a conta aberta embaixo.
  */
 export function HardwareRisk({ machineId }: { machineId: number }) {
   const [risks, setRisks] = useState<Risk[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [erro, setErro] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    let vivo = true;
+    let alive = true;
     reliabilityApi
       .hardwareRisk(machineId)
-      .then((r) => vivo && setRisks(r.data?.risks ?? []))
-      .catch(() => vivo && setErro(true))
-      .finally(() => vivo && setLoading(false));
+      .then((r) => alive && setRisks(r.data?.risks ?? []))
+      .catch(() => alive && setError(true))
+      .finally(() => alive && setLoading(false));
     return () => {
-      vivo = false;
+      alive = false;
     };
   }, [machineId]);
 
-  if (erro) return <LoadError what="o risco de falha das peças" onRetry={() => window.location.reload()} />;
+  if (error) return <LoadError what="o risco de falha das peças" onRetry={() => window.location.reload()} />;
   if (loading) return <Skeleton className="h-24" />;
   // Sem SMART nem bateria (uma máquina virtual, por exemplo) não há o que dizer.
   if (!risks || risks.length === 0) return null;

@@ -358,9 +358,8 @@ export const SEVERITY_LABELS: Record<string, string> = {
   critical: "Crítica",
 };
 
-/** Números que descrevem como o sistema trabalha, servidos por /api/meta/policy.
- *  A tela nunca os escreve à mão: era assim que quatro telas acabaram
- *  afirmando "a cada 30 segundos" numa coleta que é adaptativa. */
+/** Números que descrevem como o sistema trabalha, servidos por /api/meta/policy;
+ *  a tela nunca os escreve à mão. */
 export interface Policy {
   aprendizado: { leituras: number; horas: number; rotulo: string };
   coleta: {

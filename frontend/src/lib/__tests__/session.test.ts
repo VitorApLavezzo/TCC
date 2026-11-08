@@ -2,11 +2,8 @@ import { describe, expect, it } from "vitest";
 import { loginErrorMessage, sessionExpired } from "../session";
 
 /**
- * Quando um 401 significa "sua sessão expirou" — e quando não significa.
- *
- * Antes qualquer 401 mandava para o login com "sessão expirada", inclusive
- * para quem nunca entrou: abrir /register ou o link do técnico direto pelo
- * endereço caía no login, porque uma chamada de fundo voltava 401.
+ * Quando um 401 significa "sua sessão expirou": quem nunca entrou (/register,
+ * link do técnico) também recebe 401 de chamadas de fundo.
  */
 describe("sessionExpired", () => {
   it("expira quando havia sessão e o servidor recusou", () => {

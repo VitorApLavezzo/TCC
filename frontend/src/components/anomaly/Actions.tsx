@@ -7,11 +7,7 @@ import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { useConfirm } from "../ui/ConfirmDialog";
 
-/**
- * Ações seguras com um clique, a partir do aviso. Cada uma vira um comando que
- * o agente executa no computador e devolve o resultado — nada acontece na
- * marra, e o painel acompanha até o agente responder.
- */
+/** Ações de um clique: cada uma vira um comando que o agente executa; o painel acompanha até a resposta. */
 export function AnomalyActions({ anomaly, machine }: { anomaly: Anomaly; machine?: Machine | null }) {
   const toast = useToast();
   const confirm = useConfirm();

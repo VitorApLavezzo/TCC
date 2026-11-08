@@ -3,11 +3,8 @@ import { bytesPerSec, decimal, formatUptime, gigabytes, pluralize, processName, 
 import { health, worstLevel } from "../health";
 
 /**
- * As funções que decidem o que a pessoa lê na tela.
- *
- * São poucas e puras, e é justamente por isso que erram em silêncio: um
- * plural errado ou um "?" mostrado como nome de programa não quebra build
- * nenhum — só aparece na frente da banca.
+ * Funções puras que decidem o que a pessoa lê: um plural errado ou um "?"
+ * mostrado como nome de programa não quebra build nenhum.
  */
 describe("format", () => {
   it("mostra tempo ligado em unidade útil", () => {
@@ -18,12 +15,12 @@ describe("format", () => {
   });
 
   it("encurta o tempo decorrido sem quebrar a linha", () => {
-    const agora = new Date("2026-01-10T12:00:00Z").getTime();
-    expect(timeAgo("2026-01-10T11:59:57Z", agora)).toBe("agora");
-    expect(timeAgo("2026-01-10T11:59:30Z", agora)).toBe("há 30s");
-    expect(timeAgo("2026-01-10T11:30:00Z", agora)).toBe("há 30min");
-    expect(timeAgo("2026-01-10T09:00:00Z", agora)).toBe("há 3h");
-    expect(timeAgo(null, agora)).toBeNull();
+    const now = new Date("2026-01-10T12:00:00Z").getTime();
+    expect(timeAgo("2026-01-10T11:59:57Z", now)).toBe("agora");
+    expect(timeAgo("2026-01-10T11:59:30Z", now)).toBe("há 30s");
+    expect(timeAgo("2026-01-10T11:30:00Z", now)).toBe("há 30min");
+    expect(timeAgo("2026-01-10T09:00:00Z", now)).toBe("há 3h");
+    expect(timeAgo(null, now)).toBeNull();
   });
 
   it("concorda o plural", () => {
@@ -58,10 +55,7 @@ describe("health", () => {
   });
 });
 
-/**
- * Número em português usa vírgula. O painel misturava "12.4 GB" e "R$ 12.34"
- * com "96,5%" — o ponto decimal é convenção do inglês.
- */
+/** Número em português usa vírgula decimal; o ponto é convenção do inglês. */
 describe("decimal", () => {
   it("usa vírgula e a quantidade de casas pedida", () => {
     expect(decimal(12.345, 1)).toBe("12,3");

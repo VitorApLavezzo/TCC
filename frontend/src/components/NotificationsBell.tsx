@@ -10,17 +10,11 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 /**
- * O canal "painel" das notificações.
- *
- * O painel recebe TODAS as notificações, inclusive as que a política de
- * excesso não mandou por Telegram ou e-mail — e diz por que cada uma não saiu
- * ("abaixo da severidade mínima", "passou sozinho", "horário silencioso").
- * Sem isso, a pessoa não teria como saber que existe uma decisão sendo tomada
- * em nome dela.
+ * Canal "painel": recebe TODAS as notificações, inclusive as que a política de excesso
+ * não enviou por Telegram ou e-mail, e diz por que cada uma não saiu.
  */
 export function NotificationsBell({ placement = "up" }: { placement?: "up" | "down" }) {
-  // "up" é a lateral do desktop, onde o sino fica no rodapé; "down" é o
-  // cabeçalho do celular, onde abrir para cima jogava o painel fora da tela.
+  // "up": rodapé da lateral do desktop; "down": cabeçalho do celular, onde abrir para cima sairia da tela.
   const down = placement === "down";
   const navigate = useNavigate();
   const [items, setItems] = useState<Notification[]>([]);

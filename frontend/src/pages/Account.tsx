@@ -38,12 +38,7 @@ const SEVERITIES = [
   { value: "critical", label: "Só crítica" },
 ];
 
-/*
- * "Avisos" e "Avançado" eram também nomes do menu lateral, com outro
- * sentido (a lista de anomalias; as telas do TCC). Aqui são as notificações
- * e a automação, e passam a se chamar assim.
- */
-const ABAS = [
+const TABS = [
   { id: "perfil", label: "Perfil" },
   { id: "notificacoes", label: "Notificações" },
   { id: "privacidade", label: "Privacidade" },
@@ -52,7 +47,7 @@ const ABAS = [
 ];
 
 /** Endereços com os nomes antigos das abas continuam abrindo a certa. */
-const ABA_ANTIGA: Record<string, string> = { avisos: "notificacoes", avancado: "automacao" };
+const LEGACY_TABS: Record<string, string> = { avisos: "notificacoes", avancado: "automacao" };
 
 export function Account() {
   const { user, logout } = useAuth();
@@ -76,7 +71,7 @@ export function Account() {
         setChannels(r.data.channels_available);
         setTelegramLinked(r.data.telegram_linked);
       })
-      // Sem isto as abas que dependem das preferências ficavam em branco.
+      // Sem isto as abas que dependem das preferências ficam em branco.
       .catch(() => setLoadFailed(true))
       .finally(() => setLoading(false));
   }, []);
@@ -113,14 +108,14 @@ export function Account() {
   };
 
   const [params, setParams] = useSearchParams();
-  const pedida = params.get("aba") || "perfil";
-  const aba = ABA_ANTIGA[pedida] ?? pedida;
+  const requested = params.get("aba") || "perfil";
+  const tab = LEGACY_TABS[requested] ?? requested;
 
-  const guarda = (conteudo: ReactElement) =>
+  const guarded = (content: ReactElement) =>
     loading ? (
       <Skeleton className="h-40 w-full rounded-panel" />
     ) : prefs ? (
-      conteudo
+      content
     ) : loadFailed ? (
       <LoadError what="suas preferências" onRetry={load} />
     ) : null;
@@ -129,30 +124,25 @@ export function Account() {
     <div className="max-w-2xl space-y-8">
       <PageHeader title="Sua conta" description="Tudo o que é seu: identificação, notificações, privacidade e o que o sistema pode fazer sozinho." />
 
-      {/*
-        Abas, e não uma rolagem só: esta página juntou onze seções, entre elas
-        automação e auditoria, que são operação e não preferência. Numa lista
-        contínua, encontrar "tarifa de energia" virava caça ao tesouro.
-      */}
       <div role="tablist" aria-label="Seções da conta" className="flex flex-wrap gap-1 border-b border-hairline">
-        {ABAS.map((a) => (
+        {TABS.map((a) => (
           <button
             key={a.id}
             type="button"
             role="tab"
-            aria-selected={aba === a.id}
+            aria-selected={tab === a.id}
             onClick={() => setParams({ aba: a.id }, { replace: true })}
             className={`relative px-3 py-2 text-sm transition-colors ${
-              aba === a.id ? "font-medium text-fg" : "text-fg-3 hover:text-fg-2"
+              tab === a.id ? "font-medium text-fg" : "text-fg-3 hover:text-fg-2"
             }`}
           >
             {a.label}
-            {aba === a.id && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent" />}
+            {tab === a.id && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent" />}
           </button>
         ))}
       </div>
 
-      {aba === "perfil" && (
+      {tab === "perfil" && (
         <div className="space-y-8">
       <Section title="Identificação">
         <Panel className="px-4 py-2">
@@ -163,8 +153,8 @@ export function Account() {
           </DataList>
         </Panel>
       </Section>
-          <Aparencia theme={theme} onToggleTheme={toggle} />
-          <FerramentasTcc />
+          <Appearance theme={theme} onToggleTheme={toggle} />
+          <ResearchToolsSection />
 
           <Section title="Sessão">
             <Button variant="danger" onClick={handleLogout}>Sair da conta</Button>
@@ -172,9 +162,9 @@ export function Account() {
         </div>
       )}
 
-      {aba === "notificacoes" && (
+      {tab === "notificacoes" && (
         <div className="space-y-8">
-          {guarda(
+          {guarded(
             <div className="space-y-8">
           <Section title="Como as explicações são escritas" description="O mesmo aviso, no nível que você preferir">
             <div className="inline-flex overflow-hidden rounded-control border border-edge">
@@ -249,8 +239,7 @@ export function Account() {
                 </div>
               )}
 
-              {/* O canal de e-mail vem desligado nas preferências e não tinha
-                  controle nesta tela: com o SMTP certo, nenhum e-mail saía. */}
+              {/* O canal de e-mail vem desligado por padrão nas preferências. */}
               <div className="space-y-3 border-t border-hairline pt-4">
                 {channels.email ? (
                   <>
@@ -297,9 +286,9 @@ export function Account() {
         </div>
       )}
 
-      {aba === "privacidade" && (
+      {tab === "privacidade" && (
         <div className="space-y-8">
-          {guarda(
+          {guarded(
             <div className="space-y-8">
           <Section title="Privacidade">
             <Toggle
@@ -326,14 +315,14 @@ export function Account() {
         </div>
       )}
 
-      {aba === "automacao" && (
+      {tab === "automacao" && (
         <div className="space-y-8">
           <Playbooks />
           <AuditLedger />
         </div>
       )}
 
-      {aba === "ajuda" && (
+      {tab === "ajuda" && (
         <div className="space-y-8">
       <Section title="O que cada medida significa">
         <DataList className="divide-y divide-hairline">
@@ -382,16 +371,9 @@ function Toggle({ label, hint, checked, onChange }: { label: string; hint?: stri
   );
 }
 
-/**
- * Como o produto se apresenta: tema, tamanho da letra, densidade e idioma.
- *
- * As três primeiras existem porque o público declarado é gente que não é da
- * área — e a interface é compacta de propósito para quem acompanha uma dúzia
- * de máquinas. Quem tem uma e enxerga mal de perto precisa do contrário.
- */
 /** Liga as telas do TCC no menu. Escondidas por padrão: não são do dia a dia. */
-function FerramentasTcc() {
-  const ligado = useResearchTools();
+function ResearchToolsSection() {
+  const enabled = useResearchTools();
   return (
     <Section title="Ferramentas do TCC" description="Pesquisa, Demonstração e Estudo de compreensão">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -399,26 +381,26 @@ function FerramentasTcc() {
           Telas usadas no trabalho de conclusão de curso, não no acompanhamento do dia a dia. Mesmo escondidas do
           menu, a busca (Ctrl K) chega nelas.
         </p>
-        <Button variant="secondary" aria-pressed={ligado} onClick={() => setResearchTools(!ligado)}>
-          {ligado ? "Esconder do menu" : "Mostrar no menu"}
+        <Button variant="secondary" aria-pressed={enabled} onClick={() => setResearchTools(!enabled)}>
+          {enabled ? "Esconder do menu" : "Mostrar no menu"}
         </Button>
       </div>
     </Section>
   );
 }
 
-function Aparencia({ theme, onToggleTheme }: { theme: string; onToggleTheme: () => void }) {
+function Appearance({ theme, onToggleTheme }: { theme: string; onToggleTheme: () => void }) {
   const [display, setDisplay] = useState(getDisplay());
   const locale = useLocale();
 
-  const mudar = (mudanca: Parameters<typeof applyDisplay>[0]) => {
-    applyDisplay(mudanca);
+  const change = (patch: Parameters<typeof applyDisplay>[0]) => {
+    applyDisplay(patch);
     setDisplay(getDisplay());
   };
 
-  const grupo = "inline-flex overflow-hidden rounded-control border border-edge";
-  const botao = (ativo: boolean) =>
-    `px-3 py-1.5 text-sm transition-colors ${ativo ? "bg-raised font-medium text-fg" : "text-fg-3 hover:bg-raised"}`;
+  const groupClass = "inline-flex overflow-hidden rounded-control border border-edge";
+  const buttonClass = (active: boolean) =>
+    `px-3 py-1.5 text-sm transition-colors ${active ? "bg-raised font-medium text-fg" : "text-fg-3 hover:bg-raised"}`;
 
   return (
     <Section title="Aparência e leitura" description="Vale para este aparelho, e fica guardado nele">
@@ -434,16 +416,16 @@ function Aparencia({ theme, onToggleTheme }: { theme: string; onToggleTheme: () 
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-sm text-fg-2">Tamanho da letra</span>
-          <div className={grupo}>
-            {([["normal", "Normal"], ["grande", "Grande"], ["maior", "Maior"]] as const).map(([valor, rotulo]) => (
+          <div className={groupClass}>
+            {([["normal", "Normal"], ["grande", "Grande"], ["maior", "Maior"]] as const).map(([value, label]) => (
               <button
-                key={valor}
+                key={value}
                 type="button"
-                onClick={() => mudar({ scale: valor })}
-                aria-pressed={display.scale === valor}
-                className={botao(display.scale === valor)}
+                onClick={() => change({ scale: value })}
+                aria-pressed={display.scale === value}
+                className={buttonClass(display.scale === value)}
               >
-                {rotulo}
+                {label}
               </button>
             ))}
           </div>
@@ -451,16 +433,16 @@ function Aparencia({ theme, onToggleTheme }: { theme: string; onToggleTheme: () 
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-sm text-fg-2">Espaçamento</span>
-          <div className={grupo}>
-            {([["compacta", "Compacto"], ["confortavel", "Confortável"]] as const).map(([valor, rotulo]) => (
+          <div className={groupClass}>
+            {([["compacta", "Compacto"], ["confortavel", "Confortável"]] as const).map(([value, label]) => (
               <button
-                key={valor}
+                key={value}
                 type="button"
-                onClick={() => mudar({ density: valor })}
-                aria-pressed={display.density === valor}
-                className={botao(display.density === valor)}
+                onClick={() => change({ density: value })}
+                aria-pressed={display.density === value}
+                className={buttonClass(display.density === value)}
               >
-                {rotulo}
+                {label}
               </button>
             ))}
           </div>
@@ -468,16 +450,16 @@ function Aparencia({ theme, onToggleTheme }: { theme: string; onToggleTheme: () 
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="text-sm text-fg-2">Idioma da interface</span>
-          <div className={grupo}>
-            {([["pt-BR", "Português"], ["en", "English (parcial)"]] as const).map(([valor, rotulo]) => (
+          <div className={groupClass}>
+            {([["pt-BR", "Português"], ["en", "English (parcial)"]] as const).map(([value, label]) => (
               <button
-                key={valor}
+                key={value}
                 type="button"
-                onClick={() => setLocale(valor)}
-                aria-pressed={locale === valor}
-                className={botao(locale === valor)}
+                onClick={() => setLocale(value)}
+                aria-pressed={locale === value}
+                className={buttonClass(locale === value)}
               >
-                {rotulo}
+                {label}
               </button>
             ))}
           </div>

@@ -17,14 +17,8 @@ import { useT } from "../lib/i18n";
 import { useResearchTools } from "../lib/researchTools";
 import { pageTitle } from "../lib/title";
 
-/**
- * Navegação principal: quatro destinos, os que se usa todo dia.
- *
- * "Pesquisa" ocupava o quinto lugar — e ela é ferramenta de quem escreve o
- * trabalho, não de quem monitora um computador. No celular, cinco rótulos
- * espremiam a barra inferior a ponto de truncar. As telas de pesquisa
- * continuam a um clique, agrupadas em "Avançado" e na busca do Ctrl+K.
- */
+// Só os quatro destinos do dia a dia: cinco rótulos truncavam a barra do celular.
+// As telas de pesquisa ficam em "Avançado" e na busca do Ctrl+K.
 const NAV = [
   { to: "/", key: "nav.dashboard", label: "Painel", icon: LayoutGrid },
   { to: "/machines", key: "nav.machines", label: "Computadores", icon: Monitor },
@@ -32,7 +26,7 @@ const NAV = [
   { to: "/pergunte", key: "nav.ask", label: "Pergunte", icon: MessageSquare },
 ];
 
-const AVANCADO = [
+const ADVANCED = [
   { to: "/pesquisa", key: "nav.research", label: "Pesquisa" },
   { to: "/demonstracao", key: "nav.demo", label: "Demonstração" },
   { to: "/estudo", key: "nav.study", label: "Estudo" },
@@ -51,14 +45,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [palette, setPalette] = useState(false);
   const [shortcuts, setShortcuts] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
-  const anterior = useRef(0);
-  const [anuncio, setAnuncio] = useState("");
+  const previousPending = useRef(0);
+  const [announcement, setAnnouncement] = useState("");
 
   const researchTools = useResearchTools();
 
   // Modo apresentação: sem menu, sem e-mail na tela, tipografia maior. Para
   // projetar na banca sem mostrar a moldura do produto.
-  const apresentacao = params.get("apresentacao") === "1";
+  const presentation = params.get("apresentacao") === "1";
 
   const fetchPending = useCallback(async () => {
     const res = await anomaliesApi.list({ hours: 168, unresolved_only: true });
@@ -66,13 +60,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
   usePolling(fetchPending, 45000);
 
-  // Aviso novo chegando enquanto a pessoa olha outra tela não deixava rastro
-  // para quem usa leitor de tela. A região viva anuncia a mudança, e só ela.
+  // Região viva: anuncia ao leitor de tela aviso novo chegando enquanto se olha outra tela.
   useEffect(() => {
-    if (pending > anterior.current && anterior.current !== 0) {
-      setAnuncio(`${pending} ${pending === 1 ? "aviso em aberto" : "avisos em aberto"}`);
+    if (pending > previousPending.current && previousPending.current !== 0) {
+      setAnnouncement(`${pending} ${pending === 1 ? "aviso em aberto" : "avisos em aberto"}`);
     }
-    anterior.current = pending;
+    previousPending.current = pending;
   }, [pending]);
 
   // Numa aplicação de página única, trocar de rota não move o foco: quem
@@ -88,36 +81,35 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [location.pathname]);
 
   useEffect(() => {
-    let ultimaTecla = "";
+    let lastKey = "";
     // No modo apresentação (banca, participante do estudo) não há atalhos:
     // um "/" digitado sem querer abriria a busca no meio da tela.
-    if (apresentacao) return;
+    if (presentation) return;
     const onKey = (e: KeyboardEvent) => {
-      const alvo = e.target as HTMLElement;
-      const digitando = /^(INPUT|TEXTAREA|SELECT)$/.test(alvo?.tagName || "") || alvo?.isContentEditable;
+      const target = e.target as HTMLElement;
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || "") || target?.isContentEditable;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPalette(true);
         return;
       }
-      if (digitando) return;
+      if (typing) return;
       if (e.key === "/") {
         e.preventDefault();
         setPalette(true);
       } else if (e.key === "?") {
         setShortcuts(true);
-      } else if (ultimaTecla === "g") {
-        const destino = { p: "/", c: "/machines", a: "/anomalies", q: "/pergunte" }[e.key];
-        if (destino) navigate(destino);
+      } else if (lastKey === "g") {
+        const destination = { p: "/", c: "/machines", a: "/anomalies", q: "/pergunte" }[e.key];
+        if (destination) navigate(destination);
       }
-      ultimaTecla = e.key;
+      lastKey = e.key;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate, apresentacao]);
+  }, [navigate, presentation]);
 
-  // Mesma confirmação da página da conta: as duas portas de saída agiam
-  // diferente, e a frase tranquiliza quem acha que sair desliga o monitoramento.
+  // Mesma confirmação da página da conta; a frase tranquiliza quem acha que sair desliga o monitoramento.
   const handleLogout = async () => {
     const ok = await confirm({
       title: "Sair da conta?",
@@ -130,17 +122,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   const isActive = (to: string) => (to === "/" ? location.pathname === "/" : location.pathname.startsWith(to));
-  // Chegando numa delas pelo Ctrl+K, o grupo aparece para o menu mostrar onde
-  // a pessoa está.
-  const mostrarPesquisa = researchTools || AVANCADO.some((a) => isActive(a.to));
+  // Chegando numa delas pelo Ctrl+K, o grupo aparece para o menu mostrar onde a pessoa está.
+  const showResearch = researchTools || ADVANCED.some((a) => isActive(a.to));
 
-  // Uma árvore só para os dois modos, escondendo a moldura no modo
-  // apresentação. Antes ele devolvia outra estrutura, e o React desmontava a
-  // página inteira na troca: o Estudo perdia a sessão ao entrar no modo e
-  // voltava para a tela inicial, criando sessões vazias a cada tentativa.
+  // Uma árvore só para os dois modos: outra estrutura faria o React desmontar a
+  // página na troca, e o Estudo perderia a sessão.
   return (
-    <div className="min-h-screen bg-canvas" data-present={apresentacao ? "1" : undefined}>
-      {!apresentacao && (
+    <div className="min-h-screen bg-canvas" data-present={presentation ? "1" : undefined}>
+      {!presentation && (
         <a
           href="#conteudo"
           className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-control focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-canvas"
@@ -149,10 +138,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         </a>
       )}
       <p aria-live="polite" className="sr-only">
-        {anuncio}
+        {announcement}
       </p>
 
-      {!apresentacao && (
+      {!presentation && (
         <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-hairline bg-surface px-4 lg:hidden">
           <SignalMark />
           <span className="font-display text-sm font-semibold tracking-tight text-fg">AnomalyDetect</span>
@@ -190,14 +179,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
       )}
 
-      {!apresentacao && reachable === false && (
+      {!presentation && reachable === false && (
         <p className="flex items-center gap-2 border-b border-hairline bg-warn/10 px-4 py-1.5 text-xs text-warn lg:hidden">
           <StatusDot tone="warn" />
           {t("shell.offline", "Servidor fora de contato")}
         </p>
       )}
 
-      {!apresentacao && (
+      {!presentation && (
         <aside
           className="fixed inset-y-0 left-0 z-20 hidden w-[232px] flex-col gap-1 border-r border-hairline bg-surface p-3 lg:flex"
           aria-label="Navegação"
@@ -245,9 +234,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               );
             })}
 
-            {mostrarPesquisa && <p className="channel-label mt-5 px-2.5">{t("nav.advanced", "Ferramentas do TCC")}</p>}
-            {mostrarPesquisa &&
-              AVANCADO.map(({ to, key, label }) => (
+            {showResearch && <p className="channel-label mt-5 px-2.5">{t("nav.advanced", "Ferramentas do TCC")}</p>}
+            {showResearch &&
+              ADVANCED.map(({ to, key, label }) => (
                 <Link
                   key={to}
                   to={to}
@@ -315,11 +304,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         ref={mainRef}
         id="conteudo"
         tabIndex={-1}
-        className={apresentacao ? "outline-none" : "pb-20 outline-none lg:pb-0 lg:pl-[232px]"}
+        className={presentation ? "outline-none" : "pb-20 outline-none lg:pb-0 lg:pl-[232px]"}
       >
         <div
           className={
-            apresentacao
+            presentation
               ? "mx-auto w-full max-w-5xl px-6 py-10 text-[1.08rem]"
               : "mx-auto w-full px-4 py-7 sm:px-8 min-[1500px]:px-10 min-[1500px]:py-8"
           }
@@ -328,7 +317,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </main>
 
-      {!apresentacao && (
+      {!presentation && (
         <nav
           aria-label={t("nav.sections", "Seções")}
           className="fixed inset-x-0 bottom-0 z-30 flex items-stretch justify-around border-t border-hairline bg-surface pb-[env(safe-area-inset-bottom)] lg:hidden"

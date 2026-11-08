@@ -22,12 +22,7 @@ interface BulkKey {
   expires_at: string;
 }
 
-/**
- * Instalação em massa: recolhido e abaixo da lista de computadores.
- *
- * Atende à TI de empresa. Antes aparecia acima da lista, o que fazia o usuário
- * doméstico encarar um bloco corporativo antes de ver a própria máquina.
- */
+/** Instalação em massa para TI de empresa: recolhida e abaixo da lista, para não atrapalhar o usuário doméstico. */
 export function BulkEnrollPanel() {
   const policy = usePolicy();
   const toast = useToast();

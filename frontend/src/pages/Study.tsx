@@ -19,114 +19,108 @@ type Item = {
   explanation?: { summary: string; detailed: string; causes: string[]; recommendations: string[] };
 };
 
-const ESCALA = [1, 2, 3, 4, 5];
+const SCALE = [1, 2, 3, 4, 5];
 
 /**
- * Aplicação do estudo de compreensão.
- *
- * Esta tela é usada com o participante na frente, e por isso ela é a única do
- * sistema que esconde deliberadamente informação: nada de menu, de outras
- * páginas ou de "acertou/errou" entre os itens. Saber o resultado no meio
- * mudaria o comportamento nos itens seguintes e contaminaria a medida.
+ * Aplicação do estudo de compreensão, com o participante na frente: nada de
+ * menu nem de "acertou/errou" entre os itens, o que contaminaria a medida.
  */
 export function Study() {
   const toast = useToast();
   const navigate = useNavigate();
-  const [fase, setFase] = useState<"inicio" | "item" | "sus" | "fim">("inicio");
+  const [phase, setPhase] = useState<"inicio" | "item" | "sus" | "fim">("inicio");
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [item, setItem] = useState<Item | null>(null);
-  const [carregando, setCarregando] = useState(false);
-  const [susItens, setSusItens] = useState<string[]>([]);
-  const [susRespostas, setSusRespostas] = useState<number[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [susItems, setSusItems] = useState<string[]>([]);
+  const [susAnswers, setSusAnswers] = useState<number[]>([]);
   const [form, setForm] = useState({ participant_code: "", expertise: "leigo", items: 6 });
   const [, setParams] = useSearchParams();
 
-  // Com o participante respondendo, a moldura some (o modo apresentação do
-  // AppShell): o comentário acima prometia "nada de menu", e a tela mostrava
-  // menu, sino e Ctrl+K.
+  // Com o participante respondendo, a moldura some (modo apresentação do AppShell).
   useEffect(() => {
-    const emSessao = fase === "item" || fase === "sus";
+    const inSession = phase === "item" || phase === "sus";
     setParams(
-      (atual) => {
-        const prox = new URLSearchParams(atual);
-        if (emSessao) prox.set("apresentacao", "1");
-        else prox.delete("apresentacao");
-        return prox;
+      (current) => {
+        const next = new URLSearchParams(current);
+        if (inSession) next.set("apresentacao", "1");
+        else next.delete("apresentacao");
+        return next;
       },
       { replace: true }
     );
-  }, [fase, setParams]);
-  const [resposta, setResposta] = useState({ cause: "", action: "", confidence: 0, helpful: 0 });
+  }, [phase, setParams]);
+  const [answer, setAnswer] = useState({ cause: "", action: "", confidence: 0, helpful: 0 });
 
   useEffect(() => {
     studyApi
       .config()
       .then((r) => {
-        setSusItens(r.data.sus_items);
-        setSusRespostas(new Array(r.data.sus_items.length).fill(3));
+        setSusItems(r.data.sus_items);
+        setSusAnswers(new Array(r.data.sus_items.length).fill(3));
       })
-      .catch(() => setSusItens([]));
+      .catch(() => setSusItems([]));
   }, []);
 
-  const proximo = useCallback(async (id: number) => {
-    setCarregando(true);
+  const loadNext = useCallback(async (id: number) => {
+    setLoading(true);
     try {
       const r = await studyApi.next(id);
       if (r.data?.done) {
-        setFase("sus");
+        setPhase("sus");
         setItem(null);
       } else {
         setItem(r.data);
-        setResposta({ cause: "", action: "", confidence: 0, helpful: 0 });
-        setFase("item");
+        setAnswer({ cause: "", action: "", confidence: 0, helpful: 0 });
+        setPhase("item");
       }
     } catch (err) {
       toast.error(errorMessage(err, "Não foi possível carregar o próximo aviso."));
     } finally {
-      setCarregando(false);
+      setLoading(false);
     }
   }, [toast]);
 
-  async function comecar() {
+  async function start() {
     try {
       const r = await studyApi.create(form);
       setSessionId(r.data.session_id);
-      proximo(r.data.session_id);
+      loadNext(r.data.session_id);
     } catch (e) {
       toast.error(errorMessage(e));
     }
   }
 
-  async function responder() {
-    if (!sessionId || !item || !resposta.cause) {
+  async function submitAnswer() {
+    if (!sessionId || !item || !answer.cause) {
       toast.error("Escolha o que você acha que está acontecendo.");
       return;
     }
     try {
       await studyApi.answer(sessionId, {
         item_index: item.item_index,
-        chosen_cause: resposta.cause,
-        chosen_action: resposta.action || null,
-        confidence: resposta.confidence || null,
-        helpful: resposta.helpful || null,
+        chosen_cause: answer.cause,
+        chosen_action: answer.action || null,
+        confidence: answer.confidence || null,
+        helpful: answer.helpful || null,
       });
-      proximo(sessionId);
+      loadNext(sessionId);
     } catch (e) {
       toast.error(errorMessage(e));
     }
   }
 
-  async function encerrar() {
+  async function finishSession() {
     if (!sessionId) return;
     try {
-      await studyApi.finish(sessionId, { sus_answers: susRespostas });
-      setFase("fim");
+      await studyApi.finish(sessionId, { sus_answers: susAnswers });
+      setPhase("fim");
     } catch (e) {
       toast.error(errorMessage(e));
     }
   }
 
-  if (fase === "inicio") {
+  if (phase === "inicio") {
     return (
       <div className="space-y-8">
         <PageHeader
@@ -156,7 +150,7 @@ export function Study() {
                 <option value="tecnico">Técnico — trabalho com isso</option>
               </select>
             </label>
-            <Button className="mt-4" variant="primary" onClick={comecar}>
+            <Button className="mt-4" variant="primary" onClick={start}>
               Começar
             </Button>
             <p className="mt-3 max-w-prose text-micro leading-relaxed text-fg-3">
@@ -169,8 +163,8 @@ export function Study() {
     );
   }
 
-  if (fase === "item") {
-    if (carregando || !item) return <Skeleton className="h-64" />;
+  if (phase === "item") {
+    if (loading || !item) return <Skeleton className="h-64" />;
     return (
       <div className="mx-auto max-w-2xl space-y-6">
         <PageHeader
@@ -227,8 +221,8 @@ export function Study() {
                 <input
                   type="radio"
                   name="causa"
-                  checked={resposta.cause === o.value}
-                  onChange={() => setResposta({ ...resposta, cause: o.value })}
+                  checked={answer.cause === o.value}
+                  onChange={() => setAnswer({ ...answer, cause: o.value })}
                   className="h-4 w-4 accent-accent"
                 />
                 {o.label}
@@ -240,8 +234,8 @@ export function Study() {
         <label className="block text-sm text-fg-2">
           O que você faria?
           <select
-            value={resposta.action}
-            onChange={(e) => setResposta({ ...resposta, action: e.target.value })}
+            value={answer.action}
+            onChange={(e) => setAnswer({ ...answer, action: e.target.value })}
             className="mt-1 h-9 w-full rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
           >
             <option value="">Escolha uma ação</option>
@@ -256,14 +250,14 @@ export function Study() {
         <fieldset>
           <legend className="text-sm text-fg-2">Quanta confiança você tem na sua resposta? (1 pouca, 5 muita)</legend>
           <div className="mt-2 flex gap-2">
-            {ESCALA.map((n) => (
+            {SCALE.map((n) => (
               <button
                 key={n}
                 type="button"
-                onClick={() => setResposta({ ...resposta, confidence: n })}
-                aria-pressed={resposta.confidence === n}
+                onClick={() => setAnswer({ ...answer, confidence: n })}
+                aria-pressed={answer.confidence === n}
                 className={`h-9 w-9 rounded-control border text-sm ${
-                  resposta.confidence === n ? "border-accent bg-accent/10 text-fg" : "border-edge text-fg-2"
+                  answer.confidence === n ? "border-accent bg-accent/10 text-fg" : "border-edge text-fg-2"
                 }`}
               >
                 {n}
@@ -272,14 +266,14 @@ export function Study() {
           </div>
         </fieldset>
 
-        <Button variant="primary" onClick={responder}>
+        <Button variant="primary" onClick={submitAnswer}>
           Responder e ver a próxima
         </Button>
       </div>
     );
   }
 
-  if (fase === "sus") {
+  if (phase === "sus") {
     return (
       <div className="mx-auto max-w-2xl space-y-6">
         <PageHeader
@@ -287,20 +281,20 @@ export function Study() {
           description="Diga o quanto concorda com cada frase: 1 discordo totalmente, 5 concordo totalmente."
         />
         <ol className="space-y-4">
-          {susItens.map((frase, i) => (
+          {susItems.map((sentence, i) => (
             <li key={i}>
-              <p className="text-sm text-fg-2">{frase}</p>
+              <p className="text-sm text-fg-2">{sentence}</p>
               <div className="mt-2 flex gap-2">
-                {ESCALA.map((n) => (
+                {SCALE.map((n) => (
                   <button
                     key={n}
                     type="button"
-                    aria-pressed={susRespostas[i] === n}
+                    aria-pressed={susAnswers[i] === n}
                     onClick={() =>
-                      setSusRespostas(susRespostas.map((v, idx) => (idx === i ? n : v)))
+                      setSusAnswers(susAnswers.map((v, idx) => (idx === i ? n : v)))
                     }
                     className={`h-9 w-9 rounded-control border text-sm ${
-                      susRespostas[i] === n ? "border-accent bg-accent/10 text-fg" : "border-edge text-fg-2"
+                      susAnswers[i] === n ? "border-accent bg-accent/10 text-fg" : "border-edge text-fg-2"
                     }`}
                   >
                     {n}
@@ -310,7 +304,7 @@ export function Study() {
             </li>
           ))}
         </ol>
-        <Button variant="primary" onClick={encerrar}>
+        <Button variant="primary" onClick={finishSession}>
           Encerrar a sessão
         </Button>
       </div>
@@ -325,7 +319,7 @@ export function Study() {
         teste estatístico — aparece na página de pesquisa.
       </p>
       <div className="flex justify-center gap-2">
-        <Button variant="primary" onClick={() => { setFase("inicio"); setSessionId(null); }}>
+        <Button variant="primary" onClick={() => { setPhase("inicio"); setSessionId(null); }}>
           Próximo participante
         </Button>
         <Button variant="secondary" onClick={() => navigate("/pesquisa")}>

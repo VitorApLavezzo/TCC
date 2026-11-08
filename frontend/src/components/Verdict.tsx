@@ -11,13 +11,8 @@ import { Explain } from "./ui/Explain";
 import { StatusDot } from "./ui/Layout";
 
 /**
- * Um dos dois critérios do aprendizado, cumprido ou pendente.
- *
- * Mesmo vocabulário do passo a passo das anomalias — marcador redondo com
- * borda, contorno em `ok` quando cumprido — para a pessoa reconhecer "isto
- * está feito" no mesmo gesto visual em qualquer tela do painel. Sem risco
- * sobre o texto: estes não são itens que a pessoa faz e risca, são condições
- * que o sistema alcança.
+ * Critério do aprendizado, no mesmo marcador do passo a passo das anomalias. Sem risco
+ * sobre o texto: são condições que o sistema alcança, não tarefas da pessoa.
  */
 function LearningCriterion({
   done,
@@ -26,7 +21,6 @@ function LearningCriterion({
 }: {
   done: boolean;
   label: string;
-  /** Quanto falta, quando ainda falta. */
   remaining?: string | null;
 }) {
   return (
@@ -43,8 +37,7 @@ function LearningCriterion({
       <span className="min-w-0 leading-snug">
         <span className={done ? "text-fg-3" : "text-fg-2"}>{label}</span>
         <span className="sr-only">{done ? " (cumprido)" : ""}</span>
-        {/* Em linha própria: lado a lado, "faltam cerca de 6h" quebrava no
-            meio e disputava atenção com o nome do critério. */}
+        {/* Em linha própria: lado a lado, "faltam cerca de 6h" quebrava no meio. */}
         {!done && remaining && (
           <span className="mt-0.5 block text-micro text-fg-3">{remaining}</span>
         )}
@@ -53,7 +46,7 @@ function LearningCriterion({
   );
 }
 
-/** As três zonas do estado, na ordem em que a máquina caminha entre elas. */
+/** Na ordem em que a máquina caminha entre elas. */
 const ZONES: { level: Exclude<Level, "unknown">; label: string }[] = [
   { level: "ok", label: "normal" },
   { level: "warn", label: "atenção" },
@@ -87,17 +80,8 @@ const CHIP_LABEL: Record<Level, string> = {
 };
 
 /**
- * A conclusão sobre a máquina, antes de qualquer número.
- *
- * É o único bloco elevado da tela: um chip de estado, a manchete grande e a
- * frase do motivo respondem "o que está acontecendo"; a escala de três zonas
- * e o progresso do aprendizado, à direita, respondem "quão longe do normal
- * isso está" e "quanto o sistema já conhece desta máquina". As zonas são as
- * mesmas três que classificam toda medida do painel — nenhuma precisão
- * inventada.
- *
- * Quando está tudo normal o chip e a manchete não têm cor forte nenhuma — é o
- * que faz um problema saltar sozinho quando aparece.
+ * A conclusão sobre a máquina, antes de qualquer número. Tudo normal fica sem cor forte,
+ * para que um problema salte sozinho quando aparece.
  */
 export function Verdict({
   level,
@@ -110,14 +94,13 @@ export function Verdict({
 }: {
   /** Pior faixa entre os sinais vitais no momento. */
   level: Level;
-  /** Anomalias não resolvidas desta máquina, mais recente primeiro. */
+  /** Mais recente primeiro. */
   openAnomalies: Anomaly[];
   learning?: LearningStatus | null;
   /** Qual medida está puxando o estado — o "por quê" da frase. */
   driver?: { label: string; value: string } | null;
   onOpenAnomaly: (id: number) => void;
   onSeeAll: () => void;
-  /** Ações da máquina: diagnóstico e ver análises. */
   actions?: ReactNode;
 }) {
   const top = openAnomalies[0];
@@ -169,12 +152,7 @@ export function Verdict({
             {CHIP_LABEL[tone]}
           </span>
 
-          {/*
-            `key` na manchete: quando o veredito muda — de "Tudo normal" para
-            "Precisa da sua atenção agora" — o React troca o elemento e a
-            animação roda. É a informação mais importante da tela, e antes ela
-            mudava em silêncio, como se sempre tivesse estado ali.
-          */}
+          {/* `key` na manchete: quando o veredito muda, o React troca o elemento e a animação roda. */}
           <h2
             key={headline}
             className="animate-rise mt-3 font-display text-[1.9rem] font-bold leading-[1.1] tracking-tight text-fg sm:text-[2.1rem]"
@@ -194,9 +172,7 @@ export function Verdict({
             )}
           </p>
 
-          {/* Com aviso em aberto, a ação principal é abrir o aviso; o resto
-              (diagnóstico) vem como secundário. Antes eram quatro ações do
-              mesmo peso disputando o olhar. */}
+          {/* Com aviso em aberto, a ação principal é abrir o aviso; o resto é secundário. */}
           {(top || actions) && (
             <div className="mt-[18px] flex flex-wrap items-center gap-2.5">
               {top && (
@@ -214,11 +190,6 @@ export function Verdict({
           )}
         </div>
 
-        {/*
-          Escala de estado (as três zonas sempre visíveis, só a atual acesa) e,
-          logo abaixo, o progresso do aprendizado — as duas respostas de
-          "quão longe" ficam juntas, à direita da manchete.
-        */}
         <div className="flex w-full flex-col gap-3.5 sm:w-60">
           <div role="img" aria-label={`Estado: ${tone === "unknown" ? "sem leituras" : ZONES[activeZone]?.label}`}>
             <div className="grid grid-cols-3 gap-1">
@@ -245,25 +216,13 @@ export function Verdict({
 
           {learning && stillLearning(learning) && (
             <div className="border-t border-hairline pt-3.5 text-xs">
-              {/*
-                Parágrafo comum, não flex: com `flex flex-wrap` o texto inteiro
-                vira um item só e o "?" era empurrado sozinho para a linha de
-                baixo. Inline, ele fecha a frase onde deve.
-              */}
+              {/* Parágrafo comum, não flex: com `flex-wrap` o "?" ia sozinho para a linha de baixo. */}
               <p className="text-fg-2">
                 Aprendendo o normal deste computador <Explain term="aprendizado" />
               </p>
 
-              {/*
-                Dois critérios que se completam, não um número que sobe. Antes
-                dizia "186 de 100 leituras": um contador passando da própria
-                meta parece defeito e não respondia a única pergunta que
-                importa — o que ainda falta. Sem barra de progresso junto: a
-                lista já é o progresso, e a barra ficava um toco de 5% parado
-                por horas.
-                As duas contas correm juntas e vale a mais lenta: a 5 s por
-                leitura, as 100 fecham em 8 minutos.
-              */}
+              {/* Dois critérios que correm juntos e vale o mais lento: a 5 s por leitura, as
+                  100 fecham em 8 minutos. Um contador passaria da própria meta. */}
               <ul className="mt-2.5 space-y-2">
                 <LearningCriterion
                   done={!!learning.samples_done}

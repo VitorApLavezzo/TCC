@@ -3,9 +3,8 @@ import { stillLearning } from "../learning";
 import type { LearningStatus } from "../../types";
 
 /**
- * "Ainda está aprendendo?" decide três coisas na tela: o cartão de progresso,
- * a frase do rodapé e — desde o conserto do F5 — se vale continuar buscando o
- * estado no servidor. Estava escrita duas vezes, igual, em dois arquivos.
+ * "Ainda está aprendendo?" decide o cartão de progresso, a frase do rodapé e
+ * se vale continuar buscando o estado no servidor.
  */
 const base: LearningStatus = { collected: 50, needed: 100, ml_ready: false, retrain_every: 30 };
 

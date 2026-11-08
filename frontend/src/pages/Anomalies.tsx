@@ -35,9 +35,8 @@ export function Anomalies() {
   const toast = useToast();
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
-  // Filtros na URL, não no componente: recarregar mantém a visão, o endereço
-  // pode ser mandado para alguém e o botão Voltar desfaz o filtro em vez de
-  // sair da página.
+  // Filtros na URL: recarregar mantém a visão, o endereço pode ser mandado
+  // para alguém e o botão Voltar desfaz o filtro em vez de sair da página.
   const [machineParam, setMachineParam] = useUrlState<string>("computador", "");
   const [severity, setSeverity] = useUrlState<string>("gravidade", "");
   const [hours, setHours] = useUrlState<number>("periodo", 72);
@@ -47,10 +46,10 @@ export function Anomalies() {
   const machineId = machineParam ? Number(machineParam) : null;
   const setMachineId = (id: number | null) => setMachineParam(id ? String(id) : "");
   const [resolving, setResolving] = useState<number | null>(null);
-  const [selecionados, setSelecionados] = useState<number[]>([]);
-  const [saindo, setSaindo] = useState<number[]>([]);
-  const [concluido, setConcluido] = useState<number | null>(null);
-  const [emLote, setEmLote] = useState(false);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [leaving, setLeaving] = useState<number[]>([]);
+  const [justDone, setJustDone] = useState<number | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     machinesApi
@@ -76,33 +75,30 @@ export function Anomalies() {
 
   const poll = usePolling(fetchAnomalies, 30000);
 
-  // Voltar de um aviso devolvia a lista ao topo: com a página na URL, faltava
-  // só a altura da rolagem para a pessoa continuar de onde parou.
+  // Ao voltar de um aviso, restaura a rolagem (a página já vem na URL).
   useEffect(() => {
-    const chave = "anomaliesScroll";
-    const salvo = sessionStorage.getItem(chave);
-    if (salvo) window.scrollTo(0, Number(salvo));
-    const guardar = () => sessionStorage.setItem(chave, String(window.scrollY));
-    window.addEventListener("pagehide", guardar);
+    const storageKey = "anomaliesScroll";
+    const saved = sessionStorage.getItem(storageKey);
+    if (saved) window.scrollTo(0, Number(saved));
+    const saveScroll = () => sessionStorage.setItem(storageKey, String(window.scrollY));
+    window.addEventListener("pagehide", saveScroll);
     return () => {
-      guardar();
-      window.removeEventListener("pagehide", guardar);
+      saveScroll();
+      window.removeEventListener("pagehide", saveScroll);
     };
   }, []);
 
-  // Mudança de filtro volta à primeira página, senão a pessoa fica numa página
-  // que já não existe no novo resultado. Só na mudança, não na montagem: na
-  // montagem isso zerava a página que veio no endereço (ao voltar de um aviso).
-  // Compara com os filtros anteriores em vez de marcar "já montou": o
-  // StrictMode roda o efeito duas vezes na montagem e enganaria a marca.
-  const filtros = JSON.stringify([machineId, hours, severity, unresolvedOnly, query]);
-  const filtrosAntes = useRef(filtros);
+  // Mudança de filtro volta à primeira página; na montagem não, para manter a
+  // página vinda do endereço. Compara com os filtros anteriores em vez de marcar
+  // "já montou": o StrictMode roda o efeito duas vezes e enganaria a marca.
+  const filters = JSON.stringify([machineId, hours, severity, unresolvedOnly, query]);
+  const prevFilters = useRef(filters);
   useEffect(() => {
-    if (filtrosAntes.current === filtros) return;
-    filtrosAntes.current = filtros;
+    if (prevFilters.current === filters) return;
+    prevFilters.current = filters;
     setPage(1);
-    setSelecionados([]);
-  }, [filtros]);  // eslint-disable-line react-hooks/exhaustive-deps
+    setSelected([]);
+  }, [filters]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -121,8 +117,6 @@ export function Anomalies() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // Filtros ativos ficam à vista. Antes, um filtro esquecido produzia uma lista
-  // vazia que parecia "o sistema não está detectando nada".
   const activeFilters = [
     machineId !== null && { key: "machine", label: machineName(machineId), clear: () => setMachineId(null) },
     severity && {
@@ -152,18 +146,16 @@ export function Anomalies() {
     setResolving(a.id);
     try {
       await anomaliesApi.resolve(a.id, !a.is_resolved);
-      // Confirmação antes do sumiço: o botão vira ✓ e, quando o filtro é "só
-      // em aberto", o item recolhe a própria altura em vez de desaparecer de
-      // uma vez — sem isso, a lista salta sob o cursor e fica a dúvida de
-      // qual linha foi afetada.
-      setConcluido(a.id);
+      // Com o filtro "só em aberto", o item recolhe a própria altura antes de
+      // sumir: sem isso, a lista salta sob o cursor.
+      setJustDone(a.id);
       if (unresolvedOnly && !a.is_resolved) {
-        setSaindo((atual) => [...atual, a.id]);
+        setLeaving((current) => [...current, a.id]);
         await new Promise((r) => setTimeout(r, 320));
       }
       await fetchAnomalies();
-      setSaindo((atual) => atual.filter((id) => id !== a.id));
-      setTimeout(() => setConcluido((id) => (id === a.id ? null : id)), 700);
+      setLeaving((current) => current.filter((id) => id !== a.id));
+      setTimeout(() => setJustDone((id) => (id === a.id ? null : id)), 700);
       toast.success(a.is_resolved ? "Aviso reaberto." : "Aviso resolvido.");
     } catch (err) {
       toast.error(errorMessage(err, "Não foi possível mudar o estado deste aviso."), "Tente de novo em alguns segundos.");
@@ -174,36 +166,36 @@ export function Anomalies() {
 
   const openCount = anomalies.filter((a) => !a.is_resolved).length;
 
-  const alternar = (id: number) =>
-    setSelecionados((atual) => (atual.includes(id) ? atual.filter((x) => x !== id) : [...atual, id]));
+  const toggleSelected = (id: number) =>
+    setSelected((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]));
 
-  const selecionarPagina = () => {
+  const selectPage = () => {
     const ids = pageItems.filter((a) => !a.is_resolved).map((a) => a.id);
-    setSelecionados((atual) => (ids.every((id) => atual.includes(id)) ? [] : ids));
+    setSelected((current) => (ids.every((id) => current.includes(id)) ? [] : ids));
   };
 
   // Em lote a confirmação vem depois, não antes: a ação é reversível, e
   // perguntar "tem certeza?" a cada limpeza de lista é atrito puro.
-  const resolverLote = async (reabrir = false) => {
-    const ids = [...selecionados];
+  const resolveSelected = async (reopen = false) => {
+    const ids = [...selected];
     if (ids.length === 0) return;
-    setEmLote(true);
+    setBulkBusy(true);
     try {
-      await anomaliesApi.resolveBulk(ids, !reabrir);
+      await anomaliesApi.resolveBulk(ids, !reopen);
       await fetchAnomalies();
-      setSelecionados([]);
+      setSelected([]);
       toast.undoable(
-        `${pluralize(ids.length, "aviso", "avisos")} ${reabrir ? "reaberto(s)" : "resolvido(s)"}.`,
+        `${pluralize(ids.length, "aviso", "avisos")} ${reopen ? "reaberto(s)" : "resolvido(s)"}.`,
         "Desfazer",
         async () => {
-          await anomaliesApi.resolveBulk(ids, reabrir);
+          await anomaliesApi.resolveBulk(ids, reopen);
           fetchAnomalies();
         }
       );
     } catch (err) {
       toast.error(errorMessage(err, "Não foi possível mudar os avisos selecionados."));
     } finally {
-      setEmLote(false);
+      setBulkBusy(false);
     }
   };
 
@@ -220,27 +212,25 @@ export function Anomalies() {
         }
       />
 
-      {selecionados.length > 0 && (
+      {selected.length > 0 && (
         <div className="sticky top-16 z-20 flex flex-wrap items-center justify-between gap-3 rounded-panel border border-edge bg-raised px-4 py-2.5 lg:top-2">
           <p className="text-sm text-fg">
-            {pluralize(selecionados.length, "aviso selecionado", "avisos selecionados")}
+            {pluralize(selected.length, "aviso selecionado", "avisos selecionados")}
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="primary" loading={emLote} onClick={() => resolverLote(false)}>
+            <Button size="sm" variant="primary" loading={bulkBusy} onClick={() => resolveSelected(false)}>
               Marcar como resolvidos
             </Button>
-            <Button size="sm" variant="secondary" onClick={() => resolverLote(true)}>
+            <Button size="sm" variant="secondary" onClick={() => resolveSelected(true)}>
               Reabrir
             </Button>
-            <Button size="sm" variant="quiet" onClick={() => setSelecionados([])}>
+            <Button size="sm" variant="quiet" onClick={() => setSelected([])}>
               Limpar seleção
             </Button>
           </div>
         </div>
       )}
 
-      {/* Barra de filtros: uma linha só, com rótulo em cima de cada controle —
-          quatro seletores lado a lado sem nome exigiam adivinhar pelo valor. */}
       <div className="space-y-3">
         <div className="flex flex-wrap items-end gap-2">
           {/* O flex-1 fica no rótulo, não no campo: dentro da coluna do
@@ -365,26 +355,21 @@ export function Anomalies() {
                 type="checkbox"
                 checked={
                   pageItems.some((a) => !a.is_resolved) &&
-                  pageItems.filter((a) => !a.is_resolved).every((a) => selecionados.includes(a.id))
+                  pageItems.filter((a) => !a.is_resolved).every((a) => selected.includes(a.id))
                 }
-                onChange={selecionarPagina}
+                onChange={selectPage}
                 className="h-3.5 w-3.5 rounded border-edge bg-surface accent-accent"
               />
               Selecionar os em aberto desta página
             </label>
           </div>
 
-          {/*
-            A mesma fita de eventos do painel: horário à esquerda, tique na
-            calha, conteúdo à direita. Ler a página de cima a baixo é percorrer
-            a linha do tempo das detecções.
-          */}
           <AnomalyTimeline>
             {pageItems.map((a) => (
               <AnomalyEvent
                 key={a.id}
                 anomaly={a}
-                className={saindo.includes(a.id) ? "animate-collapse" : undefined}
+                className={leaving.includes(a.id) ? "animate-collapse" : undefined}
                 machineName={machines.length > 1 ? machineName(a.machine_id) : undefined}
                 onOpen={() => navigate(`/anomalies/${a.id}`, { state: { daLista: true } })}
                 action={
@@ -392,8 +377,8 @@ export function Anomalies() {
                     <label className="flex cursor-pointer items-center p-1" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
-                        checked={selecionados.includes(a.id)}
-                        onChange={() => alternar(a.id)}
+                        checked={selected.includes(a.id)}
+                        onChange={() => toggleSelected(a.id)}
                         aria-label={`Selecionar o aviso de ${ANOMALY_TYPE_LABELS[a.anomaly_type] || a.anomaly_type}`}
                         className="h-3.5 w-3.5 rounded border-edge bg-surface accent-accent"
                       />
@@ -406,7 +391,7 @@ export function Anomalies() {
                       onClick={(e) => handleResolve(e, a)}
                       aria-label={a.is_resolved ? "Reabrir este aviso" : "Marcar este aviso como resolvido"}
                     >
-                      {concluido === a.id ? "✓" : a.is_resolved ? "Reabrir" : "Resolver"}
+                      {justDone === a.id ? "✓" : a.is_resolved ? "Reabrir" : "Resolver"}
                     </Button>
                   </div>
                 }

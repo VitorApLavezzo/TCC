@@ -1,9 +1,6 @@
 import { clsx } from "clsx";
 
-/**
- * Placeholder de carregamento. Antes a tela ficava em branco e depois surgia
- * inteira — indistinguível de "esta máquina não tem dados".
- */
+/** Placeholder de carregamento, para não parecer "esta máquina não tem dados". */
 export function Skeleton({ className }: { className?: string }) {
   return <div aria-hidden="true" className={clsx("animate-pulse rounded bg-sunken", className)} />;
 }

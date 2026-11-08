@@ -1,10 +1,7 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "../components/ui/Button";
 
-/**
- * Antes, qualquer endereço desconhecido era redirecionado ao painel em
- * silêncio — a pessoa nunca descobria que havia digitado ou salvo algo errado.
- */
+/** Endereço desconhecido: avisa em vez de redirecionar ao painel em silêncio. */
 export function NotFound() {
   const navigate = useNavigate();
   const { pathname } = useLocation();

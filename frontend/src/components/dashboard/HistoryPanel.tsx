@@ -6,14 +6,7 @@ import { Panel } from "../ui/Layout";
 import { THRESHOLDS } from "../../lib/health";
 import { timeAgo } from "../../lib/format";
 
-/**
- * Histórico das últimas horas, com abas.
- *
- * Um gráfico de cada vez, no lugar de quatro cartões fixos: a pessoa olha uma
- * medida por vez, na resolução em que ela merece atenção. Toda a lógica das
- * abas vive aqui — o painel não precisa saber qual medida está selecionada
- * para desenhar o resto da tela.
- */
+/** Histórico das últimas horas, um gráfico por aba; a lógica das abas vive só aqui. */
 export function HistoryPanel({
   metrics,
   lastTimestamp,
@@ -47,13 +40,13 @@ export function HistoryPanel({
     },
   ];
 
-  const ativa = tabs[Math.min(tab, tabs.length - 1)];
-  const serie = metrics
-    .map((m) => (typeof m[ativa.key] === "number" ? (m[ativa.key] as number) : null))
+  const activeTab = tabs[Math.min(tab, tabs.length - 1)];
+  const series = metrics
+    .map((m) => (typeof m[activeTab.key] === "number" ? (m[activeTab.key] as number) : null))
     .filter((v): v is number => v !== null);
-  const agora = serie.length ? Math.round(serie[serie.length - 1]) : null;
-  const minimo = serie.length ? Math.round(Math.min(...serie)) : null;
-  const maximo = serie.length ? Math.round(Math.max(...serie)) : null;
+  const latest = series.length ? Math.round(series[series.length - 1]) : null;
+  const minValue = series.length ? Math.round(Math.min(...series)) : null;
+  const maxValue = series.length ? Math.round(Math.max(...series)) : null;
 
   return (
     <Panel className={clsx("p-5", className)}>
@@ -64,18 +57,17 @@ export function HistoryPanel({
             {metrics.length} leituras · a mais recente {timeAgo(lastTimestamp, now)}
           </p>
         </div>
-        {/* Só a aba ativa entra no Tab; as outras se alcançam pelas setas —
-            sem o tratamento das setas, pelo teclado não dava para trocar. */}
+        {/* Só a aba ativa entra no Tab; as outras se alcançam pelas setas. */}
         <div
           role="tablist"
           aria-label="Medida do gráfico"
           onKeyDown={(e) => {
             if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
             e.preventDefault();
-            const prox = (tab + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
-            setTab(prox);
-            const botoes = e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-            requestAnimationFrame(() => botoes[prox]?.focus());
+            const next = (tab + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length;
+            setTab(next);
+            const buttons = e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+            requestAnimationFrame(() => buttons[next]?.focus());
           }}
           className="inline-flex max-w-full gap-0.5 overflow-x-auto rounded-control border border-hairline bg-canvas p-1"
         >
@@ -101,30 +93,30 @@ export function HistoryPanel({
       <MetricChart
         bare
         metrics={metrics}
-        dataKey={ativa.key}
-        label={ativa.label}
-        unit={ativa.unit}
-        term={ativa.term}
-        threshold={ativa.threshold}
-        domain={ativa.domain}
+        dataKey={activeTab.key}
+        label={activeTab.label}
+        unit={activeTab.unit}
+        term={activeTab.term}
+        threshold={activeTab.threshold}
+        domain={activeTab.domain}
       />
 
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-fg-2">
         <span>
-          Agora <b className="tnum font-mono font-medium text-fg">{agora ?? "--"}{ativa.unit}</b>
+          Agora <b className="tnum font-mono font-medium text-fg">{latest ?? "--"}{activeTab.unit}</b>
         </span>
         <span>
-          Mínimo <b className="tnum font-mono font-medium text-fg">{minimo ?? "--"}{ativa.unit}</b>
+          Mínimo <b className="tnum font-mono font-medium text-fg">{minValue ?? "--"}{activeTab.unit}</b>
         </span>
         <span>
-          Máximo <b className="tnum font-mono font-medium text-fg">{maximo ?? "--"}{ativa.unit}</b>
+          Máximo <b className="tnum font-mono font-medium text-fg">{maxValue ?? "--"}{activeTab.unit}</b>
         </span>
-        {ativa.threshold !== undefined && (
+        {activeTab.threshold !== undefined && (
           <span>
             Limite de atenção{" "}
             <b className="tnum font-mono font-medium text-fg">
-              {ativa.threshold}
-              {ativa.unit}
+              {activeTab.threshold}
+              {activeTab.unit}
             </b>
           </span>
         )}

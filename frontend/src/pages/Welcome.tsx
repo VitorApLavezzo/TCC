@@ -9,11 +9,6 @@ import { Button, TextButton } from "../components/ui/Button";
 import { useToast } from "../components/ui/Toast";
 import { EnrollPanel, EnrollCode } from "../components/machines/EnrollPanel";
 
-/**
- * O que o produto faz, em três frases. Ficavam em linhas rótulo/valor, que são
- * feitas para medidas: o rótulo cortava ("Aco...") e a frase saía em fonte de
- * dado, alinhada à direita. Aqui cada uma é um card com texto corrido.
- */
 const WHAT_IT_DOES = [
   {
     icon: Gauge,
@@ -39,13 +34,7 @@ const STEPS = [
   "Ele aparece nesta tela sozinho, em cerca de dois minutos.",
 ];
 
-/**
- * Primeiro uso.
- *
- * Antes, quem criava a conta caía num painel vazio com um botão e nenhuma
- * explicação do que o produto faz. A página se resolve sozinha: quando a
- * primeira máquina se registra, mostra a confirmação e leva ao painel.
- */
+/** Primeiro uso: quando a primeira máquina se registra, mostra a confirmação e leva ao painel. */
 export function Welcome() {
   const navigate = useNavigate();
   const toast = useToast();

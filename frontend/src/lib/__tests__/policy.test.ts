@@ -3,12 +3,8 @@ import { GLOSSARY } from "../glossary";
 import { fillPolicy } from "../policy";
 import type { Policy } from "../../types";
 
-/**
- * Os números de política vinham escritos à mão no texto da tela e divergiam do
- * servidor — quatro telas afirmavam "a cada 30 segundos" quando a coleta é
- * adaptativa. Agora o servidor manda; estes testes guardam a substituição.
- */
-const POLITICA: Policy = {
+/** Os números de política vêm do servidor; estes testes guardam a substituição. */
+const POLICY: Policy = {
   aprendizado: { leituras: 100, horas: 1, rotulo: "100 leituras e 1 hora" },
   coleta: { rapido_segundos: 10, normal_segundos: 30, lento_segundos: 60, rotulo: "a cada 10 a 60 segundos" },
   codigo_pareamento: { minutos: 30, rotulo: "30 minutos" },
@@ -16,18 +12,18 @@ const POLITICA: Policy = {
 
 describe("fillPolicy", () => {
   it("troca o marcador pelo que o servidor mandou", () => {
-    expect(fillPolicy("ele espera {aprendizado} acompanhando", POLITICA))
+    expect(fillPolicy("ele espera {aprendizado} acompanhando", POLICY))
       .toBe("ele espera 100 leituras e 1 hora acompanhando");
   });
 
   it("troca mais de um marcador na mesma frase", () => {
-    expect(fillPolicy("{coleta}, e o código vale {codigo_pareamento}", POLITICA))
+    expect(fillPolicy("{coleta}, e o código vale {codigo_pareamento}", POLICY))
       .toBe("a cada 10 a 60 segundos, e o código vale 30 minutos");
   });
 
   it("acompanha a constante do servidor sem a tela saber o número", () => {
-    const outra: Policy = { ...POLITICA, aprendizado: { leituras: 100, horas: 2, rotulo: "100 leituras e 2 horas" } };
-    expect(fillPolicy("espera {aprendizado}", outra)).toBe("espera 100 leituras e 2 horas");
+    const other: Policy = { ...POLICY, aprendizado: { leituras: 100, horas: 2, rotulo: "100 leituras e 2 horas" } };
+    expect(fillPolicy("espera {aprendizado}", other)).toBe("espera 100 leituras e 2 horas");
   });
 
   it("sem política carregada, devolve nulo em vez de mostrar o marcador cru", () => {
@@ -40,16 +36,12 @@ describe("fillPolicy", () => {
   });
 
   it("marcador desconhecido não é substituído nem quebra a frase", () => {
-    expect(fillPolicy("valor {inexistente} aqui", POLITICA)).toBe("valor {inexistente} aqui");
+    expect(fillPolicy("valor {inexistente} aqui", POLICY)).toBe("valor {inexistente} aqui");
   });
 });
 
 describe("glossário não guarda número de política", () => {
-  /**
-   * Guarda contra a reincidência: o problema original não foi um número
-   * errado, foi um número escrito num lugar que não sabe quando ele muda.
-   * Se alguém voltar a inlinar, isto quebra antes de chegar na tela.
-   */
+  // Número escrito no glossário não acompanha quando o servidor muda.
   it("fala do aprendizado pelo marcador, não pelo número", () => {
     expect(GLOSSARY.aprendizado).toContain("{aprendizado}");
     expect(GLOSSARY.aprendizado).not.toMatch(/\d+\s*(leituras?|horas?)/);

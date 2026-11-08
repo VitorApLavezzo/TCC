@@ -19,18 +19,14 @@ type Entry = {
 type Verification = { ok: boolean; entries: number; message: string; broken_at?: number };
 
 /**
- * Livro de auditoria.
- *
- * Cada fato relevante entra numa cadeia em que a entrada carrega o hash da
- * anterior. Mexer num registro antigo quebra todas as contas seguintes — e é
- * isso que o botão "conferir" mostra, em uma frase. Serve para anexar a um
- * chamado, a um processo ou a uma auditoria interna.
+ * Livro de auditoria: cada entrada carrega o hash da anterior, então mexer num
+ * registro antigo quebra todas as seguintes — é o que o "conferir" mostra.
  */
 export function AuditLedger() {
   const toast = useToast();
   const [entries, setEntries] = useState<Entry[]>([]);
-  const [verificacao, setVerificacao] = useState<Verification | null>(null);
-  const [conferindo, setConferindo] = useState(false);
+  const [verification, setVerification] = useState<Verification | null>(null);
+  const [verifying, setVerifying] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -45,19 +41,19 @@ export function AuditLedger() {
     load();
   }, [load]);
 
-  async function conferir() {
-    setConferindo(true);
+  async function verifyChain() {
+    setVerifying(true);
     try {
       const r = await auditApi.verify();
-      setVerificacao(r.data);
+      setVerification(r.data);
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
-      setConferindo(false);
+      setVerifying(false);
     }
   }
 
-  async function baixar() {
+  async function downloadReport() {
     try {
       const r = await auditApi.report();
       const url = URL.createObjectURL(new Blob([r.data], { type: "text/plain;charset=utf-8" }));
@@ -77,19 +73,19 @@ export function AuditLedger() {
       description="Avisos, ações e automações lacrados em cadeia: adulterar um registro antigo fica detectável"
       actions={
         <div className="flex gap-2">
-          <Button size="sm" variant="secondary" loading={conferindo} onClick={conferir}>
+          <Button size="sm" variant="secondary" loading={verifying} onClick={verifyChain}>
             Conferir a cadeia
           </Button>
-          <Button size="sm" variant="quiet" onClick={baixar}>
+          <Button size="sm" variant="quiet" onClick={downloadReport}>
             Baixar relatório
           </Button>
         </div>
       }
     >
-      {verificacao && (
+      {verification && (
         <Panel className="mb-3 flex items-start gap-2 p-3">
-          <StatusDot tone={verificacao.ok ? "ok" : "crit"} className="mt-1.5" />
-          <p className="text-sm leading-relaxed text-fg-2">{verificacao.message}</p>
+          <StatusDot tone={verification.ok ? "ok" : "crit"} className="mt-1.5" />
+          <p className="text-sm leading-relaxed text-fg-2">{verification.message}</p>
         </Panel>
       )}
 

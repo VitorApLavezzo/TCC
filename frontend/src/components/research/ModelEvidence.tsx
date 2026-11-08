@@ -21,27 +21,21 @@ type AblationRow = {
 
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${decimal(v * 100, 1)}%`);
 
-/**
- * A evidência sobre a parte de aprendizado de máquina.
- *
- * Duas perguntas que uma banca faz e que o benchmark geral não responde: o
- * modelo acrescenta algo às regras (ablação), e ele separa melhor que um
- * limiar fixo de três desvios (retenção temporal, com área sob a curva).
- */
-const SENSIBILIDADE = [
-  { chave: "isolation_forest", nome: "Isolation Forest" },
-  { chave: "one_class_svm", nome: "One-Class SVM" },
-  { chave: "sigma_baseline", nome: "Limiar de 3 desvios" },
+// O modelo acrescenta algo às regras (ablação)? Separa melhor que um limiar fixo de três desvios (holdout temporal, AUC)?
+const SENSITIVITY_DETECTORS = [
+  { id: "isolation_forest", name: "Isolation Forest" },
+  { id: "one_class_svm", name: "One-Class SVM" },
+  { id: "sigma_baseline", name: "Limiar de 3 desvios" },
 ] as const;
 
 export function ModelEvidence() {
   const toast = useToast();
   const [ablation, setAblation] = useState<any>(null);
-  const [rodando, setRodando] = useState(false);
+  const [running, setRunning] = useState(false);
   const [machines, setMachines] = useState<{ id: number; name: string }[]>([]);
   const [machineId, setMachineId] = useState<string>("");
   const [holdout, setHoldout] = useState<any>(null);
-  const [carregandoHoldout, setCarregandoHoldout] = useState(false);
+  const [loadingHoldout, setLoadingHoldout] = useState(false);
 
   const loadAblation = useCallback(async () => {
     try {
@@ -61,52 +55,49 @@ export function ModelEvidence() {
       .catch(() => setMachines([]));
   }, [loadAblation]);
 
-  async function rodarAblacao() {
-    setRodando(true);
+  async function runAblation() {
+    setRunning(true);
     try {
       await evaluationApi.runAblation();
       toast.info("Rodando os cenários três vezes.", "Leva alguns minutos; o resultado aparece aqui.");
-      // Os cenários passam pelo pipeline real: é lento e não cabe numa
-      // requisição. A tela busca o resultado de tempos em tempos.
+      // Os cenários passam pelo pipeline real: lento demais para uma requisição, então consulta periodicamente.
       const timer = window.setInterval(async () => {
         const status = await loadAblation();
         if (status !== "running") {
           window.clearInterval(timer);
-          setRodando(false);
+          setRunning(false);
         }
       }, 5000);
     } catch (e) {
       toast.error(errorMessage(e));
-      setRodando(false);
+      setRunning(false);
     }
   }
 
-  async function rodarHoldout(id: string) {
+  async function loadHoldout(id: string) {
     setMachineId(id);
     if (!id) return setHoldout(null);
-    setCarregandoHoldout(true);
+    setLoadingHoldout(true);
     try {
       const r = await evaluationApi.holdout(Number(id));
       setHoldout(r.data);
     } catch (e) {
       toast.error(errorMessage(e));
     } finally {
-      setCarregandoHoldout(false);
+      setLoadingHoldout(false);
     }
   }
 
-  const linhas: AblationRow[] = ablation?.rows ?? [];
-  // Cada curva com os próprios pontos. Antes as curvas eram emparelhadas pelo
-  // índice e todas desenhadas no `fpr` do modelo — mas cada curva ROC tem os
-  // seus pares (fpr, tpr), e a do limiar fixo saía nas posições x erradas.
-  const curvas = [
-    { chave: "isolation", nome: "Isolation Forest", pontos: holdout?.roc ?? [],
-      cor: "text-series-1", largura: 2, traco: undefined },
-    { chave: "svm", nome: "One-Class SVM", pontos: holdout?.roc_ocsvm ?? [],
-      cor: "text-series-2", largura: 2, traco: "6 3" },
-    { chave: "limiar", nome: "Limiar de 3 desvios", pontos: holdout?.roc_baseline ?? [],
-      cor: "text-fg-3", largura: 1.5, traco: "2 3" },
-  ].filter((c) => c.pontos.length > 0);
+  const rows: AblationRow[] = ablation?.rows ?? [];
+  // Cada curva ROC com os próprios pares (fpr, tpr): emparelhar pelo índice desenharia nas posições x erradas.
+  const curves = [
+    { id: "isolation", name: "Isolation Forest", points: holdout?.roc ?? [],
+      colorClass: "text-series-1", width: 2, dash: undefined },
+    { id: "svm", name: "One-Class SVM", points: holdout?.roc_ocsvm ?? [],
+      colorClass: "text-series-2", width: 2, dash: "6 3" },
+    { id: "limiar", name: "Limiar de 3 desvios", points: holdout?.roc_baseline ?? [],
+      colorClass: "text-fg-3", width: 1.5, dash: "2 3" },
+  ].filter((c) => c.points.length > 0);
 
   return (
     <div className="space-y-8">
@@ -114,12 +105,12 @@ export function ModelEvidence() {
         title="O que cada camada detecta"
         description="Os mesmos cenários rodados três vezes: só regras, só modelo, os dois juntos"
         actions={
-          <Button size="sm" variant="secondary" loading={rodando || ablation?.status === "running"} onClick={rodarAblacao}>
+          <Button size="sm" variant="secondary" loading={running || ablation?.status === "running"} onClick={runAblation}>
             Rodar ablação
           </Button>
         }
       >
-        {linhas.length === 0 ? (
+        {rows.length === 0 ? (
           <EmptyState
             title="Ablação ainda não rodada"
             body="É a resposta em número para “o modelo acrescenta alguma coisa às regras?”."
@@ -142,7 +133,7 @@ export function ModelEvidence() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-hairline">
-                  {linhas.map((l) => (
+                  {rows.map((l) => (
                     <tr key={l.layer}>
                       <td className="py-2 text-fg-2">{l.label}</td>
                       <td className="tnum py-2 text-right font-mono text-fg">{pct(l.precision)}</td>
@@ -170,7 +161,7 @@ export function ModelEvidence() {
           <select
             aria-label="Computador usado na validação"
             value={machineId}
-            onChange={(e) => rodarHoldout(e.target.value)}
+            onChange={(e) => loadHoldout(e.target.value)}
             className="h-8 rounded-control border border-edge bg-surface px-2 text-sm text-fg focus:border-accent"
           >
             <option value="">Escolha um computador</option>
@@ -184,7 +175,7 @@ export function ModelEvidence() {
       >
         {!holdout ? (
           <EmptyState
-            title={carregandoHoldout ? "Calculando..." : "Escolha um computador"}
+            title={loadingHoldout ? "Calculando..." : "Escolha um computador"}
             body="A validação usa o histórico real da máquina, com anomalias injetadas nas leituras de teste."
           />
         ) : !holdout.ready ? (
@@ -229,13 +220,13 @@ export function ModelEvidence() {
             <Panel className="p-4">
               <p className="channel-label">Curva ROC</p>
               <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-micro text-fg-2" aria-label="Legenda">
-                {curvas.map((c) => (
-                  <li key={c.chave} className="inline-flex items-center gap-1.5">
-                    <svg width="20" height="6" aria-hidden="true" className={c.cor}>
-                      <line x1="0" y1="3" x2="20" y2="3" stroke="currentColor" strokeWidth={c.largura}
-                            strokeDasharray={c.traco} />
+                {curves.map((c) => (
+                  <li key={c.id} className="inline-flex items-center gap-1.5">
+                    <svg width="20" height="6" aria-hidden="true" className={c.colorClass}>
+                      <line x1="0" y1="3" x2="20" y2="3" stroke="currentColor" strokeWidth={c.width}
+                            strokeDasharray={c.dash} />
                     </svg>
-                    {c.nome}
+                    {c.name}
                   </li>
                 ))}
               </ul>
@@ -244,10 +235,10 @@ export function ModelEvidence() {
                   <LineChart margin={{ top: 4, right: 8, bottom: 4, left: -20 }}>
                     <XAxis dataKey="fpr" type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
                     <YAxis type="number" domain={[0, 1]} tick={{ fontSize: 10 }} />
-                    {curvas.map((c) => (
-                      <Line key={c.chave} data={c.pontos} dataKey="tpr" name={c.nome} type="linear"
-                            dot={false} isAnimationActive={false} strokeWidth={c.largura}
-                            strokeDasharray={c.traco} stroke="currentColor" className={c.cor} />
+                    {curves.map((c) => (
+                      <Line key={c.id} data={c.points} dataKey="tpr" name={c.name} type="linear"
+                            dot={false} isAnimationActive={false} strokeWidth={c.width}
+                            strokeDasharray={c.dash} stroke="currentColor" className={c.colorClass} />
                     ))}
                   </LineChart>
                 </ResponsiveContainer>
@@ -273,27 +264,25 @@ export function ModelEvidence() {
                     <thead>
                       <tr className="border-b border-hairline text-left text-micro uppercase tracking-wide text-fg-3">
                         <th className="py-2 font-medium">Desvio</th>
-                        {SENSIBILIDADE.map((d) => (
-                          <th key={d.chave} className="py-2 text-right font-medium">{d.nome}</th>
+                        {SENSITIVITY_DETECTORS.map((d) => (
+                          <th key={d.id} className="py-2 text-right font-medium">{d.name}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-hairline">
                       {holdout.sensitivity.rows.map((l: any) => {
-                        // O melhor de cada linha em negrito: é assim que um
-                        // cruzamento entre detectores salta aos olhos.
-                        const melhor = Math.max(...SENSIBILIDADE.map((d) => l[d.chave]));
+                        const best = Math.max(...SENSITIVITY_DETECTORS.map((d) => l[d.id]));
                         return (
                           <tr key={l.sigma}>
                             <td className="py-2 text-fg-2">
                               {l.sigma} {l.sigma === 1 ? "desvio-padrão" : "desvios-padrão"}
                             </td>
-                            {SENSIBILIDADE.map((d) => (
-                              <td key={d.chave}
+                            {SENSITIVITY_DETECTORS.map((d) => (
+                              <td key={d.id}
                                   className={`tnum py-2 text-right font-mono ${
-                                    l[d.chave] === melhor ? "font-semibold text-fg" : "text-fg-2"
+                                    l[d.id] === best ? "font-semibold text-fg" : "text-fg-2"
                                   }`}>
-                                {decimal(l[d.chave], 3)}
+                                {decimal(l[d.id], 3)}
                               </td>
                             ))}
                           </tr>

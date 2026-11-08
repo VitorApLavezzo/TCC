@@ -1,20 +1,18 @@
-/** Formatadores compartilhados — antes estavam duplicados dentro das páginas. */
-
-const formatos = new Map<number, Intl.NumberFormat>();
+const formatters = new Map<number, Intl.NumberFormat>();
 
 /**
  * Número com vírgula decimal, como se escreve em português. Sem separador de
  * milhar: os valores aparecem em colunas estreitas, ao lado de unidade.
  */
 export function decimal(val: number, digits = 1) {
-  let f = formatos.get(digits);
+  let f = formatters.get(digits);
   if (!f) {
     f = new Intl.NumberFormat("pt-BR", {
       minimumFractionDigits: digits,
       maximumFractionDigits: digits,
       useGrouping: false,
     });
-    formatos.set(digits, f);
+    formatters.set(digits, f);
   }
   return f.format(val);
 }
@@ -67,8 +65,7 @@ export function pluralize(n: number, singular: string, plural = `${singular}s`) 
 
 /**
  * Nome do programa responsável, ou null quando não dá pra identificar.
- * Avisos antigos (e agentes desatualizados) gravaram "?" como nome — isso
- * nunca deve aparecer na interface como se fosse um nome de verdade.
+ * Agentes antigos gravavam "?" como nome, que nunca deve aparecer na tela.
  */
 export function processName(anomaly?: { responsible_process?: string | null } | null): string | null {
   const raw = anomaly?.responsible_process;

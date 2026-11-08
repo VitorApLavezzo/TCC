@@ -48,12 +48,8 @@ function useToken(name: string) {
 }
 
 /**
- * Série temporal, com a mesma gramática do traço dos canais.
- *
- * A faixa do normal é sombreada da base até o limite de atenção, e o traço
- * segue neutro: o que a pessoa procura é a forma saindo da faixa, não uma
- * linha bonita. Nenhuma série ganha cor própria — dar uma cor a cada métrica
- * faria o conjunto parecer um mostruário e roubaria significado do vermelho.
+ * Série temporal com a faixa do normal sombreada e o traço neutro: nenhuma
+ * série ganha cor própria, para não roubar o significado do vermelho.
  */
 export function MetricChart({
   metrics,
@@ -109,7 +105,6 @@ export function MetricChart({
             </linearGradient>
           </defs>
 
-          {/* A faixa do normal, sombreada da base até o limite de atenção. */}
           {threshold !== undefined && (
             <ReferenceArea
               y1={yDomain[0]}
@@ -139,7 +134,6 @@ export function MetricChart({
             domain={yDomain}
           />
 
-          {/* Marca do evento: mesma íris do tique de detecção no resto do produto. */}
           {markTime && <ReferenceLine x={markTime} stroke={accent} strokeWidth={1.25} />}
 
           <Tooltip content={<CustomTooltip />} cursor={{ stroke: grid }} />

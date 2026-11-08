@@ -19,8 +19,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 // só em produção — em desenvolvimento ele serviria arquivos antigos do cache.
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((erro) => {
-      console.warn("Service worker não registrado:", erro);
+    navigator.serviceWorker.register("/sw.js").catch((err) => {
+      console.warn("Service worker não registrado:", err);
     });
   });
 }

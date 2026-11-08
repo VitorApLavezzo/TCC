@@ -1,18 +1,12 @@
 /**
- * Barramento de saúde da conexão com o servidor.
- *
- * Os interceptors do axios avisam aqui em cada resposta, então qualquer
- * requisição do app alimenta o indicador — nenhuma página precisa se lembrar
- * de reportar. Antes, uma falha de rede era completamente silenciosa: o
- * painel seguia mostrando os números velhos como se fossem atuais.
+ * Saúde da conexão com o servidor. Os interceptors do axios reportam aqui em
+ * cada resposta, então nenhuma página precisa se lembrar de reportar.
  */
 
 export interface ConnectionState {
   /** Última resposta do servidor foi bem-sucedida? `null` = ainda não sabemos. */
   reachable: boolean | null;
-  /** Momento da última resposta bem-sucedida. */
   lastSuccessAt: number | null;
-  /** Falhas consecutivas desde a última resposta boa. */
   consecutiveFailures: number;
 }
 

@@ -7,12 +7,8 @@ import { useConfirm } from "../ui/ConfirmDialog";
 import { processName } from "../../lib/format";
 
 /**
- * O ciclo de aprendizado do aviso.
- *
- * Antes só havia "resolver". Aqui a pessoa também diz se aquilo era normal
- * para ela — e o sistema cria uma regra e afrouxa o detector — ou se era um
- * problema de verdade, ao registrar a causa. Da próxima vez a explicação já
- * começa por ela.
+ * A pessoa diz se o aviso era normal (o sistema cria uma regra e afrouxa o detector)
+ * ou um problema de verdade, registrando a causa para a próxima explicação.
  */
 export function Feedback({ anomaly, onChange }: { anomaly: Anomaly; onChange: (a: Anomaly) => void }) {
   const toast = useToast();
@@ -23,8 +19,7 @@ export function Feedback({ anomaly, onChange }: { anomaly: Anomaly; onChange: (a
   const isSecurity = SECURITY_TYPES.has(anomaly.anomaly_type);
 
   const markNormal = async (scope: "process" | "type") => {
-    // Silenciar o tipo inteiro vale para todo programa, não só para este:
-    // é a única escolha daqui que pede confirmação.
+    // Silenciar o tipo inteiro vale para todo programa: é a única escolha que pede confirmação.
     if (scope === "type") {
       const ok = await confirm({
         title: "Silenciar todo aviso deste tipo?",
@@ -116,7 +111,7 @@ export function Feedback({ anomaly, onChange }: { anomaly: Anomaly; onChange: (a
   );
 }
 
-/** Selo de verificação: o sistema confere sozinho se o problema sumiu. */
+/** O sistema confere sozinho se o problema sumiu. */
 export function VerificationTag({ anomaly }: { anomaly: Anomaly }) {
   const status = anomaly.verification_status;
   if (!status) return null;

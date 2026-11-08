@@ -13,14 +13,8 @@ import { HumanStudy } from "../components/research/HumanStudy";
 import { ExplanationFidelity } from "../components/research/ExplanationFidelity";
 
 /**
- * Página de pesquisa — os dados quantitativos que o TCC precisa sobre a
- * própria ferramenta.
- *
- * Duas perguntas que um trabalho sobre "IA que explica" tem de responder com
- * número, não com opinião: as explicações são factualmente corretas (os números
- * citados existem nos dados?) e são úteis (a pessoa achou que ajudou; uma
- * IA-juíza deu que nota?). Aqui isso vem agregado por provedor, o que também
- * permite comparar modelo local × nuvem.
+ * Dados quantitativos do TCC sobre a própria ferramenta: as explicações são
+ * factualmente corretas e úteis? Agregado por provedor (local × nuvem).
  */
 export function Research() {
   const navigate = useNavigate();
