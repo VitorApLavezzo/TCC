@@ -19,6 +19,7 @@ from app.models.explanation import AIExplanation
 from app.models.machine import Machine
 from app.models.metric import Metric
 from app.models.study import StudyResponse, StudySession
+from app.services import llm
 
 DEFAULT_ITEMS = 6
 OPTIONS_PER_ITEM = 4
@@ -49,7 +50,10 @@ ACTION_OPTIONS = [
 
 
 def _eligible_anomalies(db: Session, owner_id: int, count: int) -> List[Anomaly]:
-    """Avisos reais que já têm explicação pronta e medidas para mostrar."""
+    """Avisos reais com medidas para mostrar e explicação escrita por um modelo de linguagem.
+
+    O texto de modelos prontos não entra: o braço "ai" mediria outra coisa.
+    """
     ids = [m.id for m in db.query(Machine.id).filter(Machine.owner_id == owner_id).all()]
     if not ids:
         return []
@@ -58,7 +62,8 @@ def _eligible_anomalies(db: Session, owner_id: int, count: int) -> List[Anomaly]
         .join(AIExplanation, AIExplanation.anomaly_id == Anomaly.id)
         .filter(Anomaly.machine_id.in_(ids),
                 Anomaly.metric_id.isnot(None),
-                AIExplanation.model_used.isnot(None))
+                AIExplanation.model_used.isnot(None),
+                AIExplanation.model_used != llm.STATIC_ANALYSIS)
         .order_by(Anomaly.detected_at.desc())
         .limit(count * 6)
         .all()
@@ -79,7 +84,7 @@ def create_session(db: Session, owner_id: int, participant_code: str,
                    expertise: str = "leigo", items: int = DEFAULT_ITEMS) -> Dict[str, Any]:
     anomalies = _eligible_anomalies(db, owner_id, items)
     if len(anomalies) < 2:
-        raise ValueError("São precisos ao menos 2 avisos com explicação pronta para montar o estudo.")
+        raise ValueError("São precisos ao menos 2 avisos com explicação gerada por IA para montar o estudo.")
 
     study_session = StudySession(
         owner_id=owner_id,

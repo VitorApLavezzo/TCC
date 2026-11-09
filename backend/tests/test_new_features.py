@@ -2,12 +2,17 @@
 import time
 from datetime import timedelta
 
+import pytest
+
 from app.core import ratelimit
 from app.core.timeutil import utcnow
+from app.models.anomaly import Anomaly
+from app.models.explanation import AIExplanation
 from app.models.machine import Machine
 from app.models.metric import Metric
 from app.models.mlhealth import ExplanationOutcome
 from app.models.playbook import Playbook, PlaybookRun
+from app.models.study import StudyResponse
 from app.services import drift, fidelity, hardware_risk, integrity, playbooks, study
 
 
@@ -246,6 +251,38 @@ class TestUserStudy:
         assert p is not None and p < 0.01
         # 51 contra 49 é empate
         assert study._two_proportion_p(51, 100, 49, 100) > 0.05
+
+    def _explained_anomaly(self, db, machine_id, anomaly_type, model_used):
+        metric = Metric(machine_id=machine_id, cpu_percent=90.0)
+        db.add(metric)
+        db.flush()
+        anomaly = Anomaly(machine_id=machine_id, metric_id=metric.id, anomaly_type=anomaly_type, severity="high")
+        db.add(anomaly)
+        db.flush()
+        db.add(AIExplanation(anomaly_id=anomaly.id, summary="texto", model_used=model_used))
+        db.commit()
+        return anomaly.id
+
+    def test_session_never_shows_static_text_as_ai_explanation(self, db, machine):
+        owner_id = db.get(Machine, machine["id"]).owner_id
+        generated = {
+            self._explained_anomaly(db, machine["id"], "high_cpu", "claude-cli/sonnet"),
+            self._explained_anomaly(db, machine["id"], "memory_leak", "ollama/qwen2.5:14b"),
+        }
+        self._explained_anomaly(db, machine["id"], "cpu_loop", "análise local")
+
+        session_id = study.create_session(db, owner_id, "P1")["session_id"]
+
+        items = db.query(StudyResponse).filter(StudyResponse.session_id == session_id).all()
+        assert {item.anomaly_id for item in items} == generated
+
+    def test_session_refused_when_only_static_text_exists(self, db, machine):
+        owner_id = db.get(Machine, machine["id"]).owner_id
+        self._explained_anomaly(db, machine["id"], "high_cpu", "análise local")
+        self._explained_anomaly(db, machine["id"], "memory_leak", "análise local")
+
+        with pytest.raises(ValueError):
+            study.create_session(db, owner_id, "P1")
 
 
 class TestObservability:

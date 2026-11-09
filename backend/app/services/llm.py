@@ -20,6 +20,9 @@ PRIVACY_ANY = "any"
 PRIVACY_LOCAL_ONLY = "local_only"
 PRIVACY_NO_AI = "no_ai"
 
+# `model_used` do texto montado por modelos prontos, sem nenhum provedor
+STATIC_ANALYSIS = "análise local"
+
 
 # Vai para todos os provedores: nome de processo e linha de comando são controlados por quem
 # roda o programa e podem tentar conduzir o texto (injeção de prompt).
@@ -65,6 +68,16 @@ def _call_cloud_llm(prompt: str, temperature: float = 0.3) -> str:
         return response.json()["choices"][0]["message"]["content"]
 
 
+def _cli_failure_reason(output: str) -> str:
+    """O motivo vem em `result`, depois dos contadores: cortar o JSON inteiro o perderia."""
+    output = output.strip()
+    try:
+        reason = json.loads(output).get("result")
+    except (ValueError, AttributeError):
+        reason = None
+    return str(reason or output)[:300]
+
+
 def _call_claude_cli(prompt: str, temperature: float = 0.3) -> str:
     """Claude Code CLI em modo headless, usando a assinatura (sem chave de API).
 
@@ -102,7 +115,7 @@ def _call_claude_cli(prompt: str, temperature: float = 0.3) -> str:
         env=env,
     )
     if proc.returncode != 0:
-        raise RuntimeError(f"claude cli retornou {proc.returncode}: {(proc.stderr or proc.stdout).strip()[:300]}")
+        raise RuntimeError(f"claude cli retornou {proc.returncode}: {_cli_failure_reason(proc.stderr or proc.stdout)}")
     envelope = json.loads(proc.stdout)
     if envelope.get("is_error"):
         raise RuntimeError(f"claude cli reportou erro: {str(envelope.get('result'))[:300]}")

@@ -920,6 +920,6 @@ def _generate_fallback_explanation(anomaly: Anomaly, metric: Optional[Metric], m
         "possible_causes": causes[:5],
         "recommendations": recs[:5],
         "severity_justification": f"Gravidade {sev_label.lower()}: definida pelos valores medidos e pelo quanto eles se afastam do normal deste computador.",
-        "model_used": "análise local",
+        "model_used": llm.STATIC_ANALYSIS,
         "verification": None,
     }

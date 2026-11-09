@@ -109,6 +109,28 @@ class TestRestrictedCall:
         with pytest.raises(RuntimeError):
             llm._call_claude_cli("pedido")
 
+    def _fail(self, monkeypatch, stdout="", stderr=""):
+        from app.services import llm
+        monkeypatch.setattr(
+            llm.subprocess, "run",
+            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, stdout=stdout, stderr=stderr),
+        )
+
+    def test_failure_reports_reason_buried_in_long_envelope(self, monkeypatch):
+        """Na saída real, o motivo vem depois de centenas de caracteres de contadores."""
+        from app.services import llm
+        envelope = {"duration_api_ms": 0, "usage": {"input_tokens": 0, "padding": "x" * 400},
+                    "is_error": True, "result": "Failed to authenticate"}
+        self._fail(monkeypatch, stdout=json.dumps(envelope))
+        with pytest.raises(RuntimeError, match="Failed to authenticate"):
+            llm._call_claude_cli("pedido")
+
+    def test_failure_with_plain_text_output_still_reports_it(self, monkeypatch):
+        from app.services import llm
+        self._fail(monkeypatch, stderr="comando desconhecido")
+        with pytest.raises(RuntimeError, match="comando desconhecido"):
+            llm._call_claude_cli("pedido")
+
 
 class TestSystemPromptInAllProviders:
     """Dado coletado é controlado por quem roda o programa; a instrução de que ele não é ordem vale para todos."""
