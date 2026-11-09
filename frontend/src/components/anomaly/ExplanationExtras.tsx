@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { analysisSource } from "../../lib/analysisSource";
 import { decimal } from "../../lib/format";
 import { AIExplanation, Anomaly, Counterfactual, LanguageLevel, LANGUAGE_LEVEL_LABELS, Verification } from "../../types";
 import { explanationsApi, errorMessage } from "../../services/api";
@@ -48,13 +49,8 @@ export function VerificationBadge({ verification }: { verification?: Verificatio
 
 /** Onde os dados deste aviso foram analisados (transparência). */
 export function DestinationTag({ destination, provider }: { destination?: string; provider?: string }) {
-  if (!destination) return provider ? <span className="text-micro text-fg-3">{provider}</span> : null;
-  const label =
-    destination === "local"
-      ? "analisado localmente"
-      : destination === "cloud"
-        ? "analisado na nuvem"
-        : "análise local (sem IA)";
+  const label = analysisSource(destination, provider);
+  if (!label) return null;
   return (
     <span className="text-micro text-fg-3" title={provider}>
       {label}
