@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
+from sklearn.svm import OneClassSVM
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -107,6 +108,11 @@ GROUP_TO_TYPE = {
 }
 
 _cache: Dict[int, Tuple[float, dict]] = {}
+
+
+def svm_params() -> Dict[str, Any]:
+    """`nu` tem o papel do `contamination`: os dois esperam a mesma fração de anomalias."""
+    return {"kernel": "rbf", "gamma": "scale", "nu": settings.ISOLATION_FOREST_CONTAMINATION}
 
 
 def _model_path(machine_id: int) -> str:
@@ -270,6 +276,8 @@ def train_model(machine_id: int, db: Session) -> bool:
         "samples": len(X),
         "trained_at": utcnow().isoformat(),
     }
+    if settings.ML_SVM_CONFIRM:
+        bundle["svm"] = OneClassSVM(**svm_params()).fit(X_scaled)
     with open(_model_path(machine_id), "wb") as f:
         pickle.dump(bundle, f)
     for path in _legacy_paths(machine_id):
@@ -332,13 +340,16 @@ def predict_anomaly(
             _metric_to_vector(metric, offset_minutes, bundle["features"], bundle.get("fill"))
         ]))
         score = float(bundle["model"].decision_function(X)[0])
+        # Modelo salvo antes do SVM decide só pelo Isolation Forest até o próximo treino
+        svm = bundle.get("svm") if settings.ML_SVM_CONFIRM else None
+        svm_agrees = svm is None or float(svm.decision_function(X)[0]) < 0
     except Exception:
         _discard(machine_id)
         return False, None
 
     # Sensibilidade > 1 torna o limite mais negativo: exige desvio maior
     threshold = bundle["threshold"] * max(sensitivity, 0.5)
-    return score < threshold, score
+    return score < threshold and svm_agrees, score
 
 
 def alert_threshold(machine_id: int, sensitivity: float = 1.0) -> Optional[float]:

@@ -3,6 +3,7 @@ tempo de mudanças), eventos pontuais, beacons e reinício (`boot_time` mudou)."
 import hashlib
 import ipaddress
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -16,6 +17,7 @@ from app.models.inventory import ChangeEvent, InventorySnapshot
 from app.models.machine import Machine
 from app.models.metric import Metric
 from app.services.anomaly_service import Candidate, persist_candidate
+from app.services.behavior_analyzer import LOLBINS
 from app.services.identity_service import identity_key
 
 SYSTEM_INFO_KEYS = {
@@ -321,6 +323,25 @@ def _public_ip(ip: str) -> bool:
     return not (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_reserved)
 
 
+# Rodam o que mandarem: estar assinado e instalado não diz nada sobre o que contatam
+RUNS_WHAT_IT_IS_TOLD = LOLBINS | {
+    "python", "node", "perl", "ruby", "php", "java", "bash", "sh", "zsh", "curl", "wget",
+    "nc", "ncat", "socat", "ssh", "powershell", "pwsh", "cmd",
+}
+
+
+def _trusted_install(db: Session, machine: Machine, ident: ProcessIdentity) -> bool:
+    """Assinado e instalado onde programas ficam: contato periódico é atualização ou sincronização."""
+    from app.services import trust
+    if ident.signed != "signed" or not trust._in_program_dir((ident.exe or "").lower()):
+        return False
+    base_name = re.sub(r"[\d.]+$", "", (ident.name or "").lower().removesuffix(".exe"))
+    if base_name in RUNS_WHAT_IT_IS_TOLD:
+        return False
+    key = identity_key(ident.name, ident.exe, ident.sha256)
+    return key not in trust.owner_problem_keys(db, machine.owner_id, {key})
+
+
 def evaluate_beacons(db: Session, machine: Machine, beacons: List[Dict[str, Any]], now) -> List[Anomaly]:
     created: List[Anomaly] = []
     for b in beacons or []:
@@ -343,6 +364,8 @@ def evaluate_beacons(db: Session, machine: Machine, beacons: List[Dict[str, Any]
         signed = bool(ident and ident.signed == "signed")
         # Programa assinado e presente há dias: provavelmente checagem de atualização
         if established and signed:
+            continue
+        if ident and _trusted_install(db, machine, ident):
             continue
         # Assinado e comum na frota DESTE dono: provavelmente atualização. A contagem é
         # da própria conta para que outra conta não esconda um implante inflando-a.
@@ -372,7 +395,8 @@ def evaluate_beacons(db: Session, machine: Machine, beacons: List[Dict[str, Any]
                          "first_seen_on_machine": (
                              aware(ident.first_seen).isoformat() if ident and ident.first_seen else None
                          )},
-                source="agent_event",
+                source="beacon",
+                identity=name,
                 cooldown_minutes=6 * 60,
             ),
             now=now,

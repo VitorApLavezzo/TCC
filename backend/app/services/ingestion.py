@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.redaction import redact_secrets
 from app.core.timeutil import utcnow
 from app.models.anomaly import Anomaly
+from app.models.blackbox import BlackboxCapture
 from app.models.machine import Machine
 from app.models.metric import Metric
 from app.models.process import ProcessSnapshot
@@ -68,6 +69,10 @@ def _reading_time(payload: MetricCreate, now):
     if read_at > now or read_at < now - timedelta(hours=MAX_BACKFILL_HOURS):
         return now
     return read_at
+
+
+def _has_blackbox(db: Session, anomaly: Anomaly) -> bool:
+    return db.query(BlackboxCapture.id).filter(BlackboxCapture.anomaly_id == anomaly.id).first() is not None
 
 
 def ingest(db: Session, machine: Machine, payload: MetricCreate, now=None) -> IngestResult:
@@ -157,13 +162,15 @@ def ingest(db: Session, machine: Machine, payload: MetricCreate, now=None) -> In
             lambda: agent_events.evaluate_beacons(db, machine, [b.model_dump() for b in payload.beacons], now),
         ) or []
 
-    serious = next((a for a in anomalies if a.severity in ("high", "critical")), None)
+    # Repetição somada num aviso aberto também volta na lista, mas não é novidade para o agente
+    news = [a for a in anomalies if (a.occurrences or 1) == 1]
+    serious = next((a for a in anomalies if a.severity in ("high", "critical") and not _has_blackbox(db, a)), None)
     response = {
         "metric_id": metric.id,
-        "anomaly_detected": bool(anomalies),
-        "anomaly_id": anomalies[0].id if anomalies else None,
+        "anomaly_detected": bool(news),
+        "anomaly_id": news[0].id if news else None,
         "next_interval": adaptive.resolve_interval(
-            machine, adaptive.next_interval(db, machine, metric, anomalies[0] if anomalies else None), now
+            machine, adaptive.next_interval(db, machine, metric, news[0] if news else None), now
         ),
         # Aviso grave: o agente manda os minutos anteriores em alta resolução
         "capture_blackbox": {"anomaly_id": serious.id} if serious else None,

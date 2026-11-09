@@ -127,9 +127,9 @@ def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
     return query.order_by(Anomaly.detected_at.desc()).first()
 
 
-# Origens que o agendador reconfere periodicamente. Reconferência não é ocorrência
-# nova: somá-la faria o aviso escalar sem nada ter acontecido. Detector agendado novo entra aqui.
-REEVALUATED_SOURCES = frozenset({"forecast", "fleet", "trend", "drift", "hardware"})
+# Origens cuja mesma condição volta sem ter acontecido de novo: o agendador reconfere e o agente
+# repete o beaconing a cada coleta. Somar faria o aviso escalar sozinho.
+REEVALUATED_SOURCES = frozenset({"forecast", "fleet", "trend", "drift", "hardware", "beacon"})
 
 
 def _reevaluate(db: Session, machine: Machine, existing: Anomaly, c: Candidate) -> Optional[Anomaly]:

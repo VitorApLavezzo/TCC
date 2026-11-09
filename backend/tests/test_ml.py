@@ -258,6 +258,75 @@ class TestOptionalFeatures:
         assert contribs[0]["label"] == "Programa dominante"
 
 
+class _FixedSvm:
+    """Só o voto: separa o que o predict faz com ele do que o treino aprendeu."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def decision_function(self, X):
+        return np.full(len(X), self.value)
+
+
+class TestSvmConfirmation:
+    @pytest.fixture
+    def machine_id(self, db):
+        from tests.test_trust import _machine
+        m = _machine(db)
+        _history(db, m.id, 150, with_context=False, start_hours=6, rng=np.random.default_rng(5))
+        return m.id
+
+    @pytest.fixture
+    def outlier(self):
+        return make_mock_metric(cpu=100.0, mem=99.0, conn=900, procs=900, net_s=5e7, net_r=5e7)
+
+    def _trained(self, db, machine_id, monkeypatch, confirm):
+        from app.config import settings
+        from app.services import ml_service
+        monkeypatch.setattr(settings, "ML_SVM_CONFIRM", confirm)
+        assert ml_service.train_model(machine_id, db)
+        return ml_service._load_bundle(machine_id)
+
+    def test_disagreeing_svm_blocks_the_alert_and_keeps_the_score(self, db, machine_id, outlier, monkeypatch):
+        from app.services import ml_service
+        self._trained(db, machine_id, monkeypatch, confirm=True)["svm"] = _FixedSvm(1.0)
+        is_anomaly, score = ml_service.predict_anomaly(machine_id, outlier)
+        assert is_anomaly is False and score is not None
+
+    def test_agreeing_svm_keeps_the_alert(self, db, machine_id, outlier, monkeypatch):
+        from app.services import ml_service
+        self._trained(db, machine_id, monkeypatch, confirm=True)["svm"] = _FixedSvm(-1.0)
+        assert ml_service.predict_anomaly(machine_id, outlier)[0] is True
+
+    def test_switch_off_ignores_the_svm(self, db, machine_id, outlier, monkeypatch):
+        from app.services import ml_service
+        self._trained(db, machine_id, monkeypatch, confirm=False)["svm"] = _FixedSvm(1.0)
+        assert ml_service.predict_anomaly(machine_id, outlier)[0] is True
+
+    def test_model_saved_before_the_svm_existed_still_alerts(self, db, machine_id, outlier, monkeypatch):
+        from app.services import ml_service
+        self._trained(db, machine_id, monkeypatch, confirm=True).pop("svm", None)
+        assert ml_service.predict_anomaly(machine_id, outlier)[0] is True
+
+    def test_trained_svm_flags_outlier_and_accepts_typical_reading(self, db, machine_id, outlier, monkeypatch):
+        from datetime import timedelta
+        from app.core.timeutil import utcnow
+        from app.services import ml_service
+        bundle = self._trained(db, machine_id, monkeypatch, confirm=True)
+        typical = make_mock_metric(cpu=30.0, mem=50.0, disk=60.0, net_s=5e4, net_r=9e4, conn=40,
+                                   disk_r=1e5, disk_w=1e5, load=1.0, procs=150)
+        # Hora é atributo do modelo: uma leitura típica fica dentro da janela do histórico
+        typical.timestamp = utcnow() - timedelta(hours=3, minutes=30)
+        scaler, keys = bundle["scaler"], bundle["features"]
+        def vote(metric):
+            X = scaler.transform([ml_service._metric_to_vector(metric, None, keys, bundle.get("fill"))])
+            return float(bundle["svm"].decision_function(X)[0])
+        assert vote(outlier) < 0 < vote(typical)
+
+    def test_switch_off_does_not_train_the_svm(self, db, machine_id, monkeypatch):
+        assert "svm" not in self._trained(db, machine_id, monkeypatch, confirm=False)
+
+
 def _classify(cpu, user_driven, contributions=None, **over):
     from app.services.ml_service import classify_anomaly
     m = make_mock_metric(cpu=cpu, mem=over.pop("mem", 40.0), disk=50.0)

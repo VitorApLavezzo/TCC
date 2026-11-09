@@ -54,11 +54,7 @@ def _hyperparameters() -> Dict[str, Dict[str, Any]]:
             "n_estimators": 300,
             "contamination": settings.ISOLATION_FOREST_CONTAMINATION,
         },
-        "one_class_svm": {
-            "kernel": "rbf",
-            "gamma": "scale",
-            "nu": settings.ISOLATION_FOREST_CONTAMINATION,
-        },
+        "one_class_svm": ml_service.svm_params(),
     }
 
 

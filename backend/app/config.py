@@ -34,10 +34,12 @@ class Settings(BaseSettings):
 
     # Fração (%) do próprio histórico da máquina considerada fora do padrão; o limite é recalculado
     # a cada treino, porque um número fixo não acompanha a escala de score_samples.
-    ML_ALERT_PERCENTILE: float = 0.5
+    ML_ALERT_PERCENTILE: float = 1.0
     # Quanto do caminho até o limite de alerta a leitura anterior precisa ter andado para confirmar
     # a atual (1,0 exigiria duas leituras de alerta pleno e mataria a revocação).
     ML_CONFIRM_FACTOR: float = 0.5
+    # O One-Class SVM precisa concordar com o Isolation Forest para a leitura ser fora do padrão
+    ML_SVM_CONFIRM: bool = False
     MIN_TRAINING_SAMPLES: int = 100
     # 3% de contaminação: menos alarmes falsos que 5%
     ISOLATION_FOREST_CONTAMINATION: float = 0.03
