@@ -91,7 +91,7 @@ class Settings(BaseSettings):
 
     # Retenção de dados brutos
     METRIC_RETENTION_DAYS: int = 120
-    PROCESS_SNAPSHOT_RETENTION_DAYS: int = 21
+    PROCESS_SNAPSHOT_RETENTION_DAYS: int = 60
 
     # Origens autorizadas a chamar a API pelo navegador, separadas por vírgula. Com "*" as
     # credenciais de origem cruzada ficam desligadas (inválido no CORS); o painel usa Bearer.
