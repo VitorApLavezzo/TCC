@@ -3,10 +3,11 @@
 pessoais antes de sair e registra cada tentativa com o texto exatamente como foi enviado."""
 import json
 import os
+import shutil
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Iterable, List, Optional
+from typing import Any, Callable, Iterable, List, Optional, Tuple
 
 import httpx
 
@@ -22,6 +23,14 @@ PRIVACY_NO_AI = "no_ai"
 
 # `model_used` do texto montado por modelos prontos, sem nenhum provedor
 STATIC_ANALYSIS = "análise local"
+
+# Montado somente-leitura pelo compose
+CLAUDE_HOST_CREDENTIALS = "/claude-host/.credentials.json"
+
+JSON_RETRY_HINT = (
+    "\n\nSua resposta anterior não era JSON válido. Responda só com o JSON, "
+    'escapando como \\" toda aspa dupla dentro de um texto.'
+)
 
 
 # Vai para todos os provedores: nome de processo e linha de comando são controlados por quem
@@ -78,6 +87,18 @@ def _cli_failure_reason(output: str) -> str:
     return str(reason or output)[:300]
 
 
+def _sync_claude_credentials() -> None:
+    """A CLI do computador renova o login a cada poucas horas e invalida a cópia feita na subida."""
+    target = os.path.join(os.environ.get("HOME", "/root"), ".claude", ".credentials.json")
+    try:
+        host_changed = os.path.getmtime(CLAUDE_HOST_CREDENTIALS)
+        if not os.path.exists(target) or host_changed > os.path.getmtime(target):
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(CLAUDE_HOST_CREDENTIALS, target)
+    except OSError:
+        pass
+
+
 def _call_claude_cli(prompt: str, temperature: float = 0.3) -> str:
     """Claude Code CLI em modo headless, usando a assinatura (sem chave de API).
 
@@ -85,6 +106,7 @@ def _call_claude_cli(prompt: str, temperature: float = 0.3) -> str:
     programa injetado viraria execução de comando neste container, que acessa o banco.
     Prompt por stdin (fora da lista de processos) e ambiente mínimo (sem DATABASE_URL/SECRET_KEY).
     """
+    _sync_claude_credentials()
     cmd = [
         settings.CLAUDE_CLI_PATH, "-p",
         "--output-format", "json",
@@ -171,6 +193,18 @@ def provider_chain(privacy: str = PRIVACY_ANY, exclude: Iterable[str] = ()) -> L
     return [p for p in chain if p.name not in excluded]
 
 
+def _ask(provider: Provider, sent: str, temperature: float, parse: Optional[Callable[[str], Any]]) -> Tuple[str, Any]:
+    """(resposta, valor). JSON malformado ganha uma segunda chance no mesmo provedor."""
+    raw = provider.call(sent, temperature)
+    if parse is None:
+        return raw, raw
+    try:
+        return raw, parse(raw)
+    except InvalidJSON:
+        raw = provider.call(sent + JSON_RETRY_HINT, temperature)
+        return raw, parse(raw)
+
+
 def complete(
     prompt: str,
     *,
@@ -189,8 +223,7 @@ def complete(
         last_sent = sent
         t0 = time.monotonic()
         try:
-            raw = provider.call(sent, temperature)
-            value = parse(raw) if parse else raw
+            raw, value = _ask(provider, sent, temperature, parse)
             attempts.append(Attempt(provider.name, provider.destination, True, int((time.monotonic() - t0) * 1000)))
             return LLMResult(
                 ok=True,
@@ -216,14 +249,21 @@ def complete(
     )
 
 
+class InvalidJSON(ValueError):
+    pass
+
+
 def extract_json(raw: str) -> Any:
     """Extrai o JSON da resposta mesmo com texto antes ou depois."""
     starts = [i for i in (raw.find("{"), raw.find("[")) if i != -1]
     if not starts:
-        raise ValueError("Nenhum JSON na resposta")
+        raise InvalidJSON("Nenhum JSON na resposta")
     start = min(starts)
     closer = "}" if raw[start] == "{" else "]"
     end = raw.rfind(closer) + 1
     if end == 0:
-        raise ValueError("JSON sem fechamento")
-    return json.loads(raw[start:end])
+        raise InvalidJSON("JSON sem fechamento")
+    try:
+        return json.loads(raw[start:end])
+    except json.JSONDecodeError as e:
+        raise InvalidJSON(str(e)) from e

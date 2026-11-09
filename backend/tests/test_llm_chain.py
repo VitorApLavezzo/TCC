@@ -4,6 +4,7 @@ A CLI é um agente com ferramentas e o texto enviado carrega dado que um atacant
 controla (nome de processo, linha de comando): ela só pode gerar texto.
 """
 import json
+import os
 import subprocess
 
 import pytest
@@ -130,6 +131,109 @@ class TestRestrictedCall:
         self._fail(monkeypatch, stderr="comando desconhecido")
         with pytest.raises(RuntimeError, match="comando desconhecido"):
             llm._call_claude_cli("pedido")
+
+
+class TestClaudeCredentialSync:
+    """A CLI do computador renova o login e invalida a cópia que o backend fez ao subir."""
+
+    @pytest.fixture
+    def paths(self, tmp_path, monkeypatch):
+        from app.services import llm
+        host = tmp_path / "host" / ".credentials.json"
+        host.parent.mkdir()
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True)
+        monkeypatch.setattr(llm, "CLAUDE_HOST_CREDENTIALS", str(host))
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setattr(llm.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps({"result": "ok", "is_error": False}), stderr=""))
+        return host, home / ".claude" / ".credentials.json"
+
+    def _write(self, path, text, mtime):
+        path.write_text(text)
+        os.utime(path, (mtime, mtime))
+
+    def test_newer_host_login_replaces_the_copy(self, paths):
+        from app.services import llm
+        host, copy = paths
+        self._write(copy, "antigo", 1000)
+        self._write(host, "renovado", 2000)
+        llm._call_claude_cli("pedido")
+        assert copy.read_text() == "renovado"
+
+    def test_copy_renewed_by_the_backend_is_kept(self, paths):
+        from app.services import llm
+        host, copy = paths
+        self._write(host, "do computador", 1000)
+        self._write(copy, "renovado aqui", 2000)
+        llm._call_claude_cli("pedido")
+        assert copy.read_text() == "renovado aqui"
+
+    def test_first_copy_when_backend_started_without_one(self, paths):
+        from app.services import llm
+        host, copy = paths
+        self._write(host, "do computador", 1000)
+        llm._call_claude_cli("pedido")
+        assert copy.read_text() == "do computador"
+
+    def test_missing_host_login_does_not_stop_the_call(self, paths):
+        from app.services import llm
+        assert llm._call_claude_cli("pedido") == "ok"
+
+
+class TestMalformedJsonRetry:
+    def _provider(self, name, replies):
+        from app.services import llm
+        prompts = []
+        pending = iter(replies)
+
+        def call(prompt, temperature):
+            prompts.append(prompt)
+            return next(pending)
+
+        return llm.Provider(name, llm.LOCAL, call), prompts
+
+    def test_malformed_answer_is_retried_on_the_same_provider(self, monkeypatch):
+        from app.services import llm
+        provider, prompts = self._provider("a", ['{"a": "disse "oi" aqui"}', '{"a": 1}'])
+        monkeypatch.setattr(llm, "provider_chain", lambda *a, **k: [provider])
+
+        result = llm.complete("pedido", parse=llm.extract_json)
+
+        assert result.ok and result.value == {"a": 1} and result.provider == "a"
+        assert len(prompts) == 2 and prompts[0] == "pedido" and prompts[1].startswith("pedido")
+        assert prompts[1] != "pedido"
+
+    def test_second_malformed_answer_moves_to_the_next_provider(self, monkeypatch):
+        from app.services import llm
+        first, first_prompts = self._provider("a", ['{"a": x}', '{"a": y}'])
+        second, _ = self._provider("b", ['{"b": 2}'])
+        monkeypatch.setattr(llm, "provider_chain", lambda *a, **k: [first, second])
+
+        result = llm.complete("pedido", parse=llm.extract_json)
+
+        assert result.provider == "b" and result.value == {"b": 2}
+        assert len(first_prompts) == 2
+
+    def test_answer_without_json_is_retried(self, monkeypatch):
+        from app.services import llm
+        provider, prompts = self._provider("a", ["desculpe, não consigo", '{"a": 1}'])
+        monkeypatch.setattr(llm, "provider_chain", lambda *a, **k: [provider])
+        assert llm.complete("pedido", parse=llm.extract_json).value == {"a": 1}
+        assert len(prompts) == 2
+
+    def test_rejection_of_valid_json_is_not_retried(self, monkeypatch):
+        """Número inventado reprovado passa ao próximo provedor, como sempre."""
+        from app.services import llm
+        provider, prompts = self._provider("a", ['{"a": 1}', '{"a": 2}'])
+        monkeypatch.setattr(llm, "provider_chain", lambda *a, **k: [provider])
+
+        def reject(raw):
+            llm.extract_json(raw)
+            raise ValueError("número sem respaldo")
+
+        assert llm.complete("pedido", parse=reject).ok is False
+        assert len(prompts) == 1
 
 
 class TestSystemPromptInAllProviders:
