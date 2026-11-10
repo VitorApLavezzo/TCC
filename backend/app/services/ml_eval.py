@@ -402,6 +402,8 @@ def ablation(db: Session, owner_id: int, names: Optional[List[str]] = None) -> D
                 "false_positives": metrics.get("false_positives"),
                 "scenarios": len(result.scenarios),
                 "detected_types": sorted({t for s in result.scenarios for t in s.detected}),
+                "hits": sorted(s.name for s in result.scenarios
+                               if s.family == benchmark.ATTACK and s.expected in s.detected),
             })
     finally:
         # Deixar o servidor com meia detecção por causa de um erro seria pior que o erro
@@ -422,9 +424,14 @@ def _ablation_sentence(rows: List[Dict[str, Any]]) -> str:
     tp_both = both.get("true_positives") or 0
     tp_ml = ml.get("true_positives") or 0
     if tp_both > tp_rules:
-        return (f"As regras sozinhas encontraram {tp_rules} dos ataques; com o modelo, "
-                f"{tp_both}. O Isolation Forest sozinho encontrou {tp_ml} — "
-                "as duas camadas pegam coisas diferentes, e é por isso que o sistema usa as duas.")
+        # O sistema completo também roda as previsões: nem todo acerto a mais é do modelo
+        extra = set(both.get("hits") or []) - set(rules.get("hits") or [])
+        from_model = len(extra & set(ml.get("hits") or []))
+        from_rest = len(extra) - from_model
+        return (f"As regras sozinhas encontraram {tp_rules} dos ataques, e o sistema completo, {tp_both}. "
+                f"Dos acertos a mais, {from_model} {'também aparece' if from_model == 1 else 'também aparecem'} "
+                f"com o Isolation Forest sozinho e {from_rest} {'vem' if from_rest == 1 else 'vêm'} de outra "
+                f"parte do sistema, como a previsão de disco. O Isolation Forest sozinho encontrou {tp_ml}.")
     if tp_ml == 0:
         return (f"Nestes cenários, as regras respondem por toda a detecção ({tp_rules} ataques) e o "
                 "modelo não encontrou nenhum sozinho. O papel dele aqui é outro: cobrir o desvio "
