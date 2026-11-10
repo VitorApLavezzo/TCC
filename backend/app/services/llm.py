@@ -54,8 +54,10 @@ def _call_ollama(prompt: str, temperature: float = 0.3) -> str:
         "stream": False,
         "options": {"temperature": temperature},
     }
+    # A senha vai no cabeçalho, nunca na URL: a URL aparece nas mensagens de erro
+    auth = (settings.OLLAMA_USERNAME, settings.OLLAMA_PASSWORD) if settings.OLLAMA_USERNAME else None
     # connect=5s: host do Ollama desligado falha rápido e a cadeia segue
-    with httpx.Client(timeout=httpx.Timeout(120.0, connect=5.0)) as client:
+    with httpx.Client(timeout=httpx.Timeout(120.0, connect=5.0), auth=auth) as client:
         response = client.post(url, json=payload)
         response.raise_for_status()
         return response.json()["response"]
@@ -180,15 +182,17 @@ def privacy_of(machine) -> str:
 
 
 def provider_chain(privacy: str = PRIVACY_ANY, exclude: Iterable[str] = ()) -> List[Provider]:
-    """Provedores na ordem de preferência (Ollama local, Claude CLI, API compatível com OpenAI),
-    já filtrados pela privacidade."""
+    """Provedores na ordem de preferência, já filtrados pela privacidade: Ollama local antes da
+    nuvem (Claude CLI, API compatível com OpenAI), ou depois com LLM_LOCAL_FIRST=false."""
     if privacy == PRIVACY_NO_AI:
         return []
-    chain: List[Provider] = [Provider(f"ollama/{settings.OLLAMA_MODEL}", LOCAL, _call_ollama)]
+    local = [Provider(f"ollama/{settings.OLLAMA_MODEL}", LOCAL, _call_ollama)]
+    cloud: List[Provider] = []
     if settings.CLAUDE_CLI_ENABLED and privacy == PRIVACY_ANY:
-        chain.append(Provider(f"claude-cli/{settings.CLAUDE_CLI_MODEL}", CLOUD, _call_claude_cli))
+        cloud.append(Provider(f"claude-cli/{settings.CLAUDE_CLI_MODEL}", CLOUD, _call_claude_cli))
     if settings.CLOUD_LLM_API_KEY and privacy == PRIVACY_ANY:
-        chain.append(Provider(f"cloud/{settings.CLOUD_LLM_MODEL}", CLOUD, _call_cloud_llm))
+        cloud.append(Provider(f"cloud/{settings.CLOUD_LLM_MODEL}", CLOUD, _call_cloud_llm))
+    chain = local + cloud if settings.LLM_LOCAL_FIRST else cloud + local
     excluded = set(exclude)
     return [p for p in chain if p.name not in excluded]
 

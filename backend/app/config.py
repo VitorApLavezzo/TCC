@@ -17,6 +17,11 @@ class Settings(BaseSettings):
 
     OLLAMA_BASE_URL: str = "http://ollama:11434"
     OLLAMA_MODEL: str = "llama3.1:8b"
+    # Usuário e senha de um túnel na frente do Ollama (ngrok, proxy); vazios = sem senha
+    OLLAMA_USERNAME: str = ""
+    OLLAMA_PASSWORD: str = ""
+    # False: a nuvem escreve primeiro e o modelo local fica de reserva
+    LLM_LOCAL_FIRST: bool = True
 
     # Login com Google (OAuth) — vazio desativa o botão no frontend
     GOOGLE_CLIENT_ID: str = ""
