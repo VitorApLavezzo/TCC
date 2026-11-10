@@ -248,7 +248,9 @@ class TestReputationPerAccount:
         rep = db.query(HashReputation).filter(HashReputation.identity_key == "nome:msmpeng.exe").first()
         assert rep.marked_problem == 1
 
-    def test_hub_off_by_default(self):
+    def test_hub_off_by_default(self, monkeypatch):
+        # O padrão é o do código: a variável do ambiente de quem roda os testes não conta
+        monkeypatch.delenv("REPUTATION_HUB_ACCEPT", raising=False)
         assert Settings(SECRET_KEY="x" * 40, _env_file=None).REPUTATION_HUB_ACCEPT is False
 
     def test_hub_rejects_contribution_without_key(self, client, monkeypatch):

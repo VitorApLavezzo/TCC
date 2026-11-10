@@ -15,6 +15,8 @@ def full_chain(monkeypatch):
     from app.config import settings
     monkeypatch.setattr(settings, "CLAUDE_CLI_ENABLED", True)
     monkeypatch.setattr(settings, "CLOUD_LLM_API_KEY", "chave-de-teste")
+    # A ordem padrão, não a do .env de quem roda os testes
+    monkeypatch.setattr(settings, "LLM_LOCAL_FIRST", True)
 
 
 class TestOrder:
