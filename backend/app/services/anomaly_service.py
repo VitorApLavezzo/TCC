@@ -257,7 +257,8 @@ def _queue_explanation(db: Session, anomaly: Anomaly, machine: Machine) -> None:
     if explanation is None:
         explanation = AIExplanation(anomaly_id=anomaly.id)
         db.add(explanation)
-    explanation.summary = "Analisando com Inteligência Artificial..."
+    from app.services.explanation_queue import WAITING_SUMMARY
+    explanation.summary = WAITING_SUMMARY
     explanation.possible_causes = []
     explanation.recommendations = []
     explanation.model_used = None

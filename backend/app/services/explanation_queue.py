@@ -1,9 +1,11 @@
 """Fila serial de explicações: uma anomalia por vez para não sobrecarregar o modelo local."""
 import asyncio
 import threading
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
+
+WAITING_SUMMARY = "Analisando com Inteligência Artificial..."
 
 _queue: Optional[asyncio.Queue] = None
 _loop: Optional[asyncio.AbstractEventLoop] = None
@@ -41,6 +43,21 @@ def request_explanation(anomaly_id: int, metric_id: Optional[int], machine_id: i
     return True
 
 
+def pending_explanations(db: Session) -> List[Tuple[int, Optional[int], int]]:
+    """Avisos que ficaram em "analisando": a fila vive na memória e some quando o servidor para."""
+    from app.models.anomaly import Anomaly
+    from app.models.explanation import AIExplanation
+
+    rows = (
+        db.query(Anomaly.id, Anomaly.metric_id, Anomaly.machine_id)
+        .join(AIExplanation, AIExplanation.anomaly_id == Anomaly.id)
+        .filter(AIExplanation.summary == WAITING_SUMMARY)
+        .order_by(Anomaly.id)
+        .all()
+    )
+    return [tuple(row) for row in rows]
+
+
 async def explanation_worker():
     """Worker que processa a fila serial — roda uma vez no startup."""
     global _loop
@@ -53,7 +70,11 @@ async def explanation_worker():
 
     _loop = asyncio.get_running_loop()
     queue = get_queue()
-    print("[ExplanationWorker] Iniciado — aguardando anomalias na fila...")
+    with SessionLocal() as db:
+        resumed = pending_explanations(db)
+    for item in resumed:
+        queue.put_nowait(item)
+    print(f"[ExplanationWorker] Iniciado — {len(resumed)} explicações retomadas, aguardando anomalias na fila...")
 
     while True:
         try:
