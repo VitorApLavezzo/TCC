@@ -185,6 +185,10 @@ def _ts(m):
     return aware(m.timestamp) if getattr(m, "timestamp", None) else None
 
 
+# Oito pontos precisam cobrir três minutos, em qualquer intervalo de coleta
+LEAK_POINT_GAP_SECONDS = 180 / 7
+
+
 def _before(history: List[Metric], ref: Metric, seconds: float) -> List[Metric]:
     """Leituras anteriores a `ref` dentro de `seconds`, mais recente primeiro."""
     ref_ts = _ts(ref)
@@ -208,6 +212,15 @@ def _span_seconds(metrics: List[Metric]) -> float:
     if len(stamps) < 2:
         return 0.0
     return (max(stamps) - min(stamps)).total_seconds()
+
+
+def _spaced(metrics: List[Metric], min_gap: float) -> List[Metric]:
+    """Mantém leituras afastadas de `min_gap` segundos, a partir da mais recente."""
+    kept: List[Metric] = []
+    for m in reversed(metrics):
+        if not kept or (_ts(kept[-1]) - _ts(m)).total_seconds() >= min_gap:
+            kept.append(m)
+    return kept[::-1]
 
 
 def analyze_behavior(metric: Metric, db: Session, ctx: Optional[DetectionContext] = None) -> List[BehaviorAnalysis]:
@@ -264,7 +277,8 @@ def detect_memory_leak(metric: Metric, processes: List[ProcessSnapshot],
     A série é a soma das instâncias de mesmo nome por leitura, em ordem de tempo.
     """
     s = ctx.s("memory_leak")
-    window = sorted([metric] + _before(history, metric, 20 * 60), key=_ts)[-15:]
+    recent = sorted([metric] + _before(history, metric, 20 * 60), key=_ts)
+    window = _spaced(recent, LEAK_POINT_GAP_SECONDS)[-15:]
     if len(window) < 8 or _span_seconds(window[-8:]) < 180:
         return None
 
@@ -340,8 +354,8 @@ def detect_cpu_loop(metric: Metric, processes: List[ProcessSnapshot],
     total_cpu = sum(p.cpu_percent or 0 for p in processes)
     dominance = (suspect.cpu_percent or 0) / total_cpu if total_cpu > 0 else 0
 
-    # Sustentado por pelo menos um minuto, olhando os últimos três
-    window = _before(history, metric, 180)
+    # Sustentado por pelo menos um minuto. Na coleta de 60 s, três leituras levam até 184 s
+    window = _before(history, metric, 200)
     if len(window) < 3 or _span_seconds([metric] + window) < 60:
         return None
 
