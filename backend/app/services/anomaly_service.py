@@ -48,6 +48,27 @@ def set_confidence_mode(on: bool) -> bool:
     return previous
 
 
+# Avisos de regra sobre o computador inteiro, cuja evidência o modelo também vê. Nos de um
+# programa (travado, vazamento, consumo) ou de temperatura, o "normal" do modelo não desmente
+# a regra; segurança nunca é rebaixada.
+MODEL_REVIEWED_TYPES = frozenset({
+    "high_cpu", "high_memory", "resource_exhaustion", "network_spike", "disk_activity",
+    "disk_space_change", "process_surge", "gpu_anomaly", "behavioral_change",
+    "behavioral_anomaly", "unusual_time",
+})
+
+
+def second_opinion(candidates: List["Candidate"], model_flagged: Optional[bool]) -> None:
+    """O modelo opina em todo aviso de regra; onde vê a mesma evidência e acha normal, rebaixa."""
+    if model_flagged is None:
+        return
+    for c in candidates:
+        c.details = {**(c.details or {}), "model_opinion": "anomalous" if model_flagged else "normal"}
+        if not model_flagged and c.anomaly_type in MODEL_REVIEWED_TYPES and c.severity != "low":
+            c.severity = _DEMOTE[c.severity]
+            c.details["model_demoted"] = True
+
+
 def apply_confidence(severity: str, confidence: Optional[float]) -> str:
     """Evidência fraca desce um nível.
 
@@ -409,6 +430,7 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     ml_threshold = ml_service.alert_threshold(machine.id, sensitivity.get("ml", 1.0))
     is_statistical, score = ml_service.predict_anomaly(machine.id, metric, offset, sensitivity.get("ml", 1.0))
     metric.ml_score = score
+    model_flagged = is_statistical if score is not None else None
     if is_statistical:
         # Uma leitura isolada fora do padrão é ruído; duas seguidas são sinal. A régua
         # da anterior é o limite da máquina: o zero do `contamination` é frouxo demais.
@@ -441,6 +463,8 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
         )
         for f in findings
     ]
+    if layer == "ambas":
+        second_opinion(candidates, model_flagged)
 
     if is_statistical and not candidates:
         contributions = ml_service.explain_contributions(machine.id, metric, offset)

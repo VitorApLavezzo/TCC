@@ -36,6 +36,7 @@ import {
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ArrowLeft, ShieldAlert } from "lucide-react";
+import { modelOpinionText } from "../lib/modelOpinion";
 
 const CPU = { key: "cpu_percent" as keyof Metric, label: "Processador", term: "cpu", threshold: THRESHOLDS.cpu.warn };
 const MEM = { key: "mem_percent" as keyof Metric, label: "Memória", term: "memoria", threshold: THRESHOLDS.memory.warn };
@@ -292,6 +293,7 @@ export function AnomalyDetail() {
       )}
 
       <TrustNote anomaly={anomaly} />
+      <ModelOpinion anomaly={anomaly} />
 
       <div className="mt-6 border-t border-hairline pt-5">
         {lead ? (
@@ -498,6 +500,13 @@ function TrustNote({ anomaly }: { anomaly: Anomaly }) {
       {isSecurityTool && " Programas de segurança varrem arquivos e baixam atualizações o tempo todo — é o trabalho deles, e se parece com o de um vírus."}
     </p>
   );
+}
+
+/** A segunda opinião do modelo de aprendizado de máquina sobre um aviso de regra. */
+function ModelOpinion({ anomaly }: { anomaly: Anomaly }) {
+  const text = modelOpinionText((anomaly.affected_metrics as any)?._behavior);
+  if (!text) return null;
+  return <p className="mt-4 max-w-prose border-l-2 border-edge pl-4 text-xs leading-relaxed text-fg-2">{text}</p>;
 }
 
 /** Contribuição de cada grupo de medidas para a nota do modelo. */
