@@ -392,9 +392,10 @@ def detect_cpu_loop(metric: Metric, processes: List[ProcessSnapshot],
 
 def detect_ddos_indicators(metric: Metric, processes: List[ProcessSnapshot],
                            history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """Pico abrupto de conexões ou de tráfego.
+    """Pico abrupto de conexões, ou de tráfego acompanhado de conexões novas.
 
-    Rede + CPU alta só reforça: sozinha era qualquer navegador com cem abas.
+    Tráfego sozinho é download. Rede + CPU alta só reforça: sozinha era qualquer
+    navegador com cem abas.
     """
     previous = _before(history, metric, 15 * 60)
     if len(previous) < 5:
@@ -407,7 +408,7 @@ def detect_ddos_indicators(metric: Metric, processes: List[ProcessSnapshot],
     current_recv = metric.net_bytes_recv or 0
 
     conn_spike = current_conn > max(avg_conn * 5 * s, 200 * s) if avg_conn > 0 else current_conn > 500 * s
-    recv_spike = current_recv > avg_recv * 10 * s if avg_recv > 10000 else False
+    recv_spike = avg_recv > 10000 and current_recv > avg_recv * 10 * s and current_conn > avg_conn * 2 * s
     high_cpu_net = (metric.cpu_percent or 0) > min(70 * s, 95) and current_conn > 100 * s
 
     if conn_spike or recv_spike:
