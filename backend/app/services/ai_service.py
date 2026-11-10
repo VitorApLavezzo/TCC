@@ -692,6 +692,16 @@ CAUSES_MAP = {
         "Programa legítimo verificando atualizações em intervalos fixos",
         "Extensão de navegador ou aplicativo em segundo plano enviando dados",
     ],
+    "login_failures": [
+        "Alguém errando a senha várias vezes, por engano ou tentando adivinhar",
+        "Programa ou serviço tentando entrar com uma senha antiga salva",
+        "Robô na internet testando senhas, se o acesso remoto estiver ligado",
+    ],
+    "out_of_memory": [
+        "Programa consumindo memória sem parar até esgotar a disponível",
+        "Muitos programas pesados abertos ao mesmo tempo",
+        "Pouca memória RAM para o uso atual do computador",
+    ],
     "outbreak_suspected": [
         "Vírus se espalhando pela rede entre os computadores",
         "Programa instalado em massa por atualização ou pela TI",
@@ -829,6 +839,16 @@ RECS_MAP = {
         "Verifique se reconhece o programa indicado no aviso",
         "Execute uma verificação completa de antivírus",
         "Se não reconhecer, encerre o programa e isole o computador da rede",
+    ],
+    "login_failures": [
+        "Se não foi você, troque a senha da sua conta agora",
+        "Desligue o acesso remoto (SSH ou Área de Trabalho Remota) se não usa",
+        "Confira se algum programa guarda uma senha antiga",
+    ],
+    "out_of_memory": [
+        "Salve seu trabalho e reabra o programa que foi encerrado",
+        "Feche os programas que não está usando",
+        "Se acontecer de novo, veja no painel qual programa mais cresce na memória",
     ],
     "outbreak_suspected": [
         "Isole da rede os computadores afetados",

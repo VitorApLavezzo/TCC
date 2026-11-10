@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("anomaly-agent")
 
-AGENT_VERSION = "2.1.0"
+AGENT_VERSION = "2.2.0"
 
 # A ausência de qualquer módulo extra só desliga a funcionalidade correspondente.
 try:
@@ -90,6 +90,7 @@ _blackbox = None
 _canary = None
 _beacons = None
 _watcher = None
+_system_log = None
 _last_inventory = 0.0
 _last_update_check = 0.0
 _force_inventory = False
@@ -306,6 +307,10 @@ def build_payload() -> dict:
                                "details": {"files": tripped, "suspect_processes": _canary_suspects(processes)}})
         except Exception:
             pass
+        try:
+            events.extend(_system_log.check(time.time()))
+        except Exception:
+            pass
     if events:
         metrics["events"] = events
     return metrics
@@ -502,7 +507,7 @@ def _check_for_updates():
 
 
 def _init_sensors():
-    global _blackbox, _canary, _beacons, _watcher
+    global _blackbox, _canary, _beacons, _watcher, _system_log
     if Blackbox is not None:
         try:
             _blackbox = Blackbox()
@@ -513,7 +518,8 @@ def _init_sensors():
             _canary = security.CanaryGuard()
             _beacons = security.BeaconTracker()
             _watcher = security.ProcessWatcher()
-            logger.info("Sensores de segurança ativos (arquivos-isca, beaconing, novos processos).")
+            _system_log = security.LogWatcher()
+            logger.info("Sensores de segurança ativos (arquivos-isca, beaconing, novos processos, registro do sistema).")
         except Exception as e:
             logger.info(f"Sensores de segurança indisponíveis: {e}")
 

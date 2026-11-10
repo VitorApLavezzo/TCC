@@ -34,6 +34,8 @@ ANOMALY_TYPE_LABELS = {
     "suspicious_command": "Comando suspeito em execução",
     "ransomware_canary": "Arquivo-isca alterado (possível sequestro de dados)",
     "beaconing": "Programa contatando a internet em intervalos regulares",
+    "login_failures": "Várias tentativas de senha erradas",
+    "out_of_memory": "Computador ficou sem memória",
     "disk_forecast": "Disco vai encher em breve",
     "outbreak_suspected": "Mesmo programa surgindo em vários computadores",
     "model_drift": "O normal deste computador mudou",
@@ -65,7 +67,7 @@ PERFORMANCE_TYPES = {
 SECURITY_TYPES = {
     "unknown_process", "suspicious_process", "malware_pattern", "process_masquerading",
     "suspicious_parent", "suspicious_command", "ransomware_canary", "beaconing", "ddos_indicator",
-    "outbreak_suspected",
+    "outbreak_suspected", "login_failures",
 }
 
 # Avisos cuja evidência não depende de histórico: atravessam o período de
@@ -73,7 +75,7 @@ SECURITY_TYPES = {
 LEARNING_EXEMPT = {
     "ransomware_canary", "process_masquerading", "suspicious_command",
     "suspicious_parent", "suspicious_process",
-    "hardware_failure_risk", "change_regression",
+    "hardware_failure_risk", "change_regression", "login_failures", "out_of_memory",
 }
 
 # Onde o cartão "e se eu fechar?" faz sentido: só onde o problema é memória ou

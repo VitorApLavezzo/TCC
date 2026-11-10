@@ -388,3 +388,11 @@ class TestTrayLabel:
 
         monkeypatch.setattr(agent_module.requests, "post", lambda *a, **k: FakeResponse())
         assert agent_module.send_activity_label("xyz") is False
+
+
+def test_system_log_events_go_out_with_the_reading(agent_module, monkeypatch):
+    event = {"type": "login_failures", "details": {"remote": 7, "local": 0}}
+    monkeypatch.setattr(agent_module, "_maybe_start_slow_collection", lambda: None)
+    monkeypatch.setattr(agent_module.security, "log_events", lambda since: [event])
+    monkeypatch.setattr(agent_module, "_system_log", agent_module.security.LogWatcher(every=0))
+    assert event in agent_module.build_payload()["events"]

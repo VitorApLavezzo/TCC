@@ -1,7 +1,9 @@
 """Sensores de segurança leves e best-effort: arquivos-isca (ransomware), beaconing, processos novos,
-desligamento anterior e erros de hardware / saúde de disco (SMART)."""
+desligamento anterior, erros de hardware / saúde de disco (SMART) e registro do sistema."""
+import json
 import os
 import platform
+import re
 import subprocess
 import time
 from collections import defaultdict, deque
@@ -342,6 +344,106 @@ def hardware_errors(since_epoch: float) -> List[Dict[str, Any]]:
         except (FileNotFoundError, subprocess.SubprocessError):
             pass
     return errors[:20]
+
+
+_PAM_FAILURE = re.compile(r"pam_\w+\([^)]*:auth\): authentication failure")
+_SSH_FAILURE = re.compile(r"Failed (password|keyboard-interactive)")
+_KERNEL_OOM = re.compile(r"Out of memory: Killed process \d+ \((.+?)\)")
+_OOMD_KILL = re.compile(r"Killed /")
+_REMOTE_LOGON_TYPES = {"3", "8", "10"}
+_LOCAL_LOGON_TYPES = {"2", "7", "11"}
+
+
+class LogWatcher:
+    """Lê o registro do sistema em intervalos, sempre continuando de onde parou."""
+
+    def __init__(self, every: int = 300):
+        self.every = every
+        self._cursor = time.time()
+
+    def check(self, now: float) -> List[Dict[str, Any]]:
+        if now - self._cursor < self.every:
+            return []
+        since, self._cursor = self._cursor, now
+        return log_events(since)
+
+
+def log_events(since_epoch: float) -> List[Dict[str, Any]]:
+    """Falhas de login e falta de memória desde `since_epoch`. Só contagens: nomes de usuário e endereços não saem daqui."""
+    try:
+        if IS_WINDOWS:
+            return _log_events_windows(since_epoch)
+        if IS_LINUX:
+            return _log_events_linux(since_epoch)
+    except Exception:
+        pass
+    return []
+
+
+def _log_summary(remote: int, local: int, killed: int, low_memory: int, processes: List[str]) -> List[Dict[str, Any]]:
+    events: List[Dict[str, Any]] = []
+    if remote or local:
+        events.append({"type": "login_failures", "details": {"remote": remote, "local": local}})
+    if killed or low_memory:
+        events.append({"type": "out_of_memory",
+                       "details": {"killed": killed, "low_memory": low_memory, "processes": processes[:5]}})
+    return events
+
+
+def _log_events_linux(since_epoch: float) -> List[Dict[str, Any]]:
+    out = subprocess.run(
+        ["journalctl", "SYSLOG_FACILITY=4", "SYSLOG_FACILITY=10", "+", "_TRANSPORT=kernel", "PRIORITY=3", "+",
+         "SYSLOG_IDENTIFIER=systemd-oomd", "-S", f"@{int(since_epoch)}", "-o", "json", "--no-pager", "-q"],
+        capture_output=True, text=True, errors="replace", timeout=15, **NO_WINDOW)
+    ssh_pam = ssh_failed = local = killed = 0
+    processes: List[str] = []
+    for line in out.stdout.splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        message = entry.get("MESSAGE")
+        if not isinstance(message, str):
+            continue  # o journal entrega texto não UTF-8 como lista de bytes
+        identifier = str(entry.get("SYSLOG_IDENTIFIER") or "")
+        is_ssh = identifier.startswith("sshd")
+        if _PAM_FAILURE.search(message):
+            if is_ssh:
+                ssh_pam += 1
+            else:
+                local += 1
+        elif is_ssh and _SSH_FAILURE.match(message):
+            ssh_failed += 1
+        elif entry.get("_TRANSPORT") == "kernel":
+            found = _KERNEL_OOM.match(message)
+            if found:
+                killed += 1
+                if found.group(1) not in processes:
+                    processes.append(found.group(1))
+        elif identifier == "systemd-oomd" and _OOMD_KILL.match(message):
+            killed += 1
+    # Com PAM, o sshd registra a mesma tentativa nas duas formas
+    return _log_summary(max(ssh_pam, ssh_failed), local, killed, 0, processes)
+
+
+def _log_events_windows(since_epoch: float) -> List[Dict[str, Any]]:
+    ps = (f"$s=[DateTimeOffset]::FromUnixTimeSeconds({int(since_epoch)}).LocalDateTime;"
+          "Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625;StartTime=$s} -ErrorAction SilentlyContinue"
+          " | ForEach-Object { '4625 ' + $_.Properties[10].Value };"
+          "Get-WinEvent -FilterHashtable @{LogName='System';Id=2004;"
+          "ProviderName='Microsoft-Windows-Resource-Exhaustion-Detector';StartTime=$s} -ErrorAction SilentlyContinue"
+          " | ForEach-Object { '2004' }")
+    out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=20, **NO_WINDOW)
+    remote = local = low_memory = 0
+    for line in out.stdout.splitlines():
+        code, _, logon_type = line.strip().partition(" ")
+        if code == "2004":
+            low_memory += 1
+        elif code == "4625" and logon_type in _REMOTE_LOGON_TYPES:
+            remote += 1
+        elif code == "4625" and logon_type in _LOCAL_LOGON_TYPES:
+            local += 1
+    return _log_summary(remote, local, 0, low_memory, [])
 
 
 def sleep_blockers() -> Optional[List[str]]:

@@ -25,6 +25,9 @@ SYSTEM_INFO_KEYS = {
     "is_admin", "capabilities", "python_version", "hostname", "sleep_blockers", "cpu_tdp_watts",
 }
 
+LOGIN_FAILURES_ALERT = 5
+LOGIN_FAILURES_HIGH = 20
+
 
 def _epoch(ts: Optional[float]) -> Optional[datetime]:
     if not ts:
@@ -269,12 +272,72 @@ def _evaluate_hardware_errors(db: Session, machine: Machine, previous: List, ite
     )
 
 
+def _count(details: Dict[str, Any], key: str) -> int:
+    value = details.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    try:
+        return max(int(value), 0)
+    except (ValueError, OverflowError):
+        return 0
+
+
+def _evaluate_login_failures(db: Session, machine: Machine, details: Dict[str, Any], metric: Optional[Metric],
+                             now) -> Optional[Anomaly]:
+    remote, local = _count(details, "remote"), _count(details, "local")
+    total = remote + local
+    if total < LOGIN_FAILURES_ALERT:
+        return None
+    return persist_candidate(
+        db, machine,
+        Candidate(
+            anomaly_type="login_failures",
+            severity="high" if total >= LOGIN_FAILURES_HIGH else "medium",
+            affected={"tentativas_erradas": total, "pela_rede": remote, "no_proprio_computador": local},
+            details={"type": "login_failures", "remote": remote, "local": local},
+            source="agent_event",
+            cooldown_minutes=60,
+        ),
+        metric=metric, now=now,
+    )
+
+
+def _evaluate_out_of_memory(db: Session, machine: Machine, details: Dict[str, Any], metric: Optional[Metric],
+                            now) -> Optional[Anomaly]:
+    killed, low_memory = _count(details, "killed"), _count(details, "low_memory")
+    if not killed and not low_memory:
+        return None
+    reported = details.get("processes")
+    processes = [str(p)[:64] for p in reported[:5]] if isinstance(reported, list) else []
+    return persist_candidate(
+        db, machine,
+        Candidate(
+            anomaly_type="out_of_memory",
+            severity="high" if killed else "medium",
+            affected={"programas_encerrados": killed, "avisos_de_pouca_memoria": low_memory},
+            responsible=processes[0] if processes else None,
+            details={"type": "out_of_memory", "killed": killed, "low_memory": low_memory, "processes": processes},
+            source="agent_event",
+            cooldown_minutes=30,
+        ),
+        metric=metric, now=now,
+    )
+
+
 def handle_events(db: Session, machine: Machine, events: List[Dict[str, Any]], metric: Optional[Metric], now) -> List[Anomaly]:
     created: List[Anomaly] = []
     for e in events:
         etype = e.get("type")
         details = e.get("details") or {}
-        if etype == "canary_tripped":
+        if etype == "login_failures":
+            a = _evaluate_login_failures(db, machine, details, metric, now)
+            if a:
+                created.append(a)
+        elif etype == "out_of_memory":
+            a = _evaluate_out_of_memory(db, machine, details, metric, now)
+            if a:
+                created.append(a)
+        elif etype == "canary_tripped":
             files = details.get("files") or []
             suspects = details.get("suspect_processes") or []
             responsible = suspects[0].get("name") if suspects and isinstance(suspects[0], dict) else None

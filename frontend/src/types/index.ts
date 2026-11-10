@@ -291,6 +291,8 @@ export const ANOMALY_TYPE_LABELS: Record<string, string> = {
   suspicious_command: "Comando suspeito em execução",
   ransomware_canary: "Arquivo-isca alterado (possível sequestro de dados)",
   beaconing: "Programa contatando a internet em intervalos regulares",
+  login_failures: "Várias tentativas de senha erradas",
+  out_of_memory: "Computador ficou sem memória",
   disk_forecast: "Disco vai encher em breve",
   outbreak_suspected: "Mesmo programa surgindo em vários computadores",
   model_drift: "O normal deste computador mudou",
@@ -302,7 +304,7 @@ export const ANOMALY_TYPE_LABELS: Record<string, string> = {
 /** Tipos de segurança — recebem um selo distinto e nunca são silenciados por engano. */
 export const SECURITY_TYPES = new Set([
   "unknown_process", "suspicious_process", "malware_pattern", "process_masquerading", "suspicious_parent",
-  "suspicious_command", "ransomware_canary", "beaconing", "ddos_indicator", "outbreak_suspected",
+  "suspicious_command", "ransomware_canary", "beaconing", "ddos_indicator", "outbreak_suspected", "login_failures",
 ]);
 
 export const LANGUAGE_LEVEL_LABELS: Record<LanguageLevel, string> = {
