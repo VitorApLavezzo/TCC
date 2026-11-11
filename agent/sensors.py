@@ -1,9 +1,12 @@
 """Sensores extras: identidade de executáveis (hash, assinatura), sistema, tempo ocioso e janela ativa.
 Best-effort: sem permissão ou ferramenta o campo volta None; cálculos caros ficam em cache."""
+import ctypes
+import ctypes.util
 import hashlib
 import os
 import platform
 import subprocess
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -146,6 +149,90 @@ def _signature_linux(path: str) -> Dict[str, Any]:
     return {"signed": "unsigned", "publisher": None}
 
 
+class _XScreenSaverInfo(ctypes.Structure):
+    _fields_ = [("window", ctypes.c_ulong), ("state", ctypes.c_int), ("kind", ctypes.c_int),
+                ("til_or_since", ctypes.c_ulong), ("idle", ctypes.c_ulong), ("event_mask", ctypes.c_ulong)]
+
+
+# O tratador padrão do Xlib encerra o processo num erro, como a janela ativa fechando no meio
+# da leitura; este só ignora. Fica no módulo para o ctypes não o descartar.
+_X_ERROR_HANDLER = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+_ignore_x_error = _X_ERROR_HANDLER(lambda display, event: 0)
+
+
+class _X11Session:
+    """Tempo sem teclado e mouse (extensão XScreenSaver) e janela ativa (padrão EWMH), sem dependências."""
+
+    def __init__(self):
+        x11 = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+        xss = ctypes.CDLL(ctypes.util.find_library("Xss") or "libXss.so.1")
+        x11.XSetErrorHandler.argtypes = [_X_ERROR_HANDLER]
+        x11.XSetErrorHandler.restype = ctypes.c_void_p
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        x11.XInternAtom.restype = ctypes.c_ulong
+        x11.XGetWindowProperty.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long, ctypes.c_int,
+            ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_void_p),
+        ]
+        x11.XGetWindowProperty.restype = ctypes.c_int
+        x11.XFree.argtypes = [ctypes.c_void_p]
+        xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(_XScreenSaverInfo)
+        xss.XScreenSaverQueryInfo.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(_XScreenSaverInfo)]
+        x11.XSetErrorHandler(_ignore_x_error)
+        self.display = x11.XOpenDisplay(None)
+        if not self.display:
+            raise OSError("sem acesso à tela")
+        self.x11, self.xss = x11, xss
+        self.root = x11.XDefaultRootWindow(self.display)
+        self.info = xss.XScreenSaverAllocInfo()
+
+    def idle_ms(self) -> Optional[int]:
+        if self.xss.XScreenSaverQueryInfo(self.display, self.root, self.info):
+            return int(self.info.contents.idle)
+        return None
+
+    def active_window_pid(self) -> Optional[int]:
+        window = self._cardinal(self.root, b"_NET_ACTIVE_WINDOW")
+        return self._cardinal(window, b"_NET_WM_PID") if window else None
+
+    def _cardinal(self, window: int, name: bytes) -> Optional[int]:
+        atom = self.x11.XInternAtom(self.display, name, True)
+        if not atom:
+            return None
+        kind, fmt, count, remaining = ctypes.c_ulong(), ctypes.c_int(), ctypes.c_ulong(), ctypes.c_ulong()
+        data = ctypes.c_void_p()
+        status = self.x11.XGetWindowProperty(self.display, window, atom, 0, 1, False, 0, ctypes.byref(kind),
+                                             ctypes.byref(fmt), ctypes.byref(count), ctypes.byref(remaining),
+                                             ctypes.byref(data))
+        try:
+            if status != 0 or not data.value or count.value == 0 or fmt.value != 32:
+                return None
+            return int(ctypes.cast(data, ctypes.POINTER(ctypes.c_ulong))[0]) or None
+        finally:
+            if data.value:
+                self.x11.XFree(data)
+
+
+_x11: Optional[_X11Session] = None
+_x11_lock = threading.Lock()
+
+
+def _x11_session() -> Optional[_X11Session]:
+    """A tela do usuário; None sem tela ou no Wayland, onde o X11 só enxerga programas antigos."""
+    global _x11
+    if _x11 is None and os.environ.get("DISPLAY") and os.environ.get("XDG_SESSION_TYPE") != "wayland":
+        try:
+            _x11 = _X11Session()
+        except Exception:
+            return None
+    return _x11
+
+
 def idle_seconds() -> Optional[float]:
     try:
         if IS_WINDOWS:
@@ -159,6 +246,11 @@ def idle_seconds() -> Optional[float]:
             if ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
                 millis = ctypes.windll.kernel32.GetTickCount() - info.dwTime
                 return max(millis / 1000.0, 0.0)
+        elif IS_LINUX:
+            with _x11_lock:
+                session = _x11_session()
+                millis = session.idle_ms() if session else None
+            return millis / 1000.0 if millis is not None else None
     except Exception:
         pass
     return None
@@ -166,7 +258,7 @@ def idle_seconds() -> Optional[float]:
 
 def foreground_process() -> Optional[Tuple[int, str]]:
     """(pid, nome) do programa na janela da frente — separa um jogo de um minerador.
-    None sem janela na frente (tela bloqueada, área de trabalho) ou fora do Windows."""
+    None sem janela na frente (tela bloqueada, área de trabalho) ou sem tela legível (Wayland, serviço)."""
     try:
         if IS_WINDOWS:
             import ctypes
@@ -179,6 +271,11 @@ def foreground_process() -> Optional[Tuple[int, str]]:
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value:
                 return int(pid.value), psutil.Process(pid.value).name()
+        elif IS_LINUX:
+            with _x11_lock:
+                session = _x11_session()
+                pid = session.active_window_pid() if session else None
+            return (int(pid), psutil.Process(pid).name()) if pid else None
     except Exception:
         pass
     return None

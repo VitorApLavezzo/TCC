@@ -27,6 +27,9 @@ _IDLE = {"system idle process", "idle"}
 SHELL_PROCESSES = {
     "explorer.exe", "shellexperiencehost.exe", "startmenuexperiencehost.exe", "searchhost.exe",
     "searchapp.exe", "textinputhost.exe", "lockapp.exe",
+    # Linux: área de trabalho, painel e tela de bloqueio dos ambientes mais comuns
+    "cinnamon", "nemo-desktop", "cinnamon-screensaver", "gnome-shell", "plasmashell",
+    "xfdesktop", "xfce4-panel", "mate-panel", "caja", "budgie-panel", "lxpanel",
 }
 
 # Chave da avaliação (com/sem contexto). Por thread: a reprodução leva minutos em segundo

@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("anomaly-agent")
 
-AGENT_VERSION = "2.2.0"
+AGENT_VERSION = "2.3.0"
 
 # A ausência de qualquer módulo extra só desliga a funcionalidade correspondente.
 try:
