@@ -91,6 +91,7 @@ services:
       CLAUDE_CLI_ENABLED: ${CLAUDE_CLI_ENABLED:-false}
       CLAUDE_CLI_MODEL: ${CLAUDE_CLI_MODEL:-sonnet}
       CLAUDE_CLI_TIMEOUT: ${CLAUDE_CLI_TIMEOUT:-120}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       # Endereço público do painel (links em Telegram/e-mail)
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       # Notificações por Telegram (long polling; vazio desativa)

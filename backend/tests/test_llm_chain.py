@@ -147,6 +147,7 @@ class TestClaudeCredentialSync:
         (home / ".claude").mkdir(parents=True)
         monkeypatch.setattr(llm, "CLAUDE_HOST_CREDENTIALS", str(host))
         monkeypatch.setenv("HOME", str(home))
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
         monkeypatch.setattr(llm.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(
             cmd, 0, stdout=json.dumps({"result": "ok", "is_error": False}), stderr=""))
         return host, home / ".claude" / ".credentials.json"
@@ -154,6 +155,29 @@ class TestClaudeCredentialSync:
     def _write(self, path, text, mtime):
         path.write_text(text)
         os.utime(path, (mtime, mtime))
+
+    def test_cli_gets_the_server_token_and_no_other_secret(self, paths, monkeypatch):
+        from app.services import llm
+        seen = {}
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "token-do-servidor")
+        monkeypatch.setenv("SECRET_KEY", "nao-pode-vazar")
+
+        def run(cmd, **kwargs):
+            seen.update(kwargs["env"])
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"result": "ok", "is_error": False}), stderr="")
+
+        monkeypatch.setattr(llm.subprocess, "run", run)
+        llm._call_claude_cli("pedido")
+        assert seen["CLAUDE_CODE_OAUTH_TOKEN"] == "token-do-servidor"
+        assert "SECRET_KEY" not in seen
+
+    def test_server_with_its_own_token_never_copies_the_computer_login(self, paths, monkeypatch):
+        from app.services import llm
+        host, copy = paths
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "token-do-servidor")
+        self._write(host, "login do computador", 2000)
+        llm._call_claude_cli("pedido")
+        assert not copy.exists()
 
     def test_newer_host_login_replaces_the_copy(self, paths):
         from app.services import llm

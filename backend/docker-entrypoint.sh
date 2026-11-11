@@ -1,17 +1,21 @@
 #!/bin/sh
 # Prepara a credencial do Claude Code CLI antes de subir a API.
 #
-# O diretorio ~/.claude do host e montado como somente-leitura em /claude-host.
-# Copiamos a credencial para um diretorio proprio do container, de modo que a
-# renovacao automatica do token escreva na copia e nunca no arquivo do host.
-# Sem credencial o container sobe normalmente: o provedor claude-cli falha e a
-# cadeia de explicacoes segue para o Ollama.
+# Com CLAUDE_CODE_OAUTH_TOKEN (gerado por `claude setup-token`) o servidor tem login
+# proprio e nao toca no do computador: os dois renovando o mesmo login derrubavam um
+# ao outro. Sem o token, copia o ~/.claude do host, montado somente-leitura em
+# /claude-host, para uma pasta do container. Sem nenhum dos dois o container sobe
+# normalmente e a cadeia de explicacoes segue para o Ollama.
 set -e
 
-if [ -f /claude-host/.credentials.json ]; then
-    mkdir -p /root/.claude
-    cp /claude-host/.credentials.json /root/.claude/.credentials.json
-    chmod 600 /root/.claude/.credentials.json
+HOST_DIR="${CLAUDE_HOST_DIR:-/claude-host}"
+
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+    echo "[entrypoint] Claude CLI com token de longa duracao do proprio servidor"
+elif [ -f "$HOST_DIR/.credentials.json" ]; then
+    mkdir -p "$HOME/.claude"
+    cp "$HOST_DIR/.credentials.json" "$HOME/.claude/.credentials.json"
+    chmod 600 "$HOME/.claude/.credentials.json"
     echo "[entrypoint] credencial do Claude CLI copiada do host"
 else
     echo "[entrypoint] sem credencial do Claude CLI — provedor claude-cli ficara indisponivel"

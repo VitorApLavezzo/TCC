@@ -91,6 +91,8 @@ def _cli_failure_reason(output: str) -> str:
 
 def _sync_claude_credentials() -> None:
     """A CLI do computador renova o login a cada poucas horas e invalida a cópia feita na subida."""
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return  # login próprio do servidor: com o do computador, um renovaria e derrubaria o outro
     target = os.path.join(os.environ.get("HOME", "/root"), ".claude", ".credentials.json")
     try:
         host_changed = os.path.getmtime(CLAUDE_HOST_CREDENTIALS)
@@ -128,6 +130,8 @@ def _call_claude_cli(prompt: str, temperature: float = 0.3) -> str:
         "DISABLE_AUTOUPDATER": "1",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     }
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = os.environ["CLAUDE_CODE_OAUTH_TOKEN"]
     proc = subprocess.run(
         cmd,
         input=prompt,
