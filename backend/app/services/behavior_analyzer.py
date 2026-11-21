@@ -185,8 +185,10 @@ def _ts(m):
     return aware(m.timestamp) if getattr(m, "timestamp", None) else None
 
 
-# Oito pontos precisam cobrir três minutos, em qualquer intervalo de coleta
-LEAK_POINT_GAP_SECONDS = 180 / 7
+# Oito pontos precisam cobrir dez minutos, em qualquer intervalo de coleta: com três, um jogo
+# carregando (Fortnite, 2026-11-20: 4 min subindo) virava vazamento
+LEAK_MIN_SPAN_SECONDS = 600
+LEAK_POINT_GAP_SECONDS = LEAK_MIN_SPAN_SECONDS / 7
 
 
 def _before(history: List[Metric], ref: Metric, seconds: float) -> List[Metric]:
@@ -279,7 +281,7 @@ def detect_memory_leak(metric: Metric, processes: List[ProcessSnapshot],
     s = ctx.s("memory_leak")
     recent = sorted([metric] + _before(history, metric, 20 * 60), key=_ts)
     window = _spaced(recent, LEAK_POINT_GAP_SECONDS)[-15:]
-    if len(window) < 8 or _span_seconds(window[-8:]) < 180:
+    if len(window) < 8 or _span_seconds(window[-8:]) < LEAK_MIN_SPAN_SECONDS:
         return None
 
     ts_by_id = {m.id: _ts(m) for m in window}

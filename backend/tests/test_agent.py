@@ -480,3 +480,29 @@ def test_windows_idle_pseudo_process_is_not_collected(monkeypatch):
     monkeypatch.setattr(psutil, "process_iter", lambda *a, **k: [idle, *real_iter(*a, **k)])
     procs = collector.collect_top_processes(n=5, identify=False)
     assert procs and all(p["pid"] != 0 for p in procs)
+
+
+class TestOfflineKeepsCollecting:
+    """Servidor fora do ar: depois de 5 falhas só o envio espera; as leituras seguem para a fila."""
+
+    def test_backoff_pauses_sending_not_collecting(self, agent_module, monkeypatch):
+        attempts, buffered = [], []
+        monkeypatch.setattr(agent_module, "_post_metrics", lambda m: attempts.append(m) or None)
+        monkeypatch.setattr(agent_module, "_handle_offline", lambda m: buffered.append(m))
+        monkeypatch.setattr(agent_module, "_guard", None)
+        monkeypatch.setattr(agent_module, "_send_retry_at", 0.0, raising=False)
+        monkeypatch.setattr(agent_module, "_send_failures", 0, raising=False)
+        for i in range(8):
+            assert agent_module.send_metrics({"i": i}) is False
+        assert len(attempts) == 5
+        assert len(buffered) == 8
+
+    def test_sends_again_after_backoff(self, agent_module, monkeypatch):
+        attempts = []
+        monkeypatch.setattr(agent_module, "_post_metrics", lambda m: attempts.append(m) or None)
+        monkeypatch.setattr(agent_module, "_handle_offline", lambda m: None)
+        monkeypatch.setattr(agent_module, "_guard", None)
+        monkeypatch.setattr(agent_module, "_send_failures", 0, raising=False)
+        monkeypatch.setattr(agent_module, "_send_retry_at", agent_module.time.monotonic() - 1, raising=False)
+        agent_module.send_metrics({"i": 0})
+        assert len(attempts) == 1

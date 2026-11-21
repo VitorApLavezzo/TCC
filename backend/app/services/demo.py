@@ -21,7 +21,7 @@ INTERVAL = 30  # segundos "virtuais" entre leituras injetadas
 SCENARIOS: Dict[str, Dict[str, Any]] = {
     "cpu_loop": {"label": "Programa travado no processador", "warmup": 12, "attack": 8,
                  "expect": "cpu_loop"},
-    "memory_leak": {"label": "Vazamento de memória", "warmup": 12, "attack": 12, "expect": "memory_leak"},
+    "memory_leak": {"label": "Vazamento de memória", "warmup": 12, "attack": 24, "expect": "memory_leak"},
     "ransomware": {"label": "Sequestro de dados (ransomware)", "warmup": 8, "attack": 4, "expect": "ransomware_canary"},
     # Passos de uma hora virtual: a previsão de disco exige meio dia de histórico.
     "disk_filling": {"label": "Disco enchendo rápido", "warmup": 20, "attack": 10, "expect": "disk_forecast",
@@ -98,8 +98,9 @@ def _scenario_step(scenario: str, phase: str, k: int, metric: Dict, procs: List[
                       "exe": "C:\\Users\\demo\\Downloads\\runaway.exe", "signed": "unsigned", "username": "demo",
                       "cmdline": "runaway.exe"})
     elif scenario == "memory_leak":
-        metric["mem_percent"] = min(46 + k * 4.0, 96)
-        procs.append({"name": "leaky_app.exe", "cpu_percent": 6.0, "mem_percent": min(4 + k * 4.0, 55),
+        # Dez minutos de subida contínua: o detector não chama de vazamento menos que isso
+        metric["mem_percent"] = min(46 + k * 2.0, 96)
+        procs.append({"name": "leaky_app.exe", "cpu_percent": 6.0, "mem_percent": min(4 + k * 2.0, 55),
                       "exe": "C:\\Program Files\\LeakyApp\\leaky_app.exe", "signed": "signed", "username": "demo"})
     elif scenario == "disk_filling":
         # Mantém o tamanho do disco da leitura-base, senão o uso em GB cai enquanto o percentual sobe.

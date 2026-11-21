@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 import threading
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -474,27 +475,30 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     if layer == "ambas":
         second_opinion(candidates, model_flagged)
 
-    if is_statistical and not candidates:
+    if is_statistical and not candidates and not _booting(metric):
         contributions = ml_service.explain_contributions(machine.id, metric, offset)
         classification = ml_service.classify_anomaly(metric, db, contributions)
-        ml_conf = ml_service.confidence_from_score(score, ml_threshold)
-        top = _find_top_process(metric, db, classification["anomaly_type"])
-        # Quem culpar e em quem confiar são perguntas diferentes: num desvio de disco
-        # não há culpado, mas o programa trabalhando ainda tem reputação (antivírus varrendo)
-        reputed = top if top is not None else _find_top_process(metric, db, "high_cpu")
-        raw_severity = ml_severity(classification["anomaly_type"], classification["severity"],
-                                   ctx.trust(reputed) if reputed is not None else None)
-        candidates.append(Candidate(
-            anomaly_type=classification["anomaly_type"],
-            # As duas razões de rebaixamento agem; o piso é `low`
-            severity=apply_confidence(raw_severity, ml_conf),
-            affected=classification["affected_metrics"],
-            responsible=top.name if top is not None else None,
-            details={"source": "isolation_forest", "score": score, "contributions": contributions},
-            source="ml",
-            score=score,
-            confidence=ml_conf,
-        ))
+        unusual_hour_without_history = (classification["anomaly_type"] == "unusual_time"
+                                        and not _knows_usual_hours(db, machine, now))
+        if not unusual_hour_without_history:
+            ml_conf = ml_service.confidence_from_score(score, ml_threshold)
+            top = _find_top_process(metric, db, classification["anomaly_type"])
+            # Quem culpar e em quem confiar são perguntas diferentes: num desvio de disco
+            # não há culpado, mas o programa trabalhando ainda tem reputação (antivírus varrendo)
+            reputed = top if top is not None else _find_top_process(metric, db, "high_cpu")
+            raw_severity = ml_severity(classification["anomaly_type"], classification["severity"],
+                                       ctx.trust(reputed) if reputed is not None else None)
+            candidates.append(Candidate(
+                anomaly_type=classification["anomaly_type"],
+                # As duas razões de rebaixamento agem; o piso é `low`
+                severity=apply_confidence(raw_severity, ml_conf),
+                affected=classification["affected_metrics"],
+                responsible=top.name if top is not None else None,
+                details={"source": "isolation_forest", "score": score, "contributions": contributions},
+                source="ml",
+                score=score,
+                confidence=ml_conf,
+            ))
 
     if not candidates:
         return None
@@ -553,6 +557,21 @@ LOAD_TYPES = {
 
 # Pessoa no teclado ou no mouse há menos que isto está usando o computador
 PRESENT_IDLE_SECONDS = 120
+
+
+# Logo depois de ligar, a inicialização (disco, rede, programas abrindo) foge do normal aprendido
+BOOT_GRACE_SECONDS = 600
+# Sem alguns dias de histórico o modelo não sabe que horário é normal nesta máquina
+MIN_DAYS_FOR_TIME_OF_DAY = 3
+
+
+def _booting(metric: Metric) -> bool:
+    return metric.uptime_seconds is not None and metric.uptime_seconds < BOOT_GRACE_SECONDS
+
+
+def _knows_usual_hours(db: Session, machine: Machine, now) -> bool:
+    first = db.query(func.min(Metric.timestamp)).filter(Metric.machine_id == machine.id).scalar()
+    return first is not None and aware(now) - aware(first) >= timedelta(days=MIN_DAYS_FOR_TIME_OF_DAY)
 
 
 def _reference_process(processes, responsible: Optional[str]):

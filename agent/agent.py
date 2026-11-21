@@ -347,6 +347,10 @@ def _HAS(mod) -> bool:
 _guard = LocalGuard() if LocalGuard else None
 _buffer = OfflineBuffer(os.path.join(_config_dir, "pending_metrics.jsonl")) if OfflineBuffer else None
 _offline_since = None
+# Servidor fora: depois de 5 falhas o ENVIO espera 5 min; a coleta continua indo para a fila
+SEND_BACKOFF_SECONDS = 300
+_send_failures = 0
+_send_retry_at = 0.0
 
 
 def _handle_offline(metrics: dict) -> None:
@@ -405,14 +409,23 @@ def _post_metrics(metrics: dict):
 
 
 def send_metrics(metrics: dict):
-    global _paused, _current_interval, _focus_until, _network_isolated
+    global _paused, _current_interval, _focus_until, _network_isolated, _send_failures, _send_retry_at
     if _guard is not None:
         _guard.observe(metrics)
 
+    if time.monotonic() < _send_retry_at:
+        _handle_offline(metrics)
+        return False
     data = _post_metrics(metrics)
     if data is None:
         _handle_offline(metrics)
+        _send_failures += 1
+        if _send_failures >= 5:
+            logger.error("Muitas falhas seguidas. Novo envio em 5 minutos; as leituras continuam na fila.")
+            _send_retry_at = time.monotonic() + SEND_BACKOFF_SECONDS
+            _send_failures = 0
         return False
+    _send_failures = 0
     _drain_buffer()
     if data.get("paused"):
         if not _paused:
@@ -539,19 +552,10 @@ def run():
     _init_sensors()
     _check_for_updates()
 
-    consecutive_failures = 0
     while running:
         try:
             _check_for_updates()
-            metrics = build_payload()
-            if send_metrics(metrics):
-                consecutive_failures = 0
-            else:
-                consecutive_failures += 1
-                if consecutive_failures >= 5:
-                    logger.error("Muitas falhas seguidas. Aguardando 5 minutos.")
-                    stop_event.wait(300)
-                    consecutive_failures = 0
+            send_metrics(build_payload())
         except Exception as e:
             logger.error(f"Error in collection loop: {e}", exc_info=True)
 

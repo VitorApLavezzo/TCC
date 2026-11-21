@@ -60,13 +60,17 @@ class TestCpuLoop:
 
 
 class TestMemoryLeak:
-    @pytest.mark.parametrize("gap,count", [(GAP_5S, 36), (GAP_10S, 22), (GAP_30S, 8), (GAP_60S, 8)])
+    @pytest.mark.parametrize("gap,count", [(GAP_5S, 116), (GAP_10S, 58), (GAP_30S, 22), (GAP_60S, 15)])
     def test_growing_program_is_found_at_every_pace(self, db, machine, gap, count):
         found = _leak(db, machine, gap, count, _growing)
         assert (found.anomaly_type, found.responsible_process) == ("memory_leak", "vilao")
 
-    def test_fast_pace_still_needs_three_minutes(self, db, machine):
-        assert _leak(db, machine, GAP_5S, 24, _growing) is None
+    def test_fast_pace_still_needs_ten_minutes(self, db, machine):
+        assert _leak(db, machine, GAP_5S, 95, _growing) is None
+
+    def test_game_loading_for_four_minutes_is_not_a_leak(self, db, machine):
+        """Fortnite em 2026-11-20: a memória do jogo subiu por 4 min enquanto carregava e virou "vazamento"."""
+        assert _leak(db, machine, GAP_30S, 9, _growing) is None
 
     def test_memory_going_up_and_down_is_not_a_leak(self, db, machine):
         assert _leak(db, machine, GAP_5S, 36, lambda k, elapsed: 6.0 + (k % 2)) is None
