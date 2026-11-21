@@ -328,6 +328,38 @@ class TestAncestry:
         assert "foreground_pid" in payload and "foreground_name" in payload
 
 
+class TestPerformanceCountersDisabled:
+    """Windows com contadores de desempenho desligados: o psutil lança RuntimeError em swap e carga."""
+
+    def test_reading_still_goes_out(self, monkeypatch):
+        import psutil
+        import collector
+
+        def broken():
+            raise RuntimeError("PdhAddEnglishCounterW failed. Performance counters may be disabled.")
+
+        monkeypatch.setattr(psutil, "swap_memory", broken)
+        monkeypatch.setattr(psutil, "getloadavg", broken, raising=False)
+        payload = collector.collect_metrics()
+        assert payload["mem_percent"] is not None
+        assert payload["swap_percent"] is None and payload["swap_used"] is None and payload["swap_total"] is None
+        assert payload["load_avg_1"] is None and payload["load_avg_15"] is None
+
+    def test_burst_diagnostic_still_runs(self, monkeypatch):
+        import psutil
+        import actions
+
+        def broken():
+            raise RuntimeError("PdhAddEnglishCounterW failed. Performance counters may be disabled.")
+
+        monkeypatch.setattr(psutil, "swap_memory", broken)
+        sent = {}
+        result = actions._burst_diagnostic({"seconds": 1, "interval": 0.01, "diagnostic_id": 7},
+                                           lambda path, body: sent.update(body))
+        assert result["samples"] == 1
+        assert sent["samples"][0]["swap"] is None
+
+
 @pytest.fixture(scope="module")
 def agent_module(tmp_path_factory):
     """agent.py grava log e configuração ao lado de si; no container essa pasta é só leitura."""
@@ -396,3 +428,4 @@ def test_system_log_events_go_out_with_the_reading(agent_module, monkeypatch):
     monkeypatch.setattr(agent_module.security, "log_events", lambda since: [event])
     monkeypatch.setattr(agent_module, "_system_log", agent_module.security.LogWatcher(every=0))
     assert event in agent_module.build_payload()["events"]
+

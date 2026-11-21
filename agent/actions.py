@@ -186,6 +186,14 @@ def _isolate_linux(restore: bool) -> Dict[str, Any]:
     return {"message": "Não foi possível alterar a rede (nmcli ausente)", "ok": False}
 
 
+def _swap_percent():
+    # Windows com contadores de desempenho desligados: o psutil lança RuntimeError
+    try:
+        return psutil.swap_memory().percent
+    except (RuntimeError, OSError):
+        return None
+
+
 def _burst_diagnostic(params, uploader: Callable) -> Dict[str, Any]:
     """20 leituras, uma por segundo, com consumo por processo, e envia."""
     seconds = int(params.get("seconds", 20))
@@ -210,7 +218,7 @@ def _burst_diagnostic(params, uploader: Callable) -> Dict[str, Any]:
         net = psutil.net_io_counters()
         cpu_times = psutil.cpu_times_percent(None)
         samples.append({
-            "cpu": cpu, "mem": vm.percent, "swap": psutil.swap_memory().percent,
+            "cpu": cpu, "mem": vm.percent, "swap": _swap_percent(),
             "disk_read": (io.read_bytes - last_io.read_bytes) / interval if io else 0,
             "disk_write": (io.write_bytes - last_io.write_bytes) / interval if io else 0,
             "net_sent": (net.bytes_sent - last_net.bytes_sent) / interval,

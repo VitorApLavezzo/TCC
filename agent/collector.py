@@ -52,7 +52,11 @@ def collect_metrics() -> Dict[str, Any]:
     cpu_count_physical = psutil.cpu_count(logical=False)
 
     mem = psutil.virtual_memory()
-    swap = psutil.swap_memory()
+    # Windows com contadores de desempenho desligados: o psutil lança RuntimeError em swap e carga
+    try:
+        swap = psutil.swap_memory()
+    except (RuntimeError, OSError):
+        swap = None
 
     disk = psutil.disk_usage("/")
     disk_io = psutil.disk_io_counters()
@@ -74,7 +78,10 @@ def collect_metrics() -> Dict[str, Any]:
 
     boot = psutil.boot_time()
     uptime = time.time() - boot
-    load_avg = list(psutil.getloadavg()) if hasattr(psutil, "getloadavg") else [0.0, 0.0, 0.0]
+    try:
+        load_avg = list(psutil.getloadavg()) if hasattr(psutil, "getloadavg") else [0.0, 0.0, 0.0]
+    except (RuntimeError, OSError):
+        load_avg = [None, None, None]
     user_idle = sensors.idle_seconds() if _HAS_SENSORS else None
     foreground = sensors.foreground_process() if _HAS_SENSORS else None
 
@@ -97,9 +104,9 @@ def collect_metrics() -> Dict[str, Any]:
         "mem_percent": mem.percent,
         "mem_total": mem.total,
 
-        "swap_used": swap.used,
-        "swap_percent": swap.percent,
-        "swap_total": swap.total,
+        "swap_used": swap.used if swap else None,
+        "swap_percent": swap.percent if swap else None,
+        "swap_total": swap.total if swap else None,
 
         "disk_used": disk.used,
         "disk_free": disk.free,
