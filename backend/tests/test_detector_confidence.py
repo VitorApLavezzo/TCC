@@ -177,9 +177,9 @@ class TestModelCandidate:
 
 
 class TestReputationSurvivesMissingCulprit:
-    """Sem culpado no desvio de disco, a reputação do executável ainda rebaixa a varredura de antivírus."""
+    """Sem culpado no desvio de disco, a reputação do executável ainda reconhece a varredura de antivírus."""
 
-    def test_antivirus_scan_on_disk_deviation_stays_downgraded(
+    def test_antivirus_scan_on_disk_deviation_is_not_an_alert(
             self, client, machine, db, monkeypatch):
         from app.models.machine import Machine
         from app.models.metric import Metric
@@ -206,12 +206,10 @@ class TestReputationSurvivesMissingCulprit:
         monkeypatch.setattr(ml_service, "classify_anomaly", lambda *a, **k: {
             "anomaly_type": "disk_activity", "severity": "medium", "affected_metrics": {}})
 
-        a = process_metric(current, m, db)
-        assert a is not None and a.anomaly_type == "disk_activity"
-        # Desvio de disco não nomeia culpado...
-        assert a.responsible_process is None
-        # ...mas o antivírus reconhecido continua segurando o aviso no painel
-        assert a.severity == "low"
+        from app.models.anomaly import Anomaly
+        # Desvio de disco não nomeia culpado, mas o antivírus reconhecido é o sistema se cuidando
+        assert process_metric(current, m, db) is None
+        assert db.query(Anomaly).filter(Anomaly.machine_id == m.id).count() == 0
 
 
 class TestWeakSignalInApi:

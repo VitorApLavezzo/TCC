@@ -190,6 +190,14 @@ def _ts(m):
 LEAK_MIN_SPAN_SECONDS = 600
 LEAK_POINT_GAP_SECONDS = LEAK_MIN_SPAN_SECONDS / 7
 
+# Travado fica travado: com um minuto, aba pesada do navegador e Windows Update
+# (2026-11-21, 3 min no alto) viravam "programa travado"
+LOOP_MIN_SPAN_SECONDS = 300
+
+# 5 MB/s (40 Mbit/s): abrir o navegador traz centenas de conexões, mas 1,18 MB/s
+# (Opera, 2026-11-21) é página carregando, não ataque. `net_bytes_recv` já vem por segundo
+DDOS_MIN_RECV_BYTES_PER_SECOND = 5 * 1024 * 1024
+
 
 def _before(history: List[Metric], ref: Metric, seconds: float) -> List[Metric]:
     """Leituras anteriores a `ref` dentro de `seconds`, mais recente primeiro."""
@@ -347,7 +355,8 @@ def detect_cpu_loop(metric: Metric, processes: List[ProcessSnapshot],
         return None
 
     s = ctx.s("cpu_loop")
-    user_procs = [p for p in processes if not _is_system_process(p.name or "", p.exe)]
+    user_procs = [p for p in processes if not _is_system_process(p.name or "", p.exe)
+                  and not trust.is_os_maintenance(p.name, ctx.trust(p))]
     top_cpu = sorted(user_procs, key=lambda p: p.cpu_percent or 0, reverse=True)
     if not top_cpu or (top_cpu[0].cpu_percent or 0) < min(80 * s, 98):
         return None
@@ -356,9 +365,8 @@ def detect_cpu_loop(metric: Metric, processes: List[ProcessSnapshot],
     total_cpu = sum(p.cpu_percent or 0 for p in processes)
     dominance = (suspect.cpu_percent or 0) / total_cpu if total_cpu > 0 else 0
 
-    # Sustentado por pelo menos um minuto. Na coleta de 60 s, três leituras levam até 184 s
-    window = _before(history, metric, 200)
-    if len(window) < 3 or _span_seconds([metric] + window) < 60:
+    window = _before(history, metric, LOOP_MIN_SPAN_SECONDS + 90)
+    if len(window) < 3 or _span_seconds([metric] + window) < LOOP_MIN_SPAN_SECONDS:
         return None
 
     recent_snaps = (
@@ -408,23 +416,35 @@ def detect_cpu_loop(metric: Metric, processes: List[ProcessSnapshot],
 
 def detect_ddos_indicators(metric: Metric, processes: List[ProcessSnapshot],
                            history: List[Metric], db: Session, ctx: DetectionContext) -> Optional[BehaviorAnalysis]:
-    """Pico abrupto de conexões, ou de tráfego acompanhado de conexões novas.
+    """Pico abrupto de conexões, ou de tráfego acompanhado de conexões novas, por duas leituras
+    seguidas: abrir páginas é um pico de uma leitura só.
 
     Tráfego sozinho é download. Rede + CPU alta só reforça: sozinha era qualquer
     navegador com cem abas.
     """
     previous = _before(history, metric, 15 * 60)
-    if len(previous) < 5:
+    if len(previous) < 6:
         return None
 
     s = ctx.s("ddos_indicators")
-    avg_conn = sum(m.net_connections or 0 for m in previous) / len(previous)
-    avg_recv = sum(m.net_bytes_recv or 0 for m in previous) / len(previous)
+    # A leitura anterior também precisa estar no pico, então ela fica fora da média
+    last, baseline = previous[0], previous[1:]
+    avg_conn = sum(m.net_connections or 0 for m in baseline) / len(baseline)
+    avg_recv = sum(m.net_bytes_recv or 0 for m in baseline) / len(baseline)
+
+    def spikes(m: Metric) -> Tuple[bool, bool]:
+        conn = m.net_connections or 0
+        recv = m.net_bytes_recv or 0
+        conn_spike = conn > max(avg_conn * 5 * s, 200 * s) if avg_conn > 0 else conn > 500 * s
+        recv_spike = (avg_recv > 10000 and recv > avg_recv * 10 * s and conn > avg_conn * 2 * s
+                      and recv >= DDOS_MIN_RECV_BYTES_PER_SECOND)
+        return conn_spike, recv_spike
+
+    conn_spike, recv_spike = spikes(metric)
+    last_conn, last_recv = spikes(last)
+    conn_spike, recv_spike = conn_spike and last_conn, recv_spike and last_recv
     current_conn = metric.net_connections or 0
     current_recv = metric.net_bytes_recv or 0
-
-    conn_spike = current_conn > max(avg_conn * 5 * s, 200 * s) if avg_conn > 0 else current_conn > 500 * s
-    recv_spike = avg_recv > 10000 and current_recv > avg_recv * 10 * s and current_conn > avg_conn * 2 * s
     high_cpu_net = (metric.cpu_percent or 0) > min(70 * s, 95) and current_conn > 100 * s
 
     if conn_spike or recv_spike:

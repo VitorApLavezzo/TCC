@@ -118,6 +118,15 @@ def _bare_reading(**over):
     return SimpleNamespace(**{**base, **over})
 
 
+def _spread(n, days=20, **over):
+    """`n` leituras espalhadas por `days` dias, terminando agora."""
+    from datetime import timedelta
+    from app.core.timeutil import utcnow
+    now = utcnow()
+    step = timedelta(days=days) / max(n - 1, 1)
+    return [_bare_reading(timestamp=now - step * (n - 1 - i), **over) for i in range(n)]
+
+
 def _history(db, machine_id, n, with_context, start_hours, rng):
     from datetime import timedelta
     from app.core.timeutil import utcnow
@@ -138,21 +147,47 @@ def _history(db, machine_id, n, with_context, start_hours, rng):
     db.commit()
 
 
+TIME = {"hour_sin", "hour_cos", "dow_sin", "dow_cos"}
+
+
+class TestTimeNeedsDaysOfHistory:
+    """Com um dia de treino, todo horário ainda não visto parecia incomum (Windows novo, 2026-11-21:
+    o horário pesou 18 a 30% em todo aviso). Com 5.000 leituras a cada 30 s, um computador sempre
+    ligado treina com 1,7 dia: via só dois dias da semana."""
+
+    def test_one_day_leaves_time_out(self):
+        from app.services import ml_service
+        assert not set(ml_service.available_features(_spread(200, days=1))) & TIME
+
+    def test_three_days_bring_the_hour_but_not_the_weekday(self):
+        from app.services import ml_service
+        chosen = set(ml_service.available_features(_spread(200, days=3))) & TIME
+        assert chosen == {"hour_sin", "hour_cos"}
+
+    def test_two_weeks_bring_the_weekday(self):
+        from app.services import ml_service
+        assert set(ml_service.available_features(_spread(200, days=14))) >= TIME
+
+    def test_everything_else_does_not_depend_on_days(self):
+        from app.services import ml_service
+        assert ml_service.available_features(_spread(200, days=1)) == [k for k in BASE_17 if k not in TIME]
+
+
 class TestOptionalFeatures:
     """Presença, programa dominante e estabilidade — só onde há histórico deles."""
 
     def test_base_17_included_even_without_context(self):
         from app.services import ml_service
-        assert ml_service.available_features([_bare_reading() for _ in range(200)]) == BASE_17
+        assert ml_service.available_features(_spread(200)) == BASE_17
 
     def test_optional_with_99_readings_excluded(self):
         from app.services import ml_service
-        readings = [_bare_reading(top_proc_cpu=10.0) for _ in range(99)] + [_bare_reading() for _ in range(101)]
+        readings = _spread(99, top_proc_cpu=10.0) + _spread(101)
         assert "top_proc_cpu" not in ml_service.available_features(readings)
 
     def test_optional_with_100_readings_included(self):
         from app.services import ml_service
-        readings = [_bare_reading(top_proc_cpu=10.0) for _ in range(100)] + [_bare_reading() for _ in range(100)]
+        readings = _spread(100, top_proc_cpu=10.0) + _spread(100)
         chosen = ml_service.available_features(readings)
         assert "top_proc_cpu" in chosen and chosen[:17] == BASE_17
 
@@ -164,7 +199,7 @@ class TestOptionalFeatures:
 
     def test_context_off_only_17(self):
         from app.services import context, ml_service
-        readings = [_bare_reading(**CONTEXT) for _ in range(200)]
+        readings = _spread(200, **CONTEXT)
         previous = context.set_context_mode(False)
         try:
             assert ml_service.available_features(readings) == BASE_17
@@ -190,8 +225,10 @@ class TestOptionalFeatures:
         _history(db, m.id, 120, with_context=True, start_hours=4, rng=rng)
         assert ml_service.train_model(m.id, db)
         bundle = ml_service._load_bundle(m.id)
-        assert bundle["features"][:17] == BASE_17
-        assert set(bundle["features"][17:]) == set(ml_service.OPTIONAL_FEATURES)
+        # Vinte horas de histórico: horário e dia da semana ainda ficam fora
+        untimed = [k for k in BASE_17 if k not in TIME]
+        assert bundle["features"][:len(untimed)] == untimed
+        assert set(bundle["features"][len(untimed):]) == set(ml_service.OPTIONAL_FEATURES)
         assert bundle["fill"]["top_proc_cpu"] == pytest.approx(20.0, abs=2.0)
         assert set(bundle["fill"]) == set(ml_service.OPTIONAL_FEATURES)
 
@@ -201,7 +238,7 @@ class TestOptionalFeatures:
         m = _machine(db)
         _history(db, m.id, 150, with_context=False, start_hours=6, rng=np.random.default_rng(2))
         assert ml_service.train_model(m.id, db)
-        assert ml_service._load_bundle(m.id)["features"] == BASE_17
+        assert ml_service._load_bundle(m.id)["features"] == [k for k in BASE_17 if k not in TIME]
         reading = make_mock_metric()
         for k, v in CONTEXT.items():
             setattr(reading, k, v)

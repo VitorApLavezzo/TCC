@@ -266,34 +266,40 @@ class TestResourceAbuse:
 class TestTrustInModelPath:
     """A camada de confiança também vale para o modelo estatístico, não só para os detectores."""
 
-    def test_antivirus_scan_starts_with_low_severity(self, db):
-        from app.services.anomaly_service import ml_severity
+    def _check(self, db, anomaly_type, proc):
+        from app.services.anomaly_service import is_system_maintenance
         from app.services import trust
+        t = trust.evaluate(db, _machine(db).id, proc) if proc is not None else None
+        return is_system_maintenance(anomaly_type, proc, t)
+
+    def test_antivirus_scan_is_not_a_model_alert(self, db):
         proc = _proc(name="avp.exe", exe="C:\\Program Files (x86)\\Kaspersky Lab\\KAV\\avp.exe",
                      publisher="Kaspersky Lab JSC")
-        t = trust.evaluate(db, _machine(db).id, proc)
-        assert ml_severity("disk_activity", "high", t) == "low"
+        assert self._check(db, "disk_activity", proc) is True
+
+    def test_windows_update_is_not_a_model_alert(self, db):
+        proc = _proc(name="TiWorker.exe", publisher="Microsoft Windows",
+                     exe="C:\\Windows\\WinSxS\\amd64_microsoft-windows-servicingstack_31bf\\TiWorker.exe")
+        assert self._check(db, "background_load", proc) is True
+
+    def test_name_of_windows_update_outside_windows_is_not_maintenance(self, db):
+        proc = _proc(name="TiWorker.exe", exe="C:\\Users\\v\\Downloads\\TiWorker.exe",
+                     signed="unsigned", publisher=None)
+        assert self._check(db, "background_load", proc) is False
 
     def test_common_program_gets_no_discount(self, db):
-        """Estreita de propósito: qualquer assinado rebaixando abriria espaço para binário sequestrado."""
-        from app.services.anomaly_service import ml_severity
-        from app.services import trust
+        """Estreita de propósito: qualquer assinado passando abriria espaço para binário sequestrado."""
         proc = _proc(name="chrome.exe", exe="C:\\Program Files\\Google\\Chrome\\chrome.exe",
                      publisher="Google LLC")
-        t = trust.evaluate(db, _machine(db).id, proc)
-        assert ml_severity("network_spike", "high", t) == "high"
+        assert self._check(db, "background_load", proc) is False
 
-    def test_security_alert_never_downgraded(self, db):
-        from app.services.anomaly_service import ml_severity
-        from app.services import trust
+    def test_security_alert_is_never_maintenance(self, db):
         proc = _proc(name="avp.exe", exe="C:\\Program Files (x86)\\Kaspersky Lab\\KAV\\avp.exe",
                      publisher="Kaspersky Lab JSC")
-        t = trust.evaluate(db, _machine(db).id, proc)
-        assert ml_severity("malware_pattern", "critical", t) == "critical"
+        assert self._check(db, "malware_pattern", proc) is False
 
     def test_without_responsible_process_nothing_changes(self, db):
-        from app.services.anomaly_service import ml_severity
-        assert ml_severity("network_spike", "medium", None) == "medium"
+        assert self._check(db, "network_spike", None) is False
 
 
 class TestCpuLoopWithTrust:
@@ -306,7 +312,8 @@ class TestCpuLoopWithTrust:
         from app.models.process import ProcessSnapshot
         now = utcnow()
         previous = []
-        for i in range(5, 0, -1):
+        # Cinco minutos e meio: o detector exige cinco no alto
+        for i in range(11, 0, -1):
             met = Metric(machine_id=machine_id, cpu_percent=cpu, mem_percent=40,
                          timestamp=now - timedelta(seconds=i * 30))
             db.add(met)

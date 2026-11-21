@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.redaction import redact_personal
@@ -393,23 +394,53 @@ RUNS_WHAT_IT_IS_TOLD = LOLBINS | {
 }
 
 
+def _runs_what_it_is_told(name: Optional[str]) -> bool:
+    return re.sub(r"[\d.]+$", "", (name or "").lower().removesuffix(".exe")) in RUNS_WHAT_IT_IS_TOLD
+
+
 def _trusted_install(db: Session, machine: Machine, ident: ProcessIdentity) -> bool:
     """Assinado e instalado onde programas ficam: contato periódico é atualização ou sincronização."""
     from app.services import trust
     if ident.signed != "signed" or not trust._in_program_dir((ident.exe or "").lower()):
         return False
-    base_name = re.sub(r"[\d.]+$", "", (ident.name or "").lower().removesuffix(".exe"))
-    if base_name in RUNS_WHAT_IT_IS_TOLD:
+    if _runs_what_it_is_told(ident.name):
         return False
     key = identity_key(ident.name, ident.exe, ident.sha256)
     return key not in trust.owner_problem_keys(db, machine.owner_id, {key})
+
+
+# Comunicação de controle se repete por horas; o Codex do VS Code (2026-11-21) fez 6 contatos
+# em 22 min e parou. O agente guarda até 60 contatos: num período curto o buffer enche antes
+# de meia hora, e aí a quantidade já mostra a persistência.
+BEACON_MIN_EVENTS = 10
+BEACON_MIN_SPAN_SECONDS = 30 * 60
+BEACON_FULL_BUFFER_EVENTS = 30
+
+
+def _beacon_persists(b: Dict[str, Any], interval: float) -> bool:
+    events = int(b.get("events") or 0)
+    if events < BEACON_MIN_EVENTS:
+        return False
+    first, last = b.get("first_seen"), b.get("last_seen")
+    span = float(last) - float(first) if first is not None and last is not None else (events - 1) * interval
+    return span >= BEACON_MIN_SPAN_SECONDS or events >= BEACON_FULL_BUFFER_EVENTS
+
+
+def _known_since(db: Session, machine: Machine, name: str):
+    """Desde quando o programa existe aqui, por nome: atualizar muda o caminho, não o programa."""
+    first = (
+        db.query(func.min(ProcessIdentity.first_seen))
+        .filter(ProcessIdentity.machine_id == machine.id, ProcessIdentity.name == name)
+        .scalar()
+    )
+    return aware(first) if first is not None else None
 
 
 def evaluate_beacons(db: Session, machine: Machine, beacons: List[Dict[str, Any]], now) -> List[Anomaly]:
     created: List[Anomaly] = []
     for b in beacons or []:
         interval = float(b.get("median_interval") or 0)
-        if (b.get("events") or 0) < 6 or float(b.get("jitter") or 1) > 0.2 or not (10 <= interval <= 3600):
+        if float(b.get("jitter") or 1) > 0.2 or not (10 <= interval <= 3600) or not _beacon_persists(b, interval):
             continue
         if not _public_ip(str(b.get("remote_ip"))):
             continue
@@ -420,13 +451,13 @@ def evaluate_beacons(db: Session, machine: Machine, beacons: List[Dict[str, Any]
             .order_by(ProcessIdentity.seen_count.desc())
             .first()
         )
-        established = bool(
-            ident and (ident.seen_count or 0) > 100 and ident.first_seen
-            and aware(ident.first_seen) < now - timedelta(days=3)
-        )
+        # Pela data, não por avistamentos: programa que fica aberto o dia todo é contado poucas vezes
+        since = _known_since(db, machine, name)
+        established = since is not None and since < now - timedelta(days=3)
         signed = bool(ident and ident.signed == "signed")
-        # Programa assinado e presente há dias: provavelmente checagem de atualização
-        if established and signed:
+        # Programa assinado e presente há dias: provavelmente checagem de atualização. Menos
+        # interpretador, que roda o script que mandarem
+        if established and signed and not _runs_what_it_is_told(name):
             continue
         if ident and _trusted_install(db, machine, ident):
             continue

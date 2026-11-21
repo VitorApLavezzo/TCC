@@ -133,7 +133,8 @@ def _persisting(started, last, occurrences: int) -> bool:
 
 def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
                     minutes: int = ANOMALY_COOLDOWN_MINUTES, now=None,
-                    by_condition: bool = False, condition_key: Optional[str] = None) -> Optional[Anomaly]:
+                    by_condition: bool = False, condition_key: Optional[str] = None,
+                    model_episode: bool = False) -> Optional[Anomaly]:
     """O aviso vivo deste tipo nesta máquina, para somar a repetição nele.
 
     A chave é `(máquina, tipo)`, sem o programa: cada coleta pode acusar um
@@ -143,7 +144,8 @@ def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
     cutoff = (now or utcnow()) - timedelta(minutes=minutes)
     query = db.query(Anomaly).filter(
         Anomaly.machine_id == machine_id,
-        Anomaly.anomaly_type == anomaly_type,
+        # O tipo do modelo é um palpite que muda de uma leitura para outra: o desvio é o mesmo
+        Anomaly.source == "ml" if model_episode else Anomaly.anomaly_type == anomaly_type,
         Anomaly.detected_at >= cutoff,
         Anomaly.is_resolved == False,  # noqa: E712
     )
@@ -250,7 +252,8 @@ def filter_reason(db: Session, machine: Machine, c: Candidate, now,
         rule.hits = (rule.hits or 0) + 1
         return f"regra #{rule.id}", None
     existing = _recent_anomaly(machine.id, c.anomaly_type, db, c.cooldown_minutes, now,
-                               by_condition=c.source in REEVALUATED_SOURCES, condition_key=c.identity)
+                               by_condition=c.source in REEVALUATED_SOURCES, condition_key=c.identity,
+                               model_episode=c.source == "ml")
     if existing is not None:
         return "aviso igual recente", existing
     return None, None
@@ -478,20 +481,19 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
     if is_statistical and not candidates and not _booting(metric):
         contributions = ml_service.explain_contributions(machine.id, metric, offset)
         classification = ml_service.classify_anomaly(metric, db, contributions)
-        unusual_hour_without_history = (classification["anomaly_type"] == "unusual_time"
-                                        and not _knows_usual_hours(db, machine, now))
-        if not unusual_hour_without_history:
+        anomaly_type = classification["anomaly_type"]
+        top = _find_top_process(metric, db, anomaly_type)
+        # Quem culpar e em quem confiar são perguntas diferentes: num desvio de disco
+        # não há culpado, mas o programa trabalhando ainda tem reputação (antivírus varrendo)
+        reputed = top if top is not None else _find_top_process(metric, db, "high_cpu")
+        unusual_hour_without_history = anomaly_type == "unusual_time" and not _knows_usual_hours(db, machine, now)
+        maintenance = is_system_maintenance(anomaly_type, reputed,
+                                            ctx.trust(reputed) if reputed is not None else None)
+        if not unusual_hour_without_history and not maintenance:
             ml_conf = ml_service.confidence_from_score(score, ml_threshold)
-            top = _find_top_process(metric, db, classification["anomaly_type"])
-            # Quem culpar e em quem confiar são perguntas diferentes: num desvio de disco
-            # não há culpado, mas o programa trabalhando ainda tem reputação (antivírus varrendo)
-            reputed = top if top is not None else _find_top_process(metric, db, "high_cpu")
-            raw_severity = ml_severity(classification["anomaly_type"], classification["severity"],
-                                       ctx.trust(reputed) if reputed is not None else None)
             candidates.append(Candidate(
-                anomaly_type=classification["anomaly_type"],
-                # As duas razões de rebaixamento agem; o piso é `low`
-                severity=apply_confidence(raw_severity, ml_conf),
+                anomaly_type=anomaly_type,
+                severity=apply_confidence(classification["severity"], ml_conf),
                 affected=classification["affected_metrics"],
                 responsible=top.name if top is not None else None,
                 details={"source": "isolation_forest", "score": score, "contributions": contributions},
@@ -616,17 +618,16 @@ def context_severity(anomaly_type: str, severity: str, metric, process,
     return severity, False
 
 
-def ml_severity(anomaly_type: str, severity: str, trust_info) -> str:
-    """Rebaixa o aviso do modelo quando o desvio é um produto de segurança fazendo o que promete.
+def is_system_maintenance(anomaly_type: str, proc, trust_info) -> bool:
+    """Desvio que é o sistema se cuidando (antivírus varrendo, Windows Update instalando): não vira aviso.
 
-    Estreita de propósito: só nível 3 e nunca aviso de segurança — qualquer programa
-    assinado rebaixando abriria espaço para um binário legítimo sequestrado.
+    Estreita de propósito: produto de segurança ou manutenção do Windows verificada, e nunca
+    aviso de segurança — qualquer programa assinado passando abriria espaço para um binário
+    legítimo sequestrado.
     """
-    if trust_info is None or not getattr(trust_info, "is_security_software", False):
-        return severity
-    if anomaly_type in SECURITY_TYPES:
-        return severity
-    return "low"
+    if proc is None or trust_info is None or anomaly_type in SECURITY_TYPES:
+        return False
+    return trust.is_os_maintenance(getattr(proc, "name", None), trust_info)
 
 
 # De qual medida do processo sai o culpado. Tipo fora daqui não tem culpado:

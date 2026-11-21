@@ -219,13 +219,18 @@ class TestSweepBase:
         assert len(ml_eval._sensitivity_base(X)) == 90
 
 
+def _untimed(ml_service):
+    return [k for k in ml_service.BASE_FEATURE_KEYS if k not in ml_service.TIME_FEATURE_MIN_DAYS]
+
+
 class TestMachineFeatures:
     """A avaliação mede o modelo que a máquina teria, com os atributos que ela tem."""
 
     def test_without_context_measures_17(self, db):
         from app.services import ml_eval, ml_service
         m = _machine_with_history(db)
-        assert ml_eval.holdout(db, m)["features"] == ml_service.BASE_FEATURE_KEYS
+        # Duas horas e meia de histórico: horário e dia da semana ainda ficam fora
+        assert ml_eval.holdout(db, m)["features"] == _untimed(ml_service)
 
     def test_with_context_measures_what_training_would_choose(self, db):
         from app.services import ml_eval, ml_service
@@ -237,7 +242,7 @@ class TestMachineFeatures:
             met.cpu_std_10m = float(rng.normal(6, 1))
         db.commit()
         r = ml_eval.holdout(db, m)
-        assert r["features"] == ml_service.BASE_FEATURE_KEYS + ["top_proc_cpu", "top_proc_known", "cpu_std_10m"]
+        assert r["features"] == _untimed(ml_service) + ["top_proc_cpu", "top_proc_known", "cpu_std_10m"]
         assert r["ready"] and 0.0 <= r["auc_model"] <= 1.0
 
     def test_perturbable_columns_index_used_list(self):

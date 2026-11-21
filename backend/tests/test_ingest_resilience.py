@@ -9,7 +9,7 @@ from tests.test_pipeline import BASE
 
 BEACON = {
     "process": "beacon.exe", "remote_ip": "8.8.8.8", "remote_port": 443,
-    "events": 10, "median_interval": 60.0, "jitter": 0.05,
+    "events": 10, "median_interval": 240.0, "jitter": 0.05,
 }
 
 

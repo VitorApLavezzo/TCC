@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core.metric_utils import gpu_max
-from app.core.timeutil import local_time, tz_offset_minutes, utcnow
+from app.core.timeutil import aware, local_time, tz_offset_minutes, utcnow
 from app.models.metric import Metric
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "../../ml/models")
@@ -69,6 +69,12 @@ OPTIONAL_FEATURES: Dict[str, str] = {
     "gpu_std_10m": "gpu_std_10m",
 }
 BASE_FEATURE_KEYS = [k for k in FEATURE_KEYS if k not in OPTIONAL_FEATURES]
+
+# Dias que as leituras de treino precisam cobrir para o atributo de tempo dizer algo. Com um dia,
+# todo horário ainda não visto parecia incomum (Windows novo, 2026-11-21: 18 a 30% do desvio); e
+# com 5.000 leituras a cada 30 s, um computador sempre ligado treina com 1,7 dia, vendo só dois
+# dias da semana. Horário: cada hora vista três vezes; dia da semana: cada dia visto duas.
+TIME_FEATURE_MIN_DAYS: Dict[str, float] = {"hour_sin": 3, "hour_cos": 3, "dow_sin": 14, "dow_cos": 14}
 
 # Tempo ocioso acima de uma hora é "ninguém usando" — a diferença entre 2 e 9
 # horas não diz nada, e sem o teto ela dominaria a escala do atributo
@@ -182,18 +188,25 @@ def _metric_to_vector(metric, offset_minutes: Optional[int] = None, keys: Option
     return out
 
 
+def _covered_days(metrics) -> float:
+    stamps = [aware(m.timestamp) for m in metrics if getattr(m, "timestamp", None) is not None]
+    return (max(stamps) - min(stamps)).total_seconds() / 86400 if len(stamps) > 1 else 0.0
+
+
 def available_features(metrics) -> List[str]:
     """Os atributos que o histórico desta máquina sustenta.
 
-    Os 17 originais sempre; cada opcional só com MIN_TRAINING_SAMPLES leituras
+    Os 13 que não dependem do tempo sempre; horário e dia da semana conforme os dias cobertos
+    (`TIME_FEATURE_MIN_DAYS`); cada opcional só com MIN_TRAINING_SAMPLES leituras
     preenchidas — senão, logo depois da atualização do agente, toda leitura nova
     traria um valor que o modelo nunca viu.
     """
     from app.services import context
-    keys = list(BASE_FEATURE_KEYS)
+    metrics = list(metrics)
+    days = _covered_days(metrics)
+    keys = [k for k in BASE_FEATURE_KEYS if days >= TIME_FEATURE_MIN_DAYS.get(k, 0)]
     if not context.context_on():
         return keys
-    metrics = list(metrics)
     for key, column in OPTIONAL_FEATURES.items():
         filled = sum(1 for m in metrics if getattr(m, column, None) is not None)
         if filled >= settings.MIN_TRAINING_SAMPLES:

@@ -1,5 +1,5 @@
 """O que o agente repete a cada coleta é o mesmo fato, não uma ocorrência nova."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from tests.test_pipeline import BASE
 
@@ -10,16 +10,20 @@ def _ingest(client, machine, **over):
     return res.json()
 
 
-def _identity(db, machine, name, exe, signed="signed"):
+def _identity(db, machine, name, exe, signed="signed", days=0, seen=5):
     from app.models.identity import ProcessIdentity
     db.add(ProcessIdentity(machine_id=machine["id"], name=name, exe=exe, signed=signed,
-                           first_seen=datetime.now(timezone.utc), seen_count=5))
+                           first_seen=datetime.now(timezone.utc) - timedelta(days=days), seen_count=seen))
     db.commit()
 
 
-def _beacon(process):
-    return {"process": process, "remote_ip": "8.8.8.8", "remote_port": 443,
-            "events": 10, "median_interval": 60.0, "jitter": 0.05}
+def _beacon(process, events=10, interval=240.0, span=None):
+    """Por padrão, dez contatos a cada 4 min: 36 min de padrão."""
+    b = {"process": process, "remote_ip": "8.8.8.8", "remote_port": 443,
+         "events": events, "median_interval": interval, "jitter": 0.05}
+    if span is not None:
+        b["first_seen"], b["last_seen"] = 1_795_278_814.0, 1_795_278_814.0 + span
+    return b
 
 
 def _alerts(db, machine):
@@ -53,6 +57,65 @@ class TestWhoCounts:
         db.add(ReputationVote(identity_key="nome:code", owner_id=owner_id, kind="problem"))
         db.commit()
         _ingest(client, machine, beacons=[_beacon("code")])
+        assert len(_alerts(db, machine)) == 1
+
+
+class TestPatternMustPersist:
+    """Codex do VS Code (2026-11-21): 6 contatos com a Cloudflare em 22 min e parou. Comunicação
+    de controle se repete por horas."""
+
+    def test_short_pattern_is_not_an_alert(self, client, machine, db):
+        _identity(db, machine, "codex", "/home/v/.vscode/extensions/openai.chatgpt/bin/codex", signed="unsigned")
+        _ingest(client, machine, beacons=[_beacon("codex", events=6, interval=268.3, span=1341.7)])
+        assert _alerts(db, machine) == []
+
+    def test_ten_contacts_in_twenty_minutes_is_still_short(self, client, machine, db):
+        _identity(db, machine, "tool", "/home/alguem/tool", signed="unsigned")
+        _ingest(client, machine, beacons=[_beacon("tool", events=10, interval=120.0)])
+        assert _alerts(db, machine) == []
+
+    def test_half_hour_pattern_is_an_alert(self, client, machine, db):
+        _identity(db, machine, "tool", "/home/alguem/tool", signed="unsigned")
+        _ingest(client, machine, beacons=[_beacon("tool", events=10, interval=240.0, span=2160.0)])
+        assert len(_alerts(db, machine)) == 1
+
+    def test_fast_pattern_counts_when_the_agent_buffer_is_full(self, client, machine, db):
+        """O agente guarda até 60 contatos: a cada 15 s, o buffer enche antes de meia hora."""
+        _identity(db, machine, "tool", "/home/alguem/tool", signed="unsigned")
+        _ingest(client, machine, beacons=[_beacon("tool", events=30, interval=15.0)])
+        assert len(_alerts(db, machine)) == 1
+
+
+class TestKnownForDays:
+    """Programa que fica aberto o dia todo é avistado poucas vezes: o Codex, no computador desde
+    10/11, tinha 3 avistamentos e nunca contava como conhecido."""
+
+    def test_unsigned_program_known_for_days_is_medium(self, client, machine, db):
+        _identity(db, machine, "codex", "/home/v/codex", signed="unsigned", days=10, seen=3)
+        _ingest(client, machine, beacons=[_beacon("codex")])
+        assert [a.severity for a in _alerts(db, machine)] == ["medium"]
+
+    def test_new_unsigned_program_is_high(self, client, machine, db):
+        _identity(db, machine, "codex", "/home/v/codex", signed="unsigned", seen=300)
+        _ingest(client, machine, beacons=[_beacon("codex")])
+        assert [a.severity for a in _alerts(db, machine)] == ["high"]
+
+    def test_updated_program_keeps_its_history(self, client, machine, db):
+        """Atualização da extensão muda o caminho: a versão nova nasce hoje, o programa não."""
+        _identity(db, machine, "codex", "/home/v/ext-26.1021/codex", signed="unsigned", days=10, seen=3)
+        _identity(db, machine, "codex", "/home/v/ext-26.1117/codex", signed="unsigned", seen=4)
+        _ingest(client, machine, beacons=[_beacon("codex")])
+        assert [a.severity for a in _alerts(db, machine)] == ["medium"]
+
+    def test_signed_program_known_for_days_is_quiet(self, client, machine, db):
+        _identity(db, machine, "tool", "/home/alguem/tool", days=10, seen=3)
+        _ingest(client, machine, beacons=[_beacon("tool")])
+        assert _alerts(db, machine) == []
+
+    def test_signed_interpreter_known_for_days_still_alerts(self, client, machine, db):
+        """Interpretador roda o script que mandarem: estar aí há dias não diz nada do script."""
+        _identity(db, machine, "python3", "/usr/bin/python3", days=30, seen=500)
+        _ingest(client, machine, beacons=[_beacon("python3")])
         assert len(_alerts(db, machine)) == 1
 
 

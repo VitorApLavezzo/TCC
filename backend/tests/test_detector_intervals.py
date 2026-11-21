@@ -47,7 +47,7 @@ def _growing(k, elapsed):
 
 
 class TestCpuLoop:
-    @pytest.mark.parametrize("gap,count", [(GAP_60S, 4), (GAP_30S, 7), (GAP_10S, 18)])
+    @pytest.mark.parametrize("gap,count", [(GAP_60S, 6), (GAP_30S, 11), (GAP_10S, 29), (GAP_5S, 54)])
     def test_sustained_program_is_found_at_every_pace(self, db, machine, gap, count):
         found = _cpu(db, machine, gap, count)
         assert (found.anomaly_type, found.responsible_process) == ("cpu_loop", "vilao")
@@ -56,7 +56,12 @@ class TestCpuLoop:
         assert _cpu(db, machine, GAP_30S, 3) is None
 
     def test_one_high_reading_at_slow_pace_is_not_sustained(self, db, machine):
-        assert _cpu(db, machine, GAP_60S, 4, cpu=lambda k: 97.0 if k == 3 else 5.0) is None
+        assert _cpu(db, machine, GAP_60S, 6, cpu=lambda k: 97.0 if k == 5 else 5.0) is None
+
+    @pytest.mark.parametrize("gap,count", [(GAP_60S, 4), (GAP_30S, 7), (GAP_10S, 18)])
+    def test_three_minutes_of_work_is_not_stuck(self, db, machine, gap, count):
+        """Aba do Opera e Windows Update (2026-11-21) ficaram 3 min no alto e viraram 'travado'."""
+        assert _cpu(db, machine, gap, count) is None
 
 
 class TestMemoryLeak:

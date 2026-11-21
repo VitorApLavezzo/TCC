@@ -45,6 +45,15 @@ MICROSOFT_SECURITY_PROCESSES = (
 )
 
 
+# Manutenção do próprio Windows: atualização e indexação. Só contam assinados e na pasta do
+# sistema (nível 2); fora dela o nome é o que um vírus imita. msiexec e dismhost ficam de fora:
+# rodam o pacote que mandarem.
+WINDOWS_MAINTENANCE_PROCESSES = (
+    "tiworker.exe", "trustedinstaller.exe", "mousocoreworker.exe", "usoclient.exe", "wuauclt.exe",
+    "searchindexer.exe", "searchprotocolhost.exe", "searchfilterhost.exe", "compattelrunner.exe",
+)
+
+
 @dataclass
 class Trust:
     level: int = UNKNOWN
@@ -58,6 +67,13 @@ class Trust:
     @property
     def is_trusted(self) -> bool:
         return self.level >= TRUSTED
+
+
+def is_os_maintenance(name: Optional[str], info: "Trust") -> bool:
+    """O sistema se cuidando: produto de segurança ou manutenção do Windows verificada."""
+    if info.is_security_software:
+        return True
+    return info.is_trusted and (name or "").lower() in WINDOWS_MAINTENANCE_PROCESSES
 
 
 def key_of(proc: Any) -> Tuple[str, str]:

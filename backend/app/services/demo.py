@@ -19,7 +19,8 @@ from app.models.user import User
 INTERVAL = 30  # segundos "virtuais" entre leituras injetadas
 
 SCENARIOS: Dict[str, Dict[str, Any]] = {
-    "cpu_loop": {"label": "Programa travado no processador", "warmup": 12, "attack": 8,
+    # Cinco minutos no alto: o detector não chama de travado menos que isso
+    "cpu_loop": {"label": "Programa travado no processador", "warmup": 12, "attack": 14,
                  "expect": "cpu_loop"},
     "memory_leak": {"label": "Vazamento de memória", "warmup": 12, "attack": 24, "expect": "memory_leak"},
     "ransomware": {"label": "Sequestro de dados (ransomware)", "warmup": 8, "attack": 4, "expect": "ransomware_canary"},
@@ -117,8 +118,9 @@ def _scenario_step(scenario: str, phase: str, k: int, metric: Dict, procs: List[
         # IP público real (scanme.nmap.org): o detector exige destino público e o Python
         # classifica as faixas de documentação da RFC 5737 como privadas.
         beacons.append({"process": "updater_x.exe", "exe": "C:\\Users\\demo\\AppData\\Roaming\\updater_x.exe",
-                        "remote_ip": "45.33.32.156", "remote_port": 443, "events": 6 + k,
-                        "median_interval": 60.0, "jitter": 0.03})
+                        "remote_ip": "45.33.32.156", "remote_port": 443, "events": 10 + k,
+                        # Dez contatos a cada 4 min: meia hora de padrão, o mínimo para avisar
+                        "median_interval": 240.0, "jitter": 0.03})
         procs.append({"name": "updater_x.exe", "cpu_percent": 1.5, "mem_percent": 1.0,
                       "exe": "C:\\Users\\demo\\AppData\\Roaming\\updater_x.exe", "signed": "unsigned", "username": "demo"})
     elif scenario == "ransomware":
