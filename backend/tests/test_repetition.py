@@ -62,26 +62,6 @@ class TestAggregation:
         assert db.query(Anomaly).filter(Anomaly.machine_id == m.id).count() == 2
 
 
-class TestEscalation:
-    def test_escalates_when_crossing_threshold(self, client, machine, db):
-        from app.services.anomaly_service import ESCALATION_OCCURRENCES, persist_candidate
-        m = _machine(db, machine)
-        a = None
-        for i in range(ESCALATION_OCCURRENCES):
-            a = persist_candidate(db, m, _cand(program=f"p{i}.exe"))
-        assert a.occurrences == ESCALATION_OCCURRENCES
-        assert a.severity == "high"  # medium promovido uma vez
-
-    def test_escalates_only_once(self, client, machine, db):
-        """A 11ª, 12ª e 20ª ocorrência não podem promover de novo."""
-        from app.services.anomaly_service import ESCALATION_OCCURRENCES, persist_candidate
-        m = _machine(db, machine)
-        a = None
-        for i in range(ESCALATION_OCCURRENCES + 10):
-            a = persist_candidate(db, m, _cand(program=f"p{i}.exe"))
-        assert a.severity == "high"
-
-
 class TestWindowUsesReadingTime:
     def test_aggregates_in_replayed_time(self, client, machine, db):
         """Demonstração e benchmark datam a leitura no passado: a janela usa a hora dela, não o relógio."""
@@ -156,11 +136,14 @@ class TestEscalationCannotBeSilent:
 
     def test_escalation_flag_does_not_leak_to_screen(self, client, machine, db):
         """'Dados da leitura' mostra o que não for objeto: um booleano interno viraria uma linha na tela."""
-        from app.services.anomaly_service import ESCALATION_OCCURRENCES, persist_candidate
+        from datetime import timedelta
+        from app.core.timeutil import utcnow
+        from app.services.anomaly_service import persist_candidate
         m = _machine(db, machine)
+        start = utcnow() - timedelta(hours=1)
         a = None
-        for i in range(ESCALATION_OCCURRENCES + 2):
-            a = persist_candidate(db, m, _cand(program=f"p{i}.exe"))
+        for i, minute in enumerate([0, 5, 10, 16, 20]):
+            a = persist_candidate(db, m, _cand(program=f"p{i}.exe"), now=start + timedelta(minutes=minute))
         assert not any(k.startswith("_") and not isinstance(v, (dict, list))
                        for k, v in a.affected_metrics.items())
         assert a.severity == "high"
@@ -228,11 +211,11 @@ class TestScheduledRecheckIsNotOccurrence:
 
     def test_recheck_neither_counts_nor_escalates(self, client, machine, db):
         from app.models.anomaly import Anomaly
-        from app.services.anomaly_service import ESCALATION_OCCURRENCES, persist_candidate
+        from app.services.anomaly_service import persist_candidate
         m = _machine(db, machine)
         a = persist_candidate(db, m, self._scheduled_cand())
         before = self._notifications(db, a.id)
-        for _ in range(ESCALATION_OCCURRENCES + 2):
+        for _ in range(12):
             persist_candidate(db, m, self._scheduled_cand())
         db.refresh(a)
         assert a.occurrences == 1
@@ -241,10 +224,10 @@ class TestScheduledRecheckIsNotOccurrence:
         assert db.query(Anomaly).filter(Anomaly.machine_id == m.id).count() == 1
 
     def test_applies_to_fleet_too(self, client, machine, db):
-        from app.services.anomaly_service import ESCALATION_OCCURRENCES, persist_candidate
+        from app.services.anomaly_service import persist_candidate
         m = _machine(db, machine)
         a = persist_candidate(db, m, self._scheduled_cand(origin="fleet", kind="outbreak_suspected"))
-        for _ in range(ESCALATION_OCCURRENCES + 2):
+        for _ in range(12):
             persist_candidate(db, m, self._scheduled_cand(origin="fleet", kind="outbreak_suspected"))
         db.refresh(a)
         assert a.occurrences == 1 and a.severity == "medium"

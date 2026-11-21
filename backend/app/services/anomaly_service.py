@@ -119,9 +119,15 @@ class Candidate:
     user_driven: bool = False
 
 
-# Repetir tanto assim dentro da janela deixa de ser repetição e vira o
-# acontecimento: sobe um nível e avisa, uma vez.
-ESCALATION_OCCURRENCES = 10
+# O problema que persiste deixa de ser repetição e vira o acontecimento: sobe um nível
+# e avisa, uma vez. Por duração e não por contagem: com coleta de 10 s, dez repetições
+# eram 100 s. Abaixo dos 30 min em que o aviso fica vivo.
+ESCALATION_MINUTES = 15
+ESCALATION_MIN_OCCURRENCES = 3
+
+
+def _persisting(started, last, occurrences: int) -> bool:
+    return occurrences >= ESCALATION_MIN_OCCURRENCES and last - started >= timedelta(minutes=ESCALATION_MINUTES)
 
 
 def _recent_anomaly(machine_id: int, anomaly_type: str, db: Session,
@@ -183,6 +189,9 @@ def absorb(db: Session, machine: Machine, existing: Anomaly, c: Candidate, now) 
     começou, e `last_seen_at` guarda a ocorrência mais recente.
     """
     name = _normalize_process_name(c.responsible)
+    started = aware(existing.detected_at)
+    was_persisting = _persisting(started, aware(existing.last_seen_at or existing.detected_at),
+                                 existing.occurrences or 1)
     existing.occurrences = (existing.occurrences or 1) + 1
     existing.last_seen_at = now
 
@@ -210,9 +219,8 @@ def absorb(db: Session, machine: Machine, existing: Anomaly, c: Candidate, now) 
         existing.severity = c.severity
         existing.confidence = c.confidence
 
-    # Igualdade, não "maior ou igual": a promoção acontece exatamente uma vez,
-    # sem guardar marca no JSON
-    if existing.occurrences == ESCALATION_OCCURRENCES:
+    # Só ao cruzar o limite: a promoção acontece exatamente uma vez, sem guardar marca no JSON
+    if _persisting(started, aware(now), existing.occurrences) and not was_persisting:
         existing.severity = _PROMOTE.get(existing.severity, existing.severity)
 
     # Dicionário novo, não mutação: o SQLAlchemy não enxerga alteração dentro de uma coluna JSON
@@ -540,7 +548,7 @@ def process_metric(metric: Metric, machine: Machine, db: Session,
 # de memória também não — é defeito mesmo no programa que a pessoa está usando.
 LOAD_TYPES = {
     "high_cpu", "background_load", "gpu_anomaly", "resource_abuse", "resource_exhaustion",
-    "cpu_loop", "thermal_throttling", "behavioral_anomaly",
+    "cpu_loop", "thermal_throttling", "behavioral_anomaly", "behavioral_change",
 }
 
 # Pessoa no teclado ou no mouse há menos que isto está usando o computador

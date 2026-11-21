@@ -104,6 +104,9 @@ class BeaconTracker:
         self.events: Dict[tuple, deque] = defaultdict(lambda: deque(maxlen=60))
         self.meta: Dict[tuple, Dict[str, Any]] = {}
         self._resolved: Dict[int, Dict[str, Optional[str]]] = {}
+        # Conexões abertas na coleta anterior: a mesma conexão ainda aberta não é um contato novo
+        self._open: set = set()
+        self._samples: deque = deque(maxlen=20)
 
     def _resolve(self, pid: int) -> Dict[str, Optional[str]]:
         """Consulta psutil para um PID fora do mapa recebido, com cache para não
@@ -126,17 +129,20 @@ class BeaconTracker:
             conns = psutil.net_connections(kind="inet")
         except (psutil.AccessDenied, PermissionError, OSError):
             return
-        seen_now = set()
+        self._samples.append(now)
+        current = set()
         for c in conns:
             if c.status != psutil.CONN_ESTABLISHED or not c.raddr or not c.pid:
                 continue
             ip = c.raddr.ip
             if ip.startswith(("127.", "10.", "192.168.", "169.254.", "::1")) or ip.startswith("172."):
                 continue
-            key = (c.pid, ip, c.raddr.port)
-            if key in seen_now:
+            # A porta local identifica a conexão: reconectar abre outra, manter aberta não
+            conn_id = (c.pid, ip, c.raddr.port, c.laddr.port if c.laddr else None)
+            current.add(conn_id)
+            if conn_id in self._open:
                 continue
-            seen_now.add(key)
+            key = (c.pid, ip, c.raddr.port)
             hist = self.events[key]
             if not hist or now - hist[-1] > 5:
                 hist.append(now)
@@ -147,6 +153,7 @@ class BeaconTracker:
                 name = resolved["name"]
                 exe = exe or resolved["exe"]
             self.meta[key] = {"name": name, "exe": exe}
+        self._open = current
         self._prune(now)
 
     def _prune(self, now):
@@ -162,14 +169,21 @@ class BeaconTracker:
             if pid not in active_pids:
                 self._resolved.pop(pid, None)
 
+    def _sampling_gap(self) -> float:
+        times = list(self._samples)
+        gaps = sorted(b - a for a, b in zip(times, times[1:]))
+        return gaps[len(gaps) // 2] if gaps else 0.0
+
     def candidates(self) -> List[Dict[str, Any]]:
         out = []
+        gap = self._sampling_gap()
         for (pid, ip, port), hist in self.events.items():
             if len(hist) < 6:
                 continue
             intervals = [hist[i + 1] - hist[i] for i in range(len(hist) - 1)]
             mean = sum(intervals) / len(intervals)
-            if mean <= 0:
+            # Período perto do intervalo de coleta não se distingue da própria amostragem
+            if mean <= 0 or mean < 2 * gap:
                 continue
             var = sum((x - mean) ** 2 for x in intervals) / len(intervals)
             jitter = (var ** 0.5) / mean

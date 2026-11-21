@@ -105,6 +105,9 @@ def ingest(db: Session, machine: Machine, payload: MetricCreate, now=None) -> In
     # A linha de comando passa de novo pelo filtro de segredos: agentes antigos não filtravam
     snapshots = []
     for p in payload.processes or []:
+        # "System Idle Process" de agentes antigos: com 1400% de CPU, virava o responsável pelos avisos
+        if p.pid == 0:
+            continue
         data = p.model_dump()
         data["cmdline"] = redact_secrets(data.get("cmdline"))
         snap = ProcessSnapshot(metric_id=metric.id, timestamp=now, **data)

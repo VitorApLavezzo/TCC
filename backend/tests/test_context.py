@@ -250,7 +250,8 @@ class TestSeverityByContext:
     def test_load_types(self):
         from app.services import anomaly_service as a
         assert a.LOAD_TYPES == {"high_cpu", "background_load", "gpu_anomaly", "resource_abuse",
-                                "resource_exhaustion", "cpu_loop", "thermal_throttling", "behavioral_anomaly"}
+                                "resource_exhaustion", "cpu_loop", "thermal_throttling", "behavioral_anomaly",
+                                "behavioral_change"}
 
 
 def _game_on_screen(client, machine):

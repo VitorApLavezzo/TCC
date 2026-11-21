@@ -431,6 +431,9 @@ def collect_top_processes(n: int = 15, identify: bool = True) -> List[Dict[str, 
     for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
         try:
             info = proc.info
+            # pid 0 no Windows é o "System Idle Process": tempo ocioso, não um programa
+            if info["pid"] == 0:
+                continue
             ranking.append((proc, info["pid"], info.get("cpu_percent") or 0.0, info.get("memory_percent") or 0.0))
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass

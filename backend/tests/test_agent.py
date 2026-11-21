@@ -429,3 +429,54 @@ def test_system_log_events_go_out_with_the_reading(agent_module, monkeypatch):
     monkeypatch.setattr(agent_module, "_system_log", agent_module.security.LogWatcher(every=0))
     assert event in agent_module.build_payload()["events"]
 
+
+class TestBeaconConnections:
+    """Conexão que só fica aberta não é comunicação periódica; conexão nova a cada minuto é."""
+
+    def _run(self, monkeypatch, samples):
+        from collections import namedtuple
+        import psutil
+        import security
+
+        addr = namedtuple("addr", "ip port")
+        conn = namedtuple("conn", "fd family type laddr raddr status pid")
+        tracker = security.BeaconTracker()
+        clock = {"t": 1_000_000.0}
+        monkeypatch.setattr(security.time, "time", lambda: clock["t"])
+        for t, open_conns in samples:
+            clock["t"] = 1_000_000.0 + t
+            fake = [conn(-1, 2, 1, addr("192.168.0.5", lport), addr(ip, rport), psutil.CONN_ESTABLISHED, pid)
+                    for pid, ip, rport, lport in open_conns]
+            monkeypatch.setattr(security.psutil, "net_connections", lambda kind="inet", f=fake: f)
+            tracker.observe({}, {})
+        return tracker.candidates()
+
+    def test_long_lived_connection_is_not_a_beacon(self, monkeypatch):
+        """Discord, Steam, Claude Code: a mesma conexão aberta em todas as coletas."""
+        samples = [(t, [(100, "162.159.136.234", 443, 50000)]) for t in range(0, 600, 30)]
+        assert self._run(monkeypatch, samples) == []
+
+    def test_new_connection_every_minute_is_a_beacon(self, monkeypatch):
+        samples = [(t, [(100, "45.9.20.1", 443, 50000 + t // 60)] if t % 60 == 0 else [])
+                   for t in range(0, 900, 10)]
+        found = self._run(monkeypatch, samples)
+        assert len(found) == 1
+        assert found[0]["median_interval"] == pytest.approx(60, abs=1)
+
+    def test_period_equal_to_collection_interval_is_not_measurable(self, monkeypatch):
+        """Conexão nova em toda coleta: o "intervalo" seria o da própria coleta."""
+        samples = [(t, [(100, "104.18.7.39", 443, 50000 + t)]) for t in range(0, 600, 30)]
+        assert self._run(monkeypatch, samples) == []
+
+
+def test_windows_idle_pseudo_process_is_not_collected(monkeypatch):
+    """No Windows o 'System Idle Process' (pid 0) é o tempo ocioso, com 1400% de CPU, não um programa."""
+    import psutil
+    import collector
+
+    real_iter = psutil.process_iter
+    idle = psutil.Process(os.getpid())
+    idle.info = {"pid": 0, "name": "System Idle Process", "cpu_percent": 1400.0, "memory_percent": 0.0}
+    monkeypatch.setattr(psutil, "process_iter", lambda *a, **k: [idle, *real_iter(*a, **k)])
+    procs = collector.collect_top_processes(n=5, identify=False)
+    assert procs and all(p["pid"] != 0 for p in procs)
