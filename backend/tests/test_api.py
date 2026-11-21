@@ -36,6 +36,16 @@ class TestMachines:
         res = client.delete(f"/api/machines/{machine['id']}", headers=auth)
         assert res.status_code == 204
 
+    def test_delete_machine_with_activity_labels(self, client, machine, auth, db):
+        """As marcações "o que estou fazendo" ficaram fora da limpeza: no PostgreSQL a exclusão falhava."""
+        from app.core.timeutil import utcnow
+        from app.models.activity_label import ActivityLabel
+        db.add(ActivityLabel(machine_id=machine["id"], label="jogando", started_at=utcnow()))
+        db.commit()
+        assert client.delete(f"/api/machines/{machine['id']}", headers=auth).status_code == 204
+        db.expire_all()
+        assert db.query(ActivityLabel).filter(ActivityLabel.machine_id == machine["id"]).count() == 0
+
     def test_set_ai_privacy(self, client, machine, auth):
         res = client.patch(f"/api/machines/{machine['id']}", json={"ai_privacy": "no_ai"}, headers=auth)
         assert res.status_code == 200

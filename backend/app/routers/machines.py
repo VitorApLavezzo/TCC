@@ -197,6 +197,7 @@ def set_realtime(machine_id: int, body: RealtimeRequest, db: Session = Depends(g
 def delete_machine_cascade(machine_id: int, db: Session):
     """Remove a máquina e todas as dependências na ordem certa (nem todas têm cascade no ORM)."""
     from sqlalchemy import select
+    from app.models.activity_label import ActivityLabel
     from app.models.metric import Metric
     from app.models.process import ProcessSnapshot
     from app.models.anomaly import Anomaly
@@ -273,6 +274,7 @@ def delete_machine_cascade(machine_id: int, db: Session):
     db.query(ChangeEvent).filter(ChangeEvent.machine_id == machine_id).delete(synchronize_session=False)
     db.query(InventorySnapshot).filter(InventorySnapshot.machine_id == machine_id).delete(synchronize_session=False)
     db.query(ProcessIdentity).filter(ProcessIdentity.machine_id == machine_id).delete(synchronize_session=False)
+    db.query(ActivityLabel).filter(ActivityLabel.machine_id == machine_id).delete(synchronize_session=False)
     # O modelo treinado vive em arquivo: um id reaproveitado carregaria o modelo de outra máquina.
     ml_service._discard(machine_id)
     db.query(Notification).filter(Notification.machine_id == machine_id).delete(synchronize_session=False)
