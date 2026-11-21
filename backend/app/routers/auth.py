@@ -93,6 +93,7 @@ def google_login(body: GoogleLogin, db: Session = Depends(get_db)):
             google_sub=sub,
             # Senha aleatória — conta Google entra sempre pelo botão do Google
             hashed_password=get_password_hash(secrets.token_urlsafe(24)),
+            preferences={"onboarding_done": False},
         )
         db.add(user)
         db.commit()
@@ -129,6 +130,7 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
         email=user_in.email,
         username=user_in.username,
         hashed_password=get_password_hash(user_in.password),
+        preferences={"onboarding_done": False},
     )
     db.add(user)
     db.commit()

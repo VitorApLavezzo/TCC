@@ -33,6 +33,8 @@ def defaults() -> Dict[str, Any]:
         },
         # Contribui anonimamente para a reputação coletiva de executáveis
         "share_reputation": True,
+        # O cadastro grava False; contas anteriores à configuração inicial não passam por ela
+        "onboarding_done": True,
     }
 
 

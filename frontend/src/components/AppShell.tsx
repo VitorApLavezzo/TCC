@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from "react-router-do
 import { clsx } from "clsx";
 import { Sun, Moon, LayoutGrid, Monitor, Bell, MessageSquare, Search } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { OnboardingGate } from "./onboarding/OnboardingGate";
 import { useStatus } from "../context/StatusContext";
 import { useTheme } from "../context/ThemeContext";
 import { anomaliesApi } from "../services/api";
@@ -352,6 +353,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       )}
 
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
+      <OnboardingGate />
       <ShortcutsSheet open={shortcuts} onClose={() => setShortcuts(false)} />
     </div>
   );

@@ -19,6 +19,7 @@ import { setLocale, useLocale } from "../lib/i18n";
 import { PushDevices } from "../components/account/PushDevices";
 import { AuditLedger } from "../components/account/AuditLedger";
 import { Playbooks } from "../components/automation/Playbooks";
+import { openOnboarding } from "../components/onboarding/OnboardingGate";
 
 const GLOSSARY_ORDER: { term: keyof typeof GLOSSARY; label: string }[] = [
   { term: "cpu", label: "Processador" },
@@ -156,6 +157,12 @@ export function Account() {
       </Section>
           <Appearance theme={theme} onToggleTheme={toggle} />
           <ResearchToolsSection />
+
+          <Section title="Configuração inicial" description="Explicações, avisos e aparência, passo a passo">
+            <Button variant="secondary" onClick={() => openOnboarding().then(load)}>
+              Refazer a configuração inicial
+            </Button>
+          </Section>
 
           <Section title="Sessão">
             <Button variant="danger" onClick={handleLogout}>Sair da conta</Button>
