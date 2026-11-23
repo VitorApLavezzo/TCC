@@ -1,8 +1,15 @@
 # Colocar o AnomalyDetect no ar (VPS + DuckDNS)
 
 Passo a passo para rodar o sistema numa VPS com HTTPS, usando um endereço gratuito do DuckDNS.
-Sobe o mesmo docker-compose do desenvolvimento, com o Caddy na frente: ele pede e renova o
-certificado HTTPS sozinho, e só as portas 80 e 443 ficam abertas para a internet.
+Sobe o mesmo docker-compose do desenvolvimento, com o painel e a API visíveis só de dentro da
+VPS. Quem recebe o domínio e cuida do HTTPS é um destes:
+
+- **O Nginx que já existe na VPS**, quando ela tem outros sites: o sistema vira mais um site
+  nele, com certificado pelo `certbot`. É o padrão.
+- **O Caddy**, quando a VPS é só deste sistema: ele ocupa as portas 80 e 443 e pede e renova o
+  certificado sozinho.
+
+**Não desligue um Nginx ou Apache que já esteja na VPS**: os outros sites dependem dele.
 
 Com HTTPS, os agentes passam a se atualizar sozinhos. Pela rede local em HTTP essa atualização
 fica desligada, porque um arquivo trocado no caminho viraria código rodando no computador.
@@ -65,7 +72,7 @@ Abra o `.env` (`nano .env`) e preencha:
 | Variável | O que colocar |
 |---|---|
 | `DOMAIN` | O endereço do DuckDNS, sem `https://`: `anomalydetect.duckdns.org` (acrescente a linha). |
-| `SECRET_KEY` | Uma chave aleatória (comando abaixo). **Se for trazer os dados atuais (passo 6), use a mesma do `.env` de hoje**: as sessões e o selo do registro de integridade dependem dela. |
+| `SECRET_KEY` | Uma chave aleatória (comando abaixo). **Se for trazer os dados atuais (passo 7), use a mesma do `.env` de hoje**: as sessões e o selo do registro de integridade dependem dela. |
 | `POSTGRES_PASSWORD` | Uma senha aleatória (comando abaixo). |
 | `CLAUDE_CLI_ENABLED` | `true`, para as explicações virem do Claude CLI. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | O token gerado por `claude setup-token` (o mesmo do `.env` de hoje serve). |
@@ -88,29 +95,55 @@ onde não há Ollama, essas máquinas ficam com a explicação pronta (sem IA).
 ## 5. Subir
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml' >> .env
+docker compose up -d --build
 ```
 
-A primeira vez leva alguns minutos (monta as imagens). Para ver o Caddy pegando o certificado:
+A primeira linha faz `docker compose up`, `logs` e os demais usarem a configuração de produção;
+os comandos abaixo assumem isso. A primeira subida leva alguns minutos (monta as imagens).
+
+O painel e a API ficam em `127.0.0.1:18300` e `127.0.0.1:18301`, visíveis só de dentro da VPS.
+Se outra coisa já usa essas portas (`ss -tlnp | grep -E ':1830[01] '` mostra algo), escolha outras
+com `APP_LOCAL_PORT` e `API_LOCAL_PORT` no `.env` e use as mesmas no arquivo do site (passo 6).
+
+## 6. HTTPS
+
+### Com o Nginx que já existe na VPS (padrão)
+
+O arquivo `deploy/nginx-anomalydetect.conf` é o site do sistema. Troque o domínio, ative e peça o
+certificado (como root):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f caddy
+cp deploy/nginx-anomalydetect.conf /etc/nginx/sites-available/anomalydetect
+sed -i 's/SEU-NOME.duckdns.org/anomalydetect.duckdns.org/' /etc/nginx/sites-available/anomalydetect
+ln -s /etc/nginx/sites-available/anomalydetect /etc/nginx/sites-enabled/anomalydetect
+nginx -t && systemctl reload nginx
+certbot --nginx -d anomalydetect.duckdns.org
+```
+
+- Se o `nginx -t` acusar erro, não recarregue: os outros sites continuam como estavam até o
+  erro ser corrigido.
+- Sem o `certbot`: `apt install -y certbot python3-certbot-nginx`.
+- Se o Nginx da VPS não usa `sites-enabled`, copie o arquivo para
+  `/etc/nginx/conf.d/anomalydetect.conf` no lugar das duas primeiras linhas e do `ln`.
+
+O `certbot` acrescenta o HTTPS ao site, faz o HTTP virar HTTPS e renova o certificado sozinho.
+Se ele não conseguir o certificado, quase sempre é a porta 80 fechada (passo 2) ou o DuckDNS
+apontando para outro IP (passo 1).
+
+### Com o Caddy (VPS só deste sistema)
+
+Só quando nada mais usa as portas 80 e 443 na VPS:
+
+```bash
+echo 'COMPOSE_PROFILES=caddy' >> .env
+docker compose up -d
+docker compose logs -f caddy
 ```
 
 Quando aparecer `certificate obtained successfully`, abra `https://anomalydetect.duckdns.org`.
-Se o certificado não vier, quase sempre é a porta 80 fechada (passo 2) ou o DuckDNS apontando
-para outro IP (passo 1).
 
-Para não digitar os dois arquivos toda vez:
-
-```bash
-echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.prod.yml' >> .env
-```
-
-A partir daí, `docker compose up -d`, `docker compose logs` e os demais já usam a configuração de
-produção. Os comandos abaixo assumem isso.
-
-## 6. Trazer os dados atuais (opcional)
+## 7. Trazer os dados atuais (opcional)
 
 Faça isto **antes de criar qualquer conta** na VPS. No computador de hoje, o serviço `backup` já
 guarda cópias em `backups/`. Pegue a mais recente e envie para a VPS:
@@ -131,9 +164,9 @@ docker compose start backend
 O `SECRET_KEY` precisa ser o mesmo do computador de hoje (passo 4). Senão o registro de
 integridade acusa adulteração em tudo o que veio do banco antigo.
 
-## 7. Apontar os agentes para o novo endereço
+## 8. Apontar os agentes para o novo endereço
 
-**Se trouxe os dados (passo 6):** os computadores continuam cadastrados, basta trocar o endereço
+**Se trouxe os dados (passo 7):** os computadores continuam cadastrados, basta trocar o endereço
 (`api_url`) no `agent_config.json` de cada um e reiniciar o agente. A troca é feita com Python
 porque o agente lê o arquivo em UTF-8, e o PowerShell gravaria em outra codificação.
 
@@ -158,7 +191,7 @@ porque o agente lê o arquivo em UTF-8, e o PowerShell gravaria em outra codific
 **Se começou do zero:** crie a conta no novo endereço e instale os agentes pelo painel, como
 sempre. Os instaladores já saem com o endereço HTTPS.
 
-## 8. Login com Google
+## 9. Login com Google
 
 No [Google Cloud Console](https://console.cloud.google.com/apis/credentials), abra o ID do
 cliente OAuth usado em `GOOGLE_CLIENT_ID` e acrescente `https://anomalydetect.duckdns.org` em

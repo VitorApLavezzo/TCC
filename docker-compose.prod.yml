@@ -1,10 +1,13 @@
-# Produção na VPS: só o Caddy fica aberto para a internet (80 e 443), com HTTPS para DOMAIN.
+# Produção na VPS, com HTTPS. Dois jeitos de pôr na internet (passo a passo em DEPLOY.md):
+# - Nginx que já existe na VPS (com outros sites): ele recebe o domínio e repassa para as portas
+#   locais abaixo, visíveis só de dentro da VPS. É o padrão.
+# - VPS só para este sistema: o Caddy pega as portas 80 e 443 (--profile caddy).
 # Uso: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-# Passo a passo em DEPLOY.md.
 services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    profiles: ["caddy"]
     ports:
       - "80:80"
       - "443:443"
@@ -23,15 +26,18 @@ services:
   backend:
     # Sem --reload: em produção o código só muda com git pull e restart
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    ports: !reset []
+    ports: !override
+      - "127.0.0.1:${API_LOCAL_PORT:-18301}:8000"
     environment:
       PUBLIC_BASE_URL: https://${DOMAIN}
       ALLOWED_ORIGINS: https://${DOMAIN}
-      # Rede fixa abaixo: o backend só aceita o X-Real-IP vindo de dentro dela (o Caddy)
+      # Rede fixa abaixo: o backend só aceita o X-Real-IP de quem vem dela (o Caddy, ou o
+      # Nginx da VPS, que entra pelo gateway 172.28.0.1)
       TRUSTED_PROXY_CIDRS: 172.28.0.0/16
 
   frontend:
-    ports: !reset []
+    ports: !override
+      - "127.0.0.1:${APP_LOCAL_PORT:-18300}:80"
 
   # O agente do compose monitora a máquina do servidor; na VPS ele fica desligado
   agent:
