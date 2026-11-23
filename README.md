@@ -289,6 +289,9 @@ TCC/
 
 ## Como rodar o sistema
 
+Esta seção sobe o sistema na sua máquina ou rede local. Para colocar no ar numa VPS, com HTTPS,
+veja [DEPLOY.md](DEPLOY.md).
+
 ### Pré-requisitos
 
 - Docker e Docker Compose

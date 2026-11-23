@@ -1,0 +1,17 @@
+# HTTPS automático (Let's Encrypt) para o domínio em DOMAIN, renovado sozinho.
+{$DOMAIN} {
+	# API e tempo real direto no backend, como faz o Nginx do painel. O X-Real-IP é o IP de
+	# quem conectou aqui: sem ele, todo mundo pareceria vir do Caddy e um bloqueio por excesso
+	# de tentativas de login travaria todas as contas.
+	@backend path /api/* /ws/*
+	handle @backend {
+		reverse_proxy backend:8000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	handle {
+		encode gzip
+		reverse_proxy frontend:80
+	}
+}

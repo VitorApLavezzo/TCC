@@ -1,0 +1,48 @@
+# Produção na VPS: só o Caddy fica aberto para a internet (80 e 443), com HTTPS para DOMAIN.
+# Uso: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Passo a passo em DEPLOY.md.
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: "${DOMAIN:?Defina DOMAIN no .env, por exemplo anomalydetect.duckdns.org}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificados: perder este volume obriga a pedir de novo (há limite semanal)
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+
+  backend:
+    # Sem --reload: em produção o código só muda com git pull e restart
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports: !reset []
+    environment:
+      PUBLIC_BASE_URL: https://${DOMAIN}
+      ALLOWED_ORIGINS: https://${DOMAIN}
+      # Rede fixa abaixo: o backend só aceita o X-Real-IP vindo de dentro dela (o Caddy)
+      TRUSTED_PROXY_CIDRS: 172.28.0.0/16
+
+  frontend:
+    ports: !reset []
+
+  # O agente do compose monitora a máquina do servidor; na VPS ele fica desligado
+  agent:
+    profiles: ["agente-local"]
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  caddy_data:
+  caddy_config:
