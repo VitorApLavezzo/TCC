@@ -78,24 +78,26 @@ set "SERVER=${serverUrl}"
 set "DIR=%LOCALAPPDATA%\\AnomalyDetect"
 set "STARTUP=%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup"
 
-rem --- 1. Verifica se o Python esta instalado ---
-python --version >nul 2>nul
-if errorlevel 1 (
-    echo Python nao encontrado. Tentando instalar automaticamente...
+rem --- 1. Acha um Python que funcione ---
+rem Perguntar a versao ao "python" do PATH nao serve: o winget instala o Python fora do
+rem PATH, e sem ele "python" e o atalho da Microsoft Store, que nao executa nada. PY guarda
+rem o comando encontrado e PYW o mesmo sem janela.
+call :findpy
+if not defined PY (
+    echo Python nao encontrado. Instalando o Python 3.12, pode levar alguns minutos...
     winget install -e --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
-    if errorlevel 1 (
-        echo.
-        echo ERRO: nao foi possivel instalar o Python automaticamente.
-        echo Baixe em https://www.python.org/downloads/ , instale marcando
-        echo a opcao "Add python.exe to PATH" e execute este instalador de novo.
-        pause
-        exit /b 1
-    )
-    echo.
-    echo Python instalado! FECHE esta janela e execute o instalador NOVAMENTE.
-    pause
-    exit /b 0
+    call :findpy
 )
+if not defined PY (
+    echo.
+    echo ERRO: nao foi possivel instalar o Python automaticamente.
+    echo Baixe o Python 3.12 em https://www.python.org/downloads/ , instale marcando
+    echo a opcao "Add python.exe to PATH" e execute este instalador de novo.
+    pause
+    exit /b 1
+)
+rem Dentro de um texto do VBS, as aspas do caminho precisam ser dobradas
+set "PYW_VBS=%PYW:"=""%"
 
 rem --- 2. Baixa os arquivos do agente ---
 mkdir "%DIR%" 2>nul
@@ -113,21 +115,21 @@ for %%F in (${EXTRA_FILES.join(" ")}) do (
 
 rem --- 3. Instala dependencias ---
 echo Instalando dependencias (pode levar alguns minutos)...
-python -m pip install --quiet --disable-pip-version-check --no-warn-conflicts -r requirements.txt
+%PY% -m pip install --quiet --disable-pip-version-check --no-warn-conflicts -r requirements.txt
 if errorlevel 1 goto :fail
 
 rem --- 4. Pareamento com o servidor ---
 echo Registrando esta maquina no painel...
 set "AGENT_API_URL=%SERVER%"
 ${authEnvBat(auth)}
-python agent.py --enroll-only
+%PY% agent.py --enroll-only
 if errorlevel 1 goto :fail
 
 rem --- 5. Inicia junto com o Windows (sem janela) ---
 (
 echo Set sh = CreateObject("WScript.Shell"^)
 echo sh.CurrentDirectory = "%DIR%"
-echo sh.Run "pythonw agent.py", 0, False
+echo sh.Run "%PYW_VBS% agent.py", 0, False
 ) > "%STARTUP%\\AnomalyDetectAgent.vbs"
 
 rem --- Atalho no Menu Iniciar (para reiniciar apos clicar em "Sair") ---
@@ -155,6 +157,37 @@ echo Ocorreu um erro durante a instalacao.
 echo Verifique sua conexao com o servidor e tente novamente.
 pause
 exit /b 1
+
+rem Primeiro o Python 3.12 (o que o winget instala e o que as dependencias esperam),
+rem depois qualquer 3.9 a 3.13 que ja esteja no PATH
+:findpy
+set "PY="
+set "PYW="
+call :trycmd "py -3.12" "pyw -3.12"
+call :trydir "%LOCALAPPDATA%\\Programs\\Python\\Python312"
+call :trydir "%ProgramFiles%\\Python312"
+call :trycmd "python" "pythonw"
+call :trycmd "py -3" "pyw -3"
+exit /b 0
+
+rem Comando no PATH. So vale se executar codigo: o atalho da Store devolve erro
+:trycmd
+if defined PY exit /b 0
+%~1 -c "import sys; sys.exit(0 if (3, 9) <= sys.version_info[:2] <= (3, 13) else 1)" >nul 2>nul
+if errorlevel 1 exit /b 0
+set "PY=%~1"
+set "PYW=%~2"
+exit /b 0
+
+rem Pasta de instalacao do python.org, fora do PATH
+:trydir
+if defined PY exit /b 0
+if not exist "%~1\\python.exe" exit /b 0
+"%~1\\python.exe" -c "import sys; sys.exit(0 if (3, 9) <= sys.version_info[:2] <= (3, 13) else 1)" >nul 2>nul
+if errorlevel 1 exit /b 0
+set PY="%~1\\python.exe"
+set PYW="%~1\\pythonw.exe"
+exit /b 0
 `;
   // cmd.exe é mais confiável com CRLF
   return script.replace(/\n/g, "\r\n");
