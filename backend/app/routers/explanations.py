@@ -82,9 +82,10 @@ def make_variant(anomaly_id: int, body: VariantBody, db: Session = Depends(get_d
     anomaly = _owned_anomaly(db, anomaly_id, current_user)
     expl = db.query(AIExplanation).filter(AIExplanation.anomaly_id == anomaly_id).first()
     if expl and (expl.variants or {}).get(body.level):
-        return {"level": body.level, "variant": ai_service.sanitize_explanation(expl.variants[body.level]), "cached": True}
+        return {"level": body.level, "variant": ai_service.sanitize_explanation(expl.variants[body.level], expl.evidence), "cached": True}
     variant = ai_service.generate_variant(db, anomaly, body.level)
-    return {"level": body.level, "variant": ai_service.sanitize_explanation(variant), "cached": False}
+    facts = expl.evidence if expl else None
+    return {"level": body.level, "variant": ai_service.sanitize_explanation(variant, facts), "cached": False}
 
 
 @router.post("/{anomaly_id}/rate")

@@ -33,15 +33,16 @@ class ExplanationOut(BaseModel):
     def _strip_citation_markers(self):
         """As explicações são gravadas com [[chave]] (conferência de números); ponto único que as
         remove antes de chegar ao frontend."""
-        self.summary = strip_citations(self.summary)
-        self.detailed_explanation = strip_citations(self.detailed_explanation)
-        self.severity_justification = strip_citations(self.severity_justification)
+        facts = self.evidence if isinstance(self.evidence, dict) else None
+        self.summary = strip_citations(self.summary, facts)
+        self.detailed_explanation = strip_citations(self.detailed_explanation, facts)
+        self.severity_justification = strip_citations(self.severity_justification, facts)
         if isinstance(self.possible_causes, list):
-            self.possible_causes = [strip_citations(c) for c in self.possible_causes]
+            self.possible_causes = [strip_citations(c, facts) for c in self.possible_causes]
         if isinstance(self.recommendations, list):
-            self.recommendations = [strip_citations(r) for r in self.recommendations]
+            self.recommendations = [strip_citations(r, facts) for r in self.recommendations]
         if isinstance(self.variants, dict):
-            self.variants = {level: sanitize_explanation(v) for level, v in self.variants.items()}
+            self.variants = {level: sanitize_explanation(v, facts) for level, v in self.variants.items()}
         return self
 
 

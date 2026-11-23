@@ -33,9 +33,9 @@ CHIP = {
 }
 
 
-def _strip(text: Optional[str]) -> str:
+def _strip(text: Optional[str], facts: Optional[dict] = None) -> str:
     from app.services.ai_service import strip_citations
-    return strip_citations(text or "").strip()
+    return strip_citations(text or "", facts).strip()
 
 
 def _link(base_url: Optional[str], path: Optional[str]) -> Optional[str]:
@@ -50,7 +50,7 @@ def _summary(db: Session, n: Notification) -> str:
     if n.anomaly_id and n.kind == "anomaly":
         expl = db.query(AIExplanation).filter(AIExplanation.anomaly_id == n.anomaly_id).first()
         if expl and expl.possible_causes:
-            return _strip(expl.summary)
+            return _strip(expl.summary, expl.evidence)
     return (n.body or "").strip()
 
 

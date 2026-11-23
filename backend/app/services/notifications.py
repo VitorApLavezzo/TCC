@@ -22,9 +22,9 @@ from app.services.preferences import get_preferences
 WAIT_FOR_EXPLANATION_SECONDS = 60
 
 
-def _strip(text: Optional[str]) -> str:
+def _strip(text: Optional[str], facts: Optional[dict] = None) -> str:
     from app.services.ai_service import strip_citations
-    return strip_citations(text or "")
+    return strip_citations(text or "", facts)
 
 
 def on_anomaly(db: Session, anomaly: Anomaly) -> Notification:
@@ -151,7 +151,7 @@ def _message_for(db: Session, n: Notification) -> str:
     if n.anomaly_id and n.kind == "anomaly":
         expl = db.query(AIExplanation).filter(AIExplanation.anomaly_id == n.anomaly_id).first()
         if expl and expl.possible_causes:
-            body = _strip(expl.summary)
+            body = _strip(expl.summary, expl.evidence)
     return f"{n.title}\n{body}".strip()
 
 

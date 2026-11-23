@@ -39,8 +39,8 @@ O sistema tem três partes que conversam entre si:
 └─────────────────┘                         │  2. Detecta anomalias    │
                                             │     (heurísticas + ML)   │
 ┌─────────────────┐    tempo real (WS)      │  3. Gera explicação IA   │
-│    FRONTEND     │ ◄─────────────────────► │     (Ollama → Groq →     │
-│  React + Vite   │       REST (HTTP)       │      análise local)      │
+│    FRONTEND     │ ◄─────────────────────► │  (Ollama → Claude CLI →  │
+│  React + Vite   │       REST (HTTP)       │   Groq → análise local)  │
 │  (painel web)   │                         └──────────────────────────┘
 └─────────────────┘
 ```
@@ -59,23 +59,27 @@ A detecção acontece **a cada coleta recebida**, em duas camadas complementares
 
 ### Camada 1 — Detectores comportamentais ([behavior_analyzer.py](backend/app/services/behavior_analyzer.py))
 
-Sete detectores baseados em regras e no histórico da máquina:
+Dez detectores baseados em regras e no histórico da máquina (valores padrão; o retorno do usuário deixa cada um menos sensível naquela máquina):
 
 | Detector | O que identifica |
 |---|---|
-| `memory_leak` | Processo com crescimento contínuo de memória (vazamento) |
-| `cpu_loop` | Processo travado consumindo CPU alta sustentada |
-| `ddos_indicator` | Pico abrupto de conexões/tráfego de rede |
+| `memory_leak` | Processo com crescimento contínuo de memória por pelo menos 10 minutos (vazamento) |
+| `cpu_loop` | Um processo dominando a CPU por pelo menos 5 minutos com o resto do sistema normal |
+| `ddos_indicator` | Conexões 5× acima da média dos 15 min anteriores (e > 200), ou recebimento 10× acima da média e ≥ 5 MB/s com o dobro de conexões, em duas leituras seguidas |
 | `unknown_process` / `suspicious_process` | Processo nunca visto na máquina consumindo recursos, ou com nome da lista de ameaças (xmrig, mimikatz...) |
 | `malware_pattern` | Combinação de indicadores típicos de malware (roda de pasta temporária, sem linha de comando, privilegiado + CPU alta, etc.) |
 | `resource_abuse` | Aplicação conhecida gastando muito mais que o **seu próprio histórico** |
 | `behavioral_change` | Várias métricas mudando bruscamente ao mesmo tempo |
+| `thermal_throttling` | CPU ocupada, quente e bem abaixo da frequência máxima |
+| `process_masquerading` | Processo com nome de binário do sistema rodando fora da pasta original |
+| `suspicious_parent` / `suspicious_command` | Documento do Office abrindo PowerShell/cmd (macro), ou linha de comando típica de ataque (PowerShell codificado, apagar cópias de sombra...) |
 
 Os detectores usam a tabela `process_baselines`, que **aprende** quais processos são normais em cada máquina (um processo vira "conhecido" após 5 aparições).
 
 ### Camada 2 — Machine Learning (Isolation Forest, [ml_service.py](backend/app/services/ml_service.py))
 
-- Um modelo **por máquina**, treinado com o histórico dela (13 features: CPU, RAM, swap, disco, I/O, rede, conexões, load, processos, GPU)
+- Um modelo **por máquina**, treinado com o histórico dela: 17 atributos fixos (13 medidas — CPU, load, RAM, swap, disco, leitura e gravação, envio e recebimento, conexões, processos, uso e memória da GPU — mais hora e dia da semana em seno/cosseno, que só entram com 3 e 14 dias de histórico) e até 7 de contexto (tempo sem uso, programa dominante, oscilação de CPU e GPU)
+- Alerta abaixo do percentil 1 das notas do treino; One-Class SVM disponível como segunda opinião (desligada por padrão)
 - Começa a funcionar após **100 coletas** e **retreina sozinho a cada 30 coletas** (janela de até 5.000 amostras)
 - Detecta desvios estatísticos do comportamento normal *daquela* máquina — coisas que nenhuma regra fixa pegaria
 
@@ -101,6 +105,10 @@ A geração usa uma **cadeia de provedores com fallback automático** ([ai_servi
         ▼
 4. Análise estática local (causas e recomendações pré-escritas por tipo)
 ```
+
+Essa é a ordem padrão (`LLM_LOCAL_FIRST=true`). Com `LLM_LOCAL_FIRST=false` a nuvem vem
+primeiro — foi a configuração dos experimentos do TCC: Claude Sonnet pela CLI e, de reserva,
+o `qwen2.5:14b` no Ollama, sem API compatível com OpenAI.
 
 O Claude pela CLI é um agente, não só um modelo — e o texto enviado carrega
 dado que um atacante controla (nome de processo, linha de comando). Por isso
@@ -184,7 +192,7 @@ O que este projeto tem e ferramentas parecidas (Zabbix, Netdata, PRTG, NinjaOne)
 | Backend | Python, FastAPI, SQLAlchemy, PostgreSQL, scikit-learn (Isolation Forest), httpx, python-jose (JWT), WebSockets |
 | Frontend | React 18, TypeScript, Vite, TailwindCSS, Recharts, axios, react-router |
 | Agente | Python, psutil, pystray (bandeja), pynvml/GPUtil/WMI (GPU) |
-| IA | Ollama (local) e/ou Groq (nuvem, API compatível com OpenAI) |
+| IA | Ollama (local), Claude pela CLI e/ou API compatível com OpenAI (Groq etc.) |
 | Infra | Docker Compose (PostgreSQL, backend, frontend com Nginx, agente opcional, Ollama opcional) |
 
 ---

@@ -307,26 +307,65 @@ CLAIM_RE = re.compile(
 )
 
 
-def strip_citations(text):
+# Onde começa o trecho que um marcador cita: fim do marcador anterior ou da frase anterior
+_CLAUSE_START_RE = re.compile(r"\]\]|[.;:!?](?=\s)")
+_SENTENCE_START_RE = re.compile(r"[.;:!?](?=\s)")
+
+
+def _fact_text(fact: Dict[str, Any], following: str = "") -> Optional[str]:
+    """Valor no formato brasileiro, sem a unidade quando o texto já a traz logo depois."""
+    value = fact.get("value")
+    if not isinstance(value, (int, float)):
+        return None
+    number = f"{value:g}".replace(".", ",")
+    unit = fact.get("unit") or ""
+    spelled = {unit.lower()} | ({"minuto"} if unit == "min" else set()) | ({"grau"} if "°" in unit else set())
+    if not unit or following.lstrip().lower().startswith(tuple(spelled)):
+        return number
+    return number + unit if unit == "%" else f"{number} {unit}"
+
+
+def strip_citations(text, facts: Optional[Dict[str, Dict[str, Any]]] = None):
+    """Tira os marcadores [[chave]]. Quando o modelo escreveu só o marcador, sem o número
+    ("CPU ([[cpu_agora]])"), entra o valor medido de `facts` no lugar."""
     if not isinstance(text, str):
         return text
+    if facts:
+        def fill(match):
+            before = match.string[:match.start()]
+            starts = [m.end() for m in _CLAUSE_START_RE.finditer(before)]
+            if re.search(r"\d", before[starts[-1] if starts else 0:]):
+                return match.group(0)
+            sentence = [m.end() for m in _SENTENCE_START_RE.finditer(before)]
+            if match.group(0) in before[sentence[-1] if sentence else 0:]:
+                return match.group(0)
+            fact = facts.get(match.group(1))
+            value = _fact_text(fact, match.string[match.end():]) if isinstance(fact, dict) else None
+            return value or match.group(0)
+
+        text = CITATION_RE.sub(fill, text)
+    # Marcador sem valor entre parênteses deixaria "CPU ()"
+    text = re.sub(r"\s?\(\s*\[\[[a-z0-9_]+\]\]\s*\)", "", text)
     return re.sub(r"\s?\[\[[a-z0-9_]+\]\]", "", text)
 
 
-def sanitize_explanation(data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def sanitize_explanation(data: Optional[Dict[str, Any]],
+                         facts: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
     """Tira os marcadores [[chave]] de tudo que vai ao frontend (inclusive `variants`),
     sem tocar o que fica gravado; todo lugar que devolve uma explicação passa por aqui."""
     if not data:
         return data
     out = dict(data)
+    if facts is None and isinstance(out.get("evidence"), dict):
+        facts = out["evidence"]
     for key in ("summary", "detailed_explanation", "severity_justification"):
         if key in out:
-            out[key] = strip_citations(out[key])
+            out[key] = strip_citations(out[key], facts)
     for key in ("possible_causes", "recommendations"):
         if isinstance(out.get(key), list):
-            out[key] = [strip_citations(v) for v in out[key]]
+            out[key] = [strip_citations(v, facts) for v in out[key]]
     if isinstance(out.get("variants"), dict):
-        out["variants"] = {level: sanitize_explanation(v) for level, v in out["variants"].items()}
+        out["variants"] = {level: sanitize_explanation(v, facts) for level, v in out["variants"].items()}
     return out
 
 

@@ -54,10 +54,10 @@ def judge(db: Session, anomaly_id: int) -> Optional[Dict[str, Any]]:
         return None
     machine = db.query(Machine).filter(Machine.id == anomaly.machine_id).first()
     expl_like = {
-        "summary": ai_service.strip_citations(expl.summary),
-        "detailed_explanation": ai_service.strip_citations(expl.detailed_explanation),
-        "possible_causes": [ai_service.strip_citations(c) for c in expl.possible_causes or []],
-        "recommendations": [ai_service.strip_citations(r) for r in expl.recommendations or []],
+        "summary": ai_service.strip_citations(expl.summary, expl.evidence),
+        "detailed_explanation": ai_service.strip_citations(expl.detailed_explanation, expl.evidence),
+        "possible_causes": [ai_service.strip_citations(c, expl.evidence) for c in expl.possible_causes or []],
+        "recommendations": [ai_service.strip_citations(r, expl.evidence) for r in expl.recommendations or []],
     }
     prompt = _judge_prompt(anomaly, expl_like, expl.verification)
     # Juíza diferente de quem escreveu, quando possível
